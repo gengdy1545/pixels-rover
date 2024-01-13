@@ -148,6 +148,11 @@ h6, .h6 {
     border-color: #52d3c7;
 }
 
+.btn-primary:focus {
+    background-color: #52d3c7 !important;
+    border-color: #52d3c7 !important;
+}
+
 /* Error Styles */
 label.error {
     position: inherit;

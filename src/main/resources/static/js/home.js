@@ -65,10 +65,10 @@ jQuery( function() {
 	});
 });
 
-function getSchemas() {
+showSchemas = function getSchemas() {
     $.ajax({
         type: 'POST',
-        url: 'http://10.78.50.215:8081/api/metadata/get-schemas',
+        url: '/api/metadata/get-schemas',
         contentType: 'application/json',
         data: JSON.stringify({}),
         success: function (response) {
@@ -98,7 +98,7 @@ function getSchemas() {
 showTables = function getTables(schema) {
     $.ajax({
         type: 'POST',
-        url: 'http://10.77.110.36:8081/api/metadata/get-tables',
+        url: '/api/metadata/get-tables',
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema }),
         success: function(response) {
@@ -106,7 +106,6 @@ showTables = function getTables(schema) {
 
             // Clear existing items
             tableMenu.empty();
-            console.log(response);
             if (Array.isArray(response.tables) && response.tables.length > 0) {
                 response.tables.forEach(function(table) {
                     var listItem = $('<li class="nav-item nav-item-has-subnav"><a href="javascript:void(0)" onclick="showColumns(\'' + schema + '\', \'' + table.name + '\')">' + table.name + '</a><ul class="nav nav-subnav" id="' + schema + '_' + table.name + '"></ul></li>');
@@ -120,6 +119,36 @@ showTables = function getTables(schema) {
         },
         error: function(error) {
             console.error('Error fetching tables:', error);
+        }
+    });
+}
+
+// Define showColumns function
+showColumns = function showColumns(schema, table) {
+    $.ajax({
+        type: 'POST',
+        url: '/api/metadata/get-columns',
+        contentType: 'application/json',
+        data: JSON.stringify({ "schemaName": schema, "tableName": table }),
+        success: function(response) {
+            var columnMenu = $('#' + schema + '_' + table); // Use a unique ID for each table's column menu
+
+            // Clear existing items
+            columnMenu.empty();
+
+            if (Array.isArray(response.columns) && response.columns.length > 0) {
+                response.columns.forEach(function(column) {
+                    var listItem = $('<li><a href="#">' + column.name + '</a></li>');
+                    columnMenu.append(listItem);
+                });
+            } else {
+                // If no columns, show an "empty" third-level menu
+                var emptyColumnItem = $('<li><a href="#">empty</a></li>');
+                columnMenu.append(emptyColumnItem);
+            }
+        },
+        error: function(error) {
+            console.error('Error fetching columns:', error);
         }
     });
 }
@@ -153,7 +182,7 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
     };
 
     // 发起submitQuery请求
-    fetch('http://10.77.110.36:8081/api/query/submit-query', {
+    fetch('/api/query/submit-query', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -223,7 +252,7 @@ function refreshQueryStatus(traceToken, callback) {
     };
 
     // 发送请求到后端
-    fetch('http://10.77.110.36:8081/api/query/get-query-status', {
+    fetch('/api/query/get-query-status', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -259,7 +288,7 @@ function pollForResult(traceToken, resultDisplay) {
     // 开始轮询
     const pollTimer = setInterval(function () {
         // 发起getQueryResult请求
-        fetch('http://10.77.110.36:8081/api/query/get-query-result', {
+        fetch('/api/query/get-query-result', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

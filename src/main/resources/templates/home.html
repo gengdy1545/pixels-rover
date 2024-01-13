@@ -27,24 +27,24 @@
 
             <!-- logo -->
             <div id="logo" class="sidebar-header">
-                <a th:href="@{/home}"><img src="images/logo-sidebar.png" title="LightYear" alt="LightYear"/></a>
+                <a th:href="@{/home}"><img src="images/logo-sidebar.png" title="PixelsDB" alt="PixelsDB"/></a>
             </div>
             <div class="pixels-layout-sidebar-scroll">
                 <nav class="sidebar-main">
                     <ul class="nav nav-drawer">
                         <li class="nav-item active">
                         <li class="nav-item nav-item-has-subnav" id="schemasMenu">
-                            <a href="javascript:void(0)"><i class="mdi mdi-folder"></i> <span>Schemas</span></a>
+                            <a href="javascript:void(0)" onclick="showSchemas()"><span>Schemas</span></a>
                             <ul class="nav nav-subnav" id="schemaMenu">
                             </ul>
                         </li>
                         <li class="nav-item nav-item-has-subnav">
-                            <a href="javascript:void(0)"><i class="mdi mdi-chart-bar"></i> <span>Reports</span></a>
+                            <a href="javascript:void(0)"><span>Reports</span></a>
                             <ul class="nav nav-subnav">
                             </ul>
                         </li>
                         <li class="nav-item nav-item-has-subnav">
-                            <a href="javascript:void(0)"><i class="mdi mdi-settings"></i> <span>Settings</span></a>
+                            <a href="javascript:void(0)"><span>Settings</span></a>
                             <ul class="nav nav-subnav">
                             </ul>
                         </li>
@@ -79,13 +79,12 @@
                             </a>
                             <ul class="dropdown-menu dropdown-menu-right">
                                 <li><a class="multitabs" data-url="pixels_pages_profile.html"
-                                       href="javascript:void(0)"><i class="mdi mdi-account"></i> 个人信息</a></li>
+                                       href="javascript:void(0)">个人信息</a></li>
                                 <li><a class="multitabs" data-url="pixels_pages_edit_pwd.html"
-                                       href="javascript:void(0)"><i
-                                        class="mdi mdi-lock-outline"></i> 修改密码</a></li>
-                                <li><a href="javascript:void(0)"><i class="mdi mdi-delete"></i> 清空缓存</a></li>
+                                       href="javascript:void(0)">修改密码</a></li>
+                                <li><a href="javascript:void(0)">清空缓存</a></li>
                                 <li class="divider"></li>
-                                <li><a th:href="@{/logout}"><i class="mdi mdi-logout-variant"></i> 退出登录</a></li>
+                                <li><a th:href="@{/logout}">退出登录</a></li>
                             </ul>
                         </li>
                     </ul>

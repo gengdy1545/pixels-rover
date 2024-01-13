@@ -15,106 +15,81 @@
  */
 package io.pixelsdb.pixels.rover.controller;
 
-import io.pixelsdb.pixels.common.server.rest.request.GetColumnsRequest;
-import io.pixelsdb.pixels.common.server.rest.request.GetSchemasRequest;
-import io.pixelsdb.pixels.common.server.rest.request.GetTablesRequest;
-import io.pixelsdb.pixels.common.server.rest.request.GetViewsRequest;
-import io.pixelsdb.pixels.common.server.rest.response.GetColumnsResponse;
-import io.pixelsdb.pixels.common.server.rest.response.GetSchemasResponse;
-import io.pixelsdb.pixels.common.server.rest.response.GetTablesResponse;
-import io.pixelsdb.pixels.common.server.rest.response.GetViewsResponse;
+import io.pixelsdb.pixels.common.server.rest.request.*;
+import io.pixelsdb.pixels.common.server.rest.response.*;
 import io.pixelsdb.pixels.rover.constant.RestUrlPath;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
 @RestController
-public class MetadataController
+public class QueryController
 {
     private final WebClient webClient;
 
     @Autowired
-    public MetadataController(WebClient.Builder webClientBuilder) {
+    public QueryController(WebClient.Builder webClientBuilder) {
         String BASE_URL = "http://10.78.50.215:18890";
         this.webClient = webClientBuilder.baseUrl(BASE_URL).build();
     }
 
-    @PostMapping(value = RestUrlPath.GET_SCHEMAS,
+    @PostMapping(value = RestUrlPath.SUBMIT_QUERY,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public GetSchemasResponse getSchemas(@RequestBody GetSchemasRequest request)
+    public SubmitQueryResponse submitQuery(@RequestBody SubmitQueryRequest request)
     {
         try {
             // Use WebClient to call the other REST API
             return webClient.post()
-                    .uri(RestUrlPath.GET_SCHEMAS)
+                    .uri(RestUrlPath.SUBMIT_QUERY)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(request), GetSchemasRequest.class)
+                    .body(Mono.just(request), SubmitQueryRequest.class)
                     .retrieve()
-                    .bodyToMono(GetSchemasResponse.class)
+                    .bodyToMono(SubmitQueryResponse.class)
                     .block(); // block to wait for the response
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
         }
     }
 
-    @PostMapping(value = RestUrlPath.GET_TABLES,
+    @PostMapping(value = RestUrlPath.GET_QUERY_STATUS,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public GetTablesResponse getTables(@RequestBody GetTablesRequest request)
+    public GetQueryStatusResponse getQueryStatus(@RequestBody GetQueryStatusRequest request)
     {
         try {
             // Use WebClient to call the other REST API
             return webClient.post()
-                    .uri(RestUrlPath.GET_TABLES)
+                    .uri(RestUrlPath.GET_QUERY_STATUS)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(request), GetTablesRequest.class)
+                    .body(Mono.just(request), GetQueryStatusRequest.class)
                     .retrieve()
-                    .bodyToMono(GetTablesResponse.class)
+                    .bodyToMono(GetQueryStatusResponse.class)
                     .block(); // block to wait for the response
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
         }
     }
 
-    @PostMapping(value = RestUrlPath.GET_COLUMNS,
+    @PostMapping(value = RestUrlPath.GET_QUERY_RESULT,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public GetColumnsResponse getColumns(@RequestBody GetColumnsRequest request)
+    public GetQueryResultResponse getQueryResult(@RequestBody GetQueryResultRequest request)
     {
         try {
             // Use WebClient to call the other REST API
             return webClient.post()
-                    .uri(RestUrlPath.GET_COLUMNS)
+                    .uri(RestUrlPath.GET_QUERY_RESULT)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(request), GetColumnsRequest.class)
+                    .body(Mono.just(request), GetQueryResultRequest.class)
                     .retrieve()
-                    .bodyToMono(GetColumnsResponse.class)
-                    .block(); // block to wait for the response
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
-        }
-    }
-
-    @PostMapping(value = RestUrlPath.GET_VIEWS,
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    public GetViewsResponse getViews(@RequestBody GetViewsRequest request)
-    {
-        try {
-            // Use WebClient to call the other REST API
-            return webClient.post()
-                    .uri(RestUrlPath.GET_VIEWS)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(request), GetViewsRequest.class)
-                    .retrieve()
-                    .bodyToMono(GetViewsResponse.class)
+                    .bodyToMono(GetQueryResultResponse.class)
                     .block(); // block to wait for the response
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
