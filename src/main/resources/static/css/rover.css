@@ -414,6 +414,7 @@ input.error {
     -moz-box-shadow: 4px 0 5px rgba(0, 0, 0, 0.035);
     box-shadow: 4px 0 5px rgba(0, 0, 0, 0.035);
 }
+
 .pixels-layout-header .navbar {
     position: relative;
     min-height: 64px;
@@ -423,9 +424,11 @@ input.error {
     -moz-border-radius: 0px;
     border-radius: 0px;
 }
+
 .pixels-layout-header .navbar-default {
     background-color: transparent;
 }
+
 .topbar {
     display: -webkit-box;
     display: flex;
@@ -436,12 +439,14 @@ input.error {
     min-height: 64px;
     padding: 0 15px;
 }
+
 .topbar .topbar-left {
     display: -webkit-box;
     display: flex;
     -webkit-box-align: center;
     align-items: center;
 }
+
 .topbar .topbar-right {
     display: -webkit-box;
     display: flex;
@@ -454,10 +459,24 @@ input.error {
     margin: 0px;
     padding: 0px;
 }
+
 .topbar-right > li > a {
     position: relative;
     display: block;
     padding: 10px 0px 10px 15px;
+}
+
+.pixels-layout-content {
+    position: absolute;
+    height: 100%;
+    width: 100%;
+    padding-top: 68px;
+    padding-left: 240px;
+    -webkit-transition: padding 0.3s;
+    transition: padding 0.3s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 /* Avatar Styles */
@@ -521,8 +540,14 @@ input.error {
         width: 100%;
         z-index: 5;
         position: fixed;
-        -webkit-transition: visibility 0 linear 0.4s, opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        transition: visibility 0 linear 0.4s, opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        -webkit-transition-property: visibility, opacity;
+        -webkit-transition-duration: 0.4s, 0.4s;
+        -webkit-transition-timing-function: linear, cubic-bezier(0.4, 0, 0.2, 1);
+
+        transition-property: visibility, opacity;
+        transition-duration: 0.4s, 0.4s;
+        transition-timing-function: linear, cubic-bezier(0.4, 0, 0.2, 1);
+
         -webkit-transform: translateZ(0);
         transform: translateZ(0);
     }
@@ -618,4 +643,117 @@ input.error {
         -moz-column-count: 4;
         column-count: 4;
     }
+}
+
+/* Chat Styles */
+#chat-area {
+    flex-grow: 1; /* 设置 chat-area 自动占据剩余空间 */
+    width: 90%; /* 调整聊天区域宽度 */
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    margin-top: 20px;
+    margin-bottom: 20px; /* 添加与下方区域的间隔 */
+    padding: 20px; /* 调整聊天区域内边距 */
+    overflow-y: auto;
+}
+
+/*.user-message {*/
+/*    background-color: #4CAF50; !* Green background color for user messages *!*/
+/*    color: white; !* White text color *!*/
+/*    border-radius: 15px; !* Rounded corners *!*/
+/*    padding: 10px; !* Padding to provide some space around the message *!*/
+/*    margin-bottom: 10px; !* Margin between messages *!*/
+/*    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); !* Box shadow for a subtle lift effect *!*/
+/*}*/
+
+/*.system-message {*/
+/*    background-color: #3498db; !* Blue background color for system messages *!*/
+/*    color: white; !* White text color *!*/
+/*    border-radius: 15px; !* Rounded corners *!*/
+/*    padding: 10px; !* Padding to provide some space around the message *!*/
+/*    margin-bottom: 10px; !* Margin between messages *!*/
+/*    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); !* Box shadow for a subtle lift effect *!*/
+/*}*/
+
+/* Style for user messages */
+.user-message {
+    background-color: #f2f2f2; /* Light gray background */
+    padding: 10px;
+    margin: 10px;
+    border-radius: 15px; /* Rounded corners */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Soft box shadow */
+}
+
+/* Style for system messages */
+.system-message {
+    background-color: #e6f7ff; /* Light blue background */
+    padding: 10px;
+    margin: 10px;
+    border-radius: 15px; /* Rounded corners */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Soft box shadow */
+}
+
+#send-message-area {
+    width: 90%; /* 调整发送消息区域宽度 */
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px; /* 调整发送消息区域内边距 */
+    margin-bottom: 20px;
+}
+
+#execution-hint-select,
+#chat-input,
+#output-rows-input {
+    padding: 10px;
+    margin-right: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#execution-hint-select:focus,
+#chat-input:focus,
+#output-rows-input:focus {
+    border-color: #33cabb;
+    outline: 0;
+    -webkit-box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .6);
+    box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .6);
+}
+
+#send-button {
+    width: auto;
+    padding: 10px 20px;
+    background-color: #33cabb;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+#output-rows-input {
+    -moz-appearance: textfield;
+    appearance: textfield;
+    padding: 10px;
+    width: 60px; /* Adjust the width as needed */
+    text-align: center;
+}
+
+#output-rows-input::-webkit-inner-spin-button,
+#output-rows-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#chat-input {
+    flex: 1; /* Expand to take available space */
+    padding: 10px;
+    margin-right: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }

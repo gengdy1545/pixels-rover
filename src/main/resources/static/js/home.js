@@ -191,15 +191,12 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
     })
         .then(response => response.json())
         .then(data => {
-            // 处理返回的数据，更新聊天区域
-            console.log('Query Response:', data);
-
             // 恢复 query 默认值
             document.getElementById('chat-input').value = ""
 
             // 创建结果显示区域
             var resultDisplay = document.createElement('div');
-            resultDisplay.className = 'query-result';
+            resultDisplay.className = 'system-message';
             resultDisplay.textContent = 'Query Status: ' + data.traceToken + '\n'
                 + 'Results: (To be filled once the query completes)';
 
