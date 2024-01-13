@@ -163,7 +163,7 @@ function sendQuery() {
     // 创建一个新的消息元素，代表用户输入的消息
     var userMessageElement = document.createElement('div');
     userMessageElement.className = 'user-message';
-    userMessageElement.textContent = 'User: ' + chatInput;
+    userMessageElement.textContent = chatInput;
 
     // 将新的消息元素添加到聊天区域
     chatArea.appendChild(userMessageElement);
@@ -178,7 +178,7 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
     var submitQueryRequest = {
         query: query,
         executionHint: executionHint,
-        limitRows: outputRows || 10,
+        limitRows: outputRows,
     };
 
     // 发起submitQuery请求
@@ -197,8 +197,7 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
             // 创建结果显示区域
             var resultDisplay = document.createElement('div');
             resultDisplay.className = 'system-message';
-            resultDisplay.textContent = 'Query Status: ' + data.traceToken + '\n'
-                + 'Results: (To be filled once the query completes)';
+            resultDisplay.textContent = 'Query Status: unknown\n';
 
             // 将新的结果显示区域添加到聊天区域
             chatArea.appendChild(resultDisplay);
@@ -206,7 +205,7 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
             // 如果查询成功，继续处理
             if (data.errorCode === 0) {
                 // 显示查询状态
-                showQueryStatus(data.traceToken, resultDisplay);
+                updateQueryStatusAndResults(data.traceToken, resultDisplay);
             } else {
                 // 如果查询失败，显示错误消息
                 resultDisplay.textContent = 'Error: ' + data.errorMessage;
@@ -219,103 +218,99 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
         });
 }
 
-// 显示查询状态
-function showQueryStatus(traceToken, resultDisplay) {
+// 更新查询状态和结果
+function updateQueryStatusAndResults(traceToken, resultDisplay) {
+    // 更新查询状态
+    updateQueryStatus(traceToken, function (status) {
+        // 显示查询状态
+        resultDisplay.textContent = 'Query Status: ' + status + '\n';
+
+        // 如果查询状态为 "finished"，获取结果并更新显示
+        if (status.toLowerCase() === 'finished') {
+            getQueryResult(traceToken, function (result) {
+                // 显示查询结果
+                displayQueryResult(result, resultDisplay);
+            });
+        }
+    });
+}
+
+// 更新查询状态
+function updateQueryStatus(traceToken, callback) {
     // 定义标志，判断是否继续刷新状态
     var shouldRefresh = true;
 
     // 定时刷新查询状态
     var refreshInterval = setInterval(function () {
         if (shouldRefresh) {
-            refreshQueryStatus(traceToken, function (status) {
-                // 如果查询状态为 "finished"，停止刷新
-                if (status.toLowerCase() === 'finished') {
+            // 构造GetQueryStatusRequest
+            var getRequest = {
+                traceTokens: [traceToken]
+            };
+
+            // 发送请求到后端
+            fetch('/api/query/get-query-status', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(getRequest),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data);
+
+                    // 处理后端返回的查询状态
+                    if (data.errorCode === 0) {
+                        var status = data.queryStatuses[traceToken];
+
+                        // 执行回调函数，传递查询状态
+                        if (typeof callback === 'function') {
+                            callback(status);
+                        }
+
+                        // 如果查询状态为 "finished"，停止刷新
+                        if (status.toLowerCase() === 'finished') {
+                            shouldRefresh = false;
+                            clearInterval(refreshInterval);
+                        }
+                    } else {
+                        console.error('Error getting query status:', data.errorMessage);
+                        shouldRefresh = false;
+                        clearInterval(refreshInterval);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error updating query status:', error);
                     shouldRefresh = false;
                     clearInterval(refreshInterval);
-
-                    // 轮询后端以获取查询结果
-                    pollForResult(traceToken, resultDisplay);
-                }
-            });
+                });
         }
-    }, 500); // 每5秒刷新一次，根据需求调整
+    }, 500); // 每0.5秒刷新一次，根据需求调整
 }
 
-// 刷新查询状态
-function refreshQueryStatus(traceToken, callback) {
-    // 构造GetQueryStatusRequest
-    var getRequest = {
-        traceTokens: [traceToken]
-    };
-
-    // 发送请求到后端
-    fetch('/api/query/get-query-status', {
+// 获取查询结果
+function getQueryResult(traceToken, callback) {
+    // 发起getQueryResult请求
+    fetch('/api/query/get-query-result', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify(getRequest),
+        body: JSON.stringify({ traceToken: traceToken }),
     })
         .then(response => response.json())
-        .then(data => {
-            console.log(data);
+        .then(result => {
+            console.log(result);
 
-            // 处理后端返回的查询状态
-            if (data.errorCode === 0) {
-                var status = data.queryStatuses[traceToken];
-
-                // 执行回调函数，传递查询状态
-                if (typeof callback === 'function') {
-                    callback(status);
-                }
-            } else {
-                console.error('Error getting query status:', data.errorMessage);
+            // 执行回调函数，传递查询结果
+            if (typeof callback === 'function') {
+                callback(result);
             }
         })
         .catch(error => {
-            console.error('Error refreshing query status:', error);
+            console.error('Error getting query result:', error);
         });
-}
-
-// 轮询后端以获取查询结果
-function pollForResult(traceToken, resultDisplay) {
-    // 定义轮询间隔（ms）
-    const pollInterval = 1000;
-
-    // 开始轮询
-    const pollTimer = setInterval(function () {
-        // 发起getQueryResult请求
-        fetch('/api/query/get-query-result', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ traceToken: traceToken }),
-        })
-            .then(response => response.json())
-            .then(result => {
-                console.log(result);
-
-                // 如果查询完成，停止轮询并显示结果
-                if (result.errorCode === 0) {
-                    clearInterval(pollTimer);
-
-                    // 显示查询结果
-                    displayQueryResult(result, resultDisplay);
-                } else if (result.errorCode !== 10405) {
-                    // 如果发生错误，停止轮询并显示错误消息
-                    clearInterval(pollTimer);
-                    resultDisplay.textContent = 'Error: ' + result.errorMessage;
-                }
-                // 如果还未完成，继续轮询
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                // 如果出现错误，停止轮询并显示错误消息
-                clearInterval(pollTimer);
-                resultDisplay.textContent = 'Error occurred while getting query result.';
-            });
-    }, pollInterval);
 }
 
 // 修改显示查询结果的函数，保留第一行的状态信息

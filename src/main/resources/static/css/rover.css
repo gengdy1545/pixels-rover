@@ -658,24 +658,6 @@ input.error {
     overflow-y: auto;
 }
 
-/*.user-message {*/
-/*    background-color: #4CAF50; !* Green background color for user messages *!*/
-/*    color: white; !* White text color *!*/
-/*    border-radius: 15px; !* Rounded corners *!*/
-/*    padding: 10px; !* Padding to provide some space around the message *!*/
-/*    margin-bottom: 10px; !* Margin between messages *!*/
-/*    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); !* Box shadow for a subtle lift effect *!*/
-/*}*/
-
-/*.system-message {*/
-/*    background-color: #3498db; !* Blue background color for system messages *!*/
-/*    color: white; !* White text color *!*/
-/*    border-radius: 15px; !* Rounded corners *!*/
-/*    padding: 10px; !* Padding to provide some space around the message *!*/
-/*    margin-bottom: 10px; !* Margin between messages *!*/
-/*    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); !* Box shadow for a subtle lift effect *!*/
-/*}*/
-
 /* Style for user messages */
 .user-message {
     background-color: #f2f2f2; /* Light gray background */
