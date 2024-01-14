@@ -153,6 +153,26 @@ showColumns = function showColumns(schema, table) {
     });
 }
 
+document.addEventListener('DOMContentLoaded', function () {
+    // Get the input field
+    var chatInput = document.getElementById('chat-input');
+
+    // Check if the element exists before adding the event listener
+    if (chatInput) {
+        // Add an event listener for the "keydown" event
+        chatInput.addEventListener('keydown', function (event) {
+            // Check if the pressed key is Enter (key code 13)
+            if (event.keyCode === 13) {
+                // Prevent the default form submission behavior
+                event.preventDefault();
+
+                // Call the function to send the query
+                sendQuery();
+            }
+        });
+    }
+});
+
 // 添加一个函数，用于在聊天区域显示用户输入的消息和执行结果
 function sendQuery() {
     var chatInput = document.getElementById('chat-input').value;
@@ -258,8 +278,6 @@ function updateQueryStatus(traceToken, callback) {
             })
                 .then(response => response.json())
                 .then(data => {
-                    console.log(data);
-
                     // 处理后端返回的查询状态
                     if (data.errorCode === 0) {
                         var status = data.queryStatuses[traceToken];
@@ -301,8 +319,6 @@ function getQueryResult(traceToken, callback) {
     })
         .then(response => response.json())
         .then(result => {
-            console.log(result);
-
             // 执行回调函数，传递查询结果
             if (typeof callback === 'function') {
                 callback(result);
@@ -323,33 +339,91 @@ function displayQueryResult(result, resultDisplay) {
     var rows = result.rows;
     var columnPrintSizes = result.columnPrintSizes;
 
-    // 输出列名
-    var columnNamesStr = '';
+    // 创建表格元素
+    var table = document.createElement('table');
+
+    // 创建表头
+    var thead = document.createElement('thead');
+    var headerRow = document.createElement('tr');
+
     columnNames.forEach(function (columnName, index) {
         var columnPrintSize = columnPrintSizes[index] || columnName.length + 2;
-        columnNamesStr += padRight(columnName, columnPrintSize);
+        var th = document.createElement('th');
+        th.textContent = columnName;
+        th.style.width = columnPrintSize + 'ch';
+        headerRow.appendChild(th);
     });
-    resultDisplayContent.textContent += columnNamesStr + '\n';
 
-    // 输出行数据
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // 创建表体
+    var tbody = document.createElement('tbody');
+
     rows.forEach(function (row) {
-        var rowStr = '';
-        columnNames.forEach(function (columnName, index) {
-            var columnPrintSize = columnPrintSizes[index];
+        var tr = document.createElement('tr');
+
+        columnNames.forEach(function (_, index) {
+            var td = document.createElement('td');
             var value = row[index];
             if (value === undefined || value === null) {
                 value = 'null';
             }
-            rowStr += padRight(value, columnPrintSize);
+            td.textContent = value;
+            tr.appendChild(td);
         });
-        resultDisplayContent.textContent += rowStr + '\n';
+
+        tbody.appendChild(tr);
     });
+
+    table.appendChild(tbody);
+    resultDisplayContent.appendChild(table);
 
     // 将新的结果显示区域添加到已有的结果显示区域
     resultDisplay.appendChild(resultDisplayContent);
 }
 
-// 辅助函数：右对齐并填充空格
-function padRight(str, length) {
-    return (str + ' '.repeat(Math.max(0, length - str.length))).substring(0, length);
-}
+// // 修改显示查询结果的函数，保留第一行的状态信息
+// function displayQueryResult(result, resultDisplay) {
+//     // 获取显示结果的DOM元素
+//     var resultDisplayContent = document.createElement('div');
+//
+//     // 处理成功的情况
+//     var columnNames = result.columnNames;
+//     var rows = result.rows;
+//     var columnPrintSizes = result.columnPrintSizes;
+//
+//     // 输出列名
+//     var columnNamesStr = '';
+//     columnNames.forEach(function (columnName, index) {
+//         var columnPrintSize = columnPrintSizes[index] || columnName.length + 2;
+//         columnNamesStr += padRight(columnName, columnPrintSize);
+//     });
+//     resultDisplayContent.innerHTML += columnNamesStr + '<br>';
+//
+//     // 输出行数据
+//     rows.forEach(function (row) {
+//         var rowStr = '';
+//         columnNames.forEach(function (columnName, index) {
+//             var columnPrintSize = columnPrintSizes[index];
+//             var value = row[index];
+//             if (value === undefined || value === null) {
+//                 value = 'null';
+//             }
+//             rowStr += padRight(value, columnPrintSize);
+//         });
+//         resultDisplayContent.innerHTML += rowStr.replace(/ /g, '&nbsp;') + '<br>';
+//     });
+//
+//     // 将新的结果显示区域添加到已有的结果显示区域
+//     resultDisplay.appendChild(resultDisplayContent);
+// }
+//
+// // 辅助函数：右对齐并填充空格
+// function padRight(str, length) {
+//     var spacesToAdd = length - str.length;
+//     if (spacesToAdd <= 0) {
+//         return str;
+//     }
+//     return ' '.repeat(spacesToAdd) + str;
+// }

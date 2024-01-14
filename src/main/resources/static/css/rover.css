@@ -655,7 +655,21 @@ input.error {
     margin-top: 20px;
     margin-bottom: 20px; /* 添加与下方区域的间隔 */
     padding: 20px; /* 调整聊天区域内边距 */
-    overflow-y: auto;
+    overflow: auto;
+}
+
+#chat-area::-webkit-scrollbar {
+    width: 8px; /* Set the width of the scrollbar */
+}
+
+#chat-area::-webkit-scrollbar-thumb {
+    background-color: rgba(51, 202, 187, 0.7); /* Use a lighter color with some opacity */
+    border-radius: 5px;
+    height: 1px;
+}
+
+#chat-area::-webkit-scrollbar-track {
+    background-color: #f0f0f0; /* Set the background color of the scrollbar track */
 }
 
 /* Style for user messages */
