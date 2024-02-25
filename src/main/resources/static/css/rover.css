@@ -753,3 +753,29 @@ input.error {
     border-radius: 5px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+
+.toggle-results {
+    cursor: pointer;
+    display: inline-block;
+    width:  10px;
+    height:  10px;
+    position: relative;
+    margin-left:  10px; /* 添加左边距 */
+}
+
+.toggle-results::before {
+    content: '';
+    position: absolute;
+    top:   50%;
+    left:   50%;
+    width:   5px;
+    height:   5px;
+    border-top:   2px solid #000;
+    border-right:   2px solid #000;
+    transform: translate(-50%, -50%) rotate(45deg); /*   初始状态为向右 */
+    transition: transform   0.3s ease;
+}
+
+.toggle-results.expanded::before {
+    transform: translate(-50%, -50%) rotate(135deg); /*  展开状态为向下 */
+}

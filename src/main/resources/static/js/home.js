@@ -214,20 +214,31 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
             // 恢复 query 默认值
             document.getElementById('chat-input').value = ""
 
-            // 创建结果显示区域
+            //  创建结果显示区域
+            var systemMessage = document.createElement('div');
+            systemMessage.className = 'system-message';
+
+            //  创建状态显示区域
+            var statusDisplay = document.createElement('div');
+            statusDisplay.className = 'query-status';
+            statusDisplay.textContent = 'Query Status: unknown\n';
+            systemMessage.appendChild(statusDisplay);
+
+            //  创建结果显示区域
             var resultDisplay = document.createElement('div');
-            resultDisplay.className = 'system-message';
-            resultDisplay.textContent = 'Query Status: unknown\n';
+            resultDisplay.className = 'query-results';
+            resultDisplay.style.display = 'none'; //  默认隐藏结果
+            systemMessage.appendChild(resultDisplay);
 
-            // 将新的结果显示区域添加到聊天区域
-            chatArea.appendChild(resultDisplay);
+            //  将新的结果显示区域添加到聊天区域
+            document.getElementById('chat-area').appendChild(systemMessage);
 
-            // 如果查询成功，继续处理
+            //  如果查询成功，继续处理
             if (data.errorCode === 0) {
-                // 显示查询状态
-                updateQueryStatusAndResults(data.traceToken, resultDisplay);
+                //  显示查询状态
+                updateQueryStatusAndResults(data.traceToken, statusDisplay, resultDisplay);
             } else {
-                // 如果查询失败，显示错误消息
+                //  如果查询失败，显示错误消息
                 resultDisplay.textContent = 'Error: ' + data.errorMessage;
             }
         })
@@ -239,14 +250,30 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
 }
 
 // 更新查询状态和结果
-function updateQueryStatusAndResults(traceToken, resultDisplay) {
+function updateQueryStatusAndResults(traceToken, statusDisplay, resultDisplay) {
     // 更新查询状态
     updateQueryStatus(traceToken, function (status) {
         // 显示查询状态
-        resultDisplay.textContent = 'Query Status: ' + status + '\n';
+        statusDisplay.textContent = 'Query Status: ' + status + '\n';
 
         // 如果查询状态为 "finished"，获取结果并更新显示
         if (status.toLowerCase() === 'finished') {
+            //   添加折叠/展开按钮
+            var toggleResults = document.createElement('span');
+            toggleResults.className = 'toggle-results';
+            toggleResults.addEventListener('click', function () {
+                if (resultDisplay.style.display === 'none') {
+                    resultDisplay.style.display = 'block';
+                    toggleResults.classList.add('expanded');
+                } else {
+                    resultDisplay.style.display = 'none';
+                    toggleResults.classList.remove('expanded');
+                }
+            });
+
+            //  将折叠按钮添加到状态显示区域
+            statusDisplay.appendChild(toggleResults);
+
             getQueryResult(traceToken, function (result) {
                 // 显示查询结果
                 displayQueryResult(result, resultDisplay);
@@ -350,7 +377,7 @@ function displayQueryResult(result, resultDisplay) {
         var columnPrintSize = columnPrintSizes[index] || columnName.length + 2;
         var th = document.createElement('th');
         th.textContent = columnName;
-        th.style.width = columnPrintSize + 'ch';
+        th.style.width = columnPrintSize + 3 + 'ch'; // 增加固定长度
         headerRow.appendChild(th);
     });
 
@@ -382,48 +409,3 @@ function displayQueryResult(result, resultDisplay) {
     // 将新的结果显示区域添加到已有的结果显示区域
     resultDisplay.appendChild(resultDisplayContent);
 }
-
-// // 修改显示查询结果的函数，保留第一行的状态信息
-// function displayQueryResult(result, resultDisplay) {
-//     // 获取显示结果的DOM元素
-//     var resultDisplayContent = document.createElement('div');
-//
-//     // 处理成功的情况
-//     var columnNames = result.columnNames;
-//     var rows = result.rows;
-//     var columnPrintSizes = result.columnPrintSizes;
-//
-//     // 输出列名
-//     var columnNamesStr = '';
-//     columnNames.forEach(function (columnName, index) {
-//         var columnPrintSize = columnPrintSizes[index] || columnName.length + 2;
-//         columnNamesStr += padRight(columnName, columnPrintSize);
-//     });
-//     resultDisplayContent.innerHTML += columnNamesStr + '<br>';
-//
-//     // 输出行数据
-//     rows.forEach(function (row) {
-//         var rowStr = '';
-//         columnNames.forEach(function (columnName, index) {
-//             var columnPrintSize = columnPrintSizes[index];
-//             var value = row[index];
-//             if (value === undefined || value === null) {
-//                 value = 'null';
-//             }
-//             rowStr += padRight(value, columnPrintSize);
-//         });
-//         resultDisplayContent.innerHTML += rowStr.replace(/ /g, '&nbsp;') + '<br>';
-//     });
-//
-//     // 将新的结果显示区域添加到已有的结果显示区域
-//     resultDisplay.appendChild(resultDisplayContent);
-// }
-//
-// // 辅助函数：右对齐并填充空格
-// function padRight(str, length) {
-//     var spacesToAdd = length - str.length;
-//     if (spacesToAdd <= 0) {
-//         return str;
-//     }
-//     return ' '.repeat(spacesToAdd) + str;
-// }

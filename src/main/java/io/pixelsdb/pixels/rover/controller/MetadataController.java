@@ -23,6 +23,7 @@ import io.pixelsdb.pixels.common.server.rest.response.GetColumnsResponse;
 import io.pixelsdb.pixels.common.server.rest.response.GetSchemasResponse;
 import io.pixelsdb.pixels.common.server.rest.response.GetTablesResponse;
 import io.pixelsdb.pixels.common.server.rest.response.GetViewsResponse;
+import io.pixelsdb.pixels.common.utils.ConfigFactory;
 import io.pixelsdb.pixels.rover.constant.RestUrlPath;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -33,6 +34,8 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import java.net.URL;
+import java.net.MalformedURLException;
 
 @RestController
 public class MetadataController
@@ -41,7 +44,10 @@ public class MetadataController
 
     @Autowired
     public MetadataController(WebClient.Builder webClientBuilder) {
-        String BASE_URL = "http://10.78.50.215:18890";
+        String host = ConfigFactory.Instance().getProperty("metadata.server.host");
+        assert (host != null);
+        int port = 18890;
+        String BASE_URL = "http://" + host + ":" + port;
         this.webClient = webClientBuilder.baseUrl(BASE_URL).build();
     }
 

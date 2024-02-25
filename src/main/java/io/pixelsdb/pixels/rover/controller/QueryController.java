@@ -17,6 +17,7 @@ package io.pixelsdb.pixels.rover.controller;
 
 import io.pixelsdb.pixels.common.server.rest.request.*;
 import io.pixelsdb.pixels.common.server.rest.response.*;
+import io.pixelsdb.pixels.common.utils.ConfigFactory;
 import io.pixelsdb.pixels.rover.constant.RestUrlPath;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -35,7 +36,10 @@ public class QueryController
 
     @Autowired
     public QueryController(WebClient.Builder webClientBuilder) {
-        String BASE_URL = "http://10.78.50.215:18890";
+        String host = ConfigFactory.Instance().getProperty("metadata.server.host");
+        assert (host != null);
+        int port = 18890;
+        String BASE_URL = "http://" + host + ":" + port;
         this.webClient = webClientBuilder.baseUrl(BASE_URL).build();
     }
 
