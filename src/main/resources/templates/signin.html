@@ -21,11 +21,14 @@
     <script type="text/javascript" src="js/signin.js"></script>
 </head>
 <body>
-<div class="row pixels-wrapper" style="background-image: url(images/login-bg.jpg); background-size: cover;">
+<div class="row pixels-wrapper" style="background-image: url(images/login-bg3.jpg); background-size: cover;">
     <div class="pixels-login">
         <div class="login-center">
-            <div class="login-header text-center">
-                <img alt="pixelsDB" src="images/logo-sidebar.png">
+<!--            <div class="login-header text-center">-->
+<!--                <img alt="pixelsDB" src="images/logo-sidebar.png">-->
+<!--            </div>-->
+            <div class="login-title text-center">
+                Pixels
             </div>
             <div th:if="${param.error}">
                 Invalid username and password.
@@ -58,7 +61,7 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <button class="btn btn-block btn-primary" id="btnSubmit" data-loading="Verifying login, please wait...">Sign In</button>
+                    <button class="btn btn-block btn-primary" id="btnSubmit">Sign In</button>
                 </div>
             </form>
             <div th:if="${param.error}">
