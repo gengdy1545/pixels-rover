@@ -72,6 +72,8 @@ showSchemas = function getSchemas() {
         contentType: 'application/json',
         data: JSON.stringify({}),
         success: function (response) {
+            console.log(response);
+
             var schemaMenu = $('#schemaMenu');
 
             // Clear existing items
@@ -102,6 +104,8 @@ showTables = function getTables(schema) {
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema }),
         success: function(response) {
+            console.log(response);
+
             var tableMenu = $('#' + schema); // Use a unique ID for each schema's table menu
 
             // Clear existing items
@@ -124,13 +128,15 @@ showTables = function getTables(schema) {
 }
 
 // Define showColumns function
-showColumns = function showColumns(schema, table) {
+showColumns = function getColumns(schema, table) {
     $.ajax({
         type: 'POST',
         url: '/api/metadata/get-columns',
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema, "tableName": table }),
         success: function(response) {
+            console.log(response);
+
             var columnMenu = $('#' + schema + '_' + table); // Use a unique ID for each table's column menu
 
             // Clear existing items
