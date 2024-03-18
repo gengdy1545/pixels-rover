@@ -496,8 +496,11 @@ input.error {
     -webkit-transition: padding 0.3s;
     transition: padding 0.3s;
     display: flex;
-    flex-direction: column;
-    align-items: center;
+    /*flex-direction: column;*/
+    /*align-items: center;*/
+    flex-direction: row;
+    justify-content: center;
+    align-items: flex-start;
 }
 
 /* Avatar Styles */
@@ -672,6 +675,37 @@ input.error {
         column-count: 4;
     }
 }
+
+.row {
+    width: 100%;
+    height: 100%;
+}
+
+.left-content {
+    flex: 1;
+    width: calc(50% - 25px);
+    height: calc(100% - 40px);
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    margin: 20px 5px 20px 20px;
+}
+
+.right-content {
+    flex: 1;
+    width: calc(50% - 25px);
+    height: calc(100% - 40px);
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    margin: 20px 20px 20px 5px;
+}
+/*!* 拖动条 *!*/
+/*.dragbar {*/
+/*    cursor: ew-resize; !* 设置光标样式为水平调整大小 *!*/
+/*    width: 8px; !* 拖动条的宽度 *!*/
+/*    background-color: #ccc; !* 拖动条的颜色 *!*/
+/*}*/
 
 /* Chat Styles */
 #chat-area {

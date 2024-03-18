@@ -96,24 +96,38 @@
 
         <!--页面主要内容-->
         <main class="pixels-layout-content">
-            <!-- 聊天区域 -->
-            <div id="chat-area">
-                <div class="system-message">
-                    This is PixelsDB. <br>
-                    You can send SQL query.
-                </div>
-            </div>
+            <div class="row">
+                <!-- 左边区域 -->
+                <div class="col-md-6 left-content">
+                    <!-- 聊天区域 -->
+                    <div id="chat-area">
+                        <div class="system-message">
+                            This is PixelsDB. <br>
+                            You can send SQL query.
+                        </div>
+                    </div>
 
-            <!-- 发送消息区域 -->
-            <div id="send-message-area">
-                <input type="text" id="chat-input" placeholder="Type a query...">
-                <select id="execution-hint-select">
-                    <option value="0">Best Effort</option>
-                    <option value="1">Relaxed</option>
-                    <option value="2">Immediate</option>
-                </select>
-                <input type="number" id="output-rows-input" placeholder="LIMIT">
-                <button class="btn btn-block btn-primary" id="send-button" onclick="sendQuery()">Send</button>
+<!--                    &lt;!&ndash; 发送消息区域 &ndash;&gt;-->
+<!--                    <div id="send-message-area">-->
+<!--                        <input type="text" id="chat-input" placeholder="Type a query...">-->
+<!--                        <select id="execution-hint-select">-->
+<!--                            <option value="0">Best Effort</option>-->
+<!--                            <option value="1">Relaxed</option>-->
+<!--                            <option value="2">Immediate</option>-->
+<!--                        </select>-->
+<!--                        <input type="number" id="output-rows-input" placeholder="LIMIT">-->
+<!--                        <button class="btn btn-block btn-primary" id="send-button" onclick="sendQuery()">Send</button>-->
+<!--                    </div>-->
+                </div>
+
+                <!-- 拖动条 -->
+                <div class="dragbar"></div>
+
+                <!-- 右边区域 -->
+                <div class="col-md-6 right-content">
+                    <!-- 查询状态显示区域 -->
+                    查询状态显示区域
+                </div>
             </div>
         </main>
         <!--End 页面主要内容-->
