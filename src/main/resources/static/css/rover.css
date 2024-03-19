@@ -718,6 +718,24 @@ input.error {
     background-color: #ccc; /* 高亮显示 */
 }
 
+.fullscreen {
+    text-align: right;
+}
+
+.fullscreen-btn {
+    width: 24px;
+    height: 24px;
+    margin-top: 15px;
+    background-color: transparent;
+    transition: background-color 0.3s, border-radius 0.3s;
+    border-radius: 16%;
+}
+
+.fullscreen-btn:hover {
+    background-color: #ccc;
+    cursor: pointer;
+}
+
 /* Chat Styles */
 #chat-area {
     flex-grow: 1; /* 设置 chat-area 自动占据剩余空间 */

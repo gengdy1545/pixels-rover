@@ -431,7 +431,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 监听mousemove事件，当鼠标移动时进行拖动
         const onMouseMove = (e) => {
-            const deltaX = e.clientX - row.getBoundingClientRect().left - row.offsetWidth / 2;
+            let deltaX = e.clientX - row.getBoundingClientRect().left - row.offsetWidth / 2;
+            if(e.clientX - row.getBoundingClientRect().left <= 60)
+                deltaX = 60 - row.offsetWidth / 2;
+            else if(row.getBoundingClientRect().right - e.clientX <= 60)
+                deltaX = row.offsetWidth / 2 - 60;
+            console.log(deltaX);
             const deltaPercentage = deltaX / row.offsetWidth;
 
             // 设置左右区域的宽度
@@ -451,3 +456,51 @@ document.addEventListener('DOMContentLoaded', function() {
         document.addEventListener('mouseup', onMouseUp);
     });
 });
+
+function toggleFullscreen(side) {
+    const leftContent = document.querySelector('.left-content');
+    const rightContent = document.querySelector('.right-content');
+    const dragbar = document.querySelector('.resize');
+
+    if (side === 'left') {
+        const fullscreenBtn = document.querySelector('.left-content .fullscreen-btn');
+        if (leftContent.classList.contains('fullscreen')) {
+            // 如果左边区域已经全屏，则恢复原状
+            leftContent.classList.remove('fullscreen');
+            leftContent.style.width = 'calc(50% - 25px)';
+            rightContent.style.width = 'calc(50% - 25px)';
+            leftContent.style.margin = '20px 0 20px 20px';
+            rightContent.style.display = 'block';
+            dragbar.style.display = 'block';
+            fullscreenBtn.src = 'images/fullscreen.svg'; // 切换为全屏图标
+        } else {
+            // 否则将左边区域设为全屏
+            leftContent.classList.add('fullscreen');
+            leftContent.style.width = 'calc(100% - 40px)';
+            leftContent.style.margin = '20px';
+            rightContent.style.display = 'none';
+            dragbar.style.display = 'none';
+            fullscreenBtn.src = 'images/exitfullscreen.svg'; // 切换为退出全屏图标
+        }
+    } else if (side === 'right') {
+        const fullscreenBtn = document.querySelector('.right-content .fullscreen-btn');
+        if (rightContent.classList.contains('fullscreen')) {
+            // 如果右边区域已经全屏，则恢复原状
+            rightContent.classList.remove('fullscreen');
+            rightContent.style.width = 'calc(50% - 25px)';
+            leftContent.style.width = 'calc(50% - 25px)';
+            rightContent.style.margin = '20px 20px 20px 0';
+            leftContent.style.display = 'block';
+            dragbar.style.display = 'block';
+            fullscreenBtn.src = 'images/fullscreen.svg'; // 切换为全屏图标
+        } else {
+            // 否则将右边区域设为全屏
+            rightContent.classList.add('fullscreen');
+            rightContent.style.width = 'calc(100% - 40px)';
+            rightContent.style.margin = '20px';
+            leftContent.style.display = 'none';
+            dragbar.style.display = 'none';
+            fullscreenBtn.src = 'images/exitfullscreen.svg'; // 切换为退出全屏图标
+        }
+    }
+}
