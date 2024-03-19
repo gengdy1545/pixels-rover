@@ -718,9 +718,16 @@ input.error {
     background-color: #ccc; /* 高亮显示 */
 }
 
-.fullscreen {
-    /*height: 40px;*/
-    text-align: right;
+.content-title {
+    display: flex;
+    justify-content: space-between;
+}
+
+.content-title-name {
+    font-size: 16px;
+    font-weight: bold;
+    margin-top: 15px;
+    margin-left: 20px;
 }
 
 .fullscreen-btn {
@@ -740,7 +747,7 @@ input.error {
 /* Chat Styles */
 #chat-area {
     width: 100%;
-    height: calc(100% - 119px);
+    height: calc(100% - 129px);
     margin-top: 10px;
     margin-bottom: 10px;
     flex-grow: 1;
