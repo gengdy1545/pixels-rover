@@ -182,8 +182,8 @@ document.addEventListener('DOMContentLoaded', function () {
 // 添加一个函数，用于在聊天区域显示用户输入的消息和执行结果
 function sendQuery() {
     var chatInput = document.getElementById('chat-input').value;
-    var executionHintSelect = document.getElementById('execution-hint-select').value;
-    var outputRowsInput = document.getElementById('output-rows-input').value;
+    // var executionHintSelect = document.getElementById('execution-hint-select').value;
+    // var outputRowsInput = document.getElementById('output-rows-input').value;
     var chatArea = document.getElementById('chat-area');
 
     // 创建一个新的消息元素，代表用户输入的消息
@@ -194,8 +194,8 @@ function sendQuery() {
     // 将新的消息元素添加到聊天区域
     chatArea.appendChild(userMessageElement);
 
-    // 发送后端请求，执行查询
-    executeQuery(chatInput, executionHintSelect, outputRowsInput, chatArea);
+    // // 发送后端请求，执行查询
+    // executeQuery(chatInput, executionHintSelect, outputRowsInput, chatArea);
 }
 
 // 发送后端请求，执行查询

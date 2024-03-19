@@ -719,6 +719,7 @@ input.error {
 }
 
 .fullscreen {
+    /*height: 40px;*/
     text-align: right;
 }
 
@@ -738,14 +739,11 @@ input.error {
 
 /* Chat Styles */
 #chat-area {
-    flex-grow: 1; /* 设置 chat-area 自动占据剩余空间 */
-    width: 90%; /* 调整聊天区域宽度 */
-    background-color: #fff;
-    border-radius: 10px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    margin-top: 20px;
-    margin-bottom: 20px; /* 添加与下方区域的间隔 */
-    padding: 20px; /* 调整聊天区域内边距 */
+    width: 100%;
+    height: calc(100% - 119px);
+    margin-top: 10px;
+    margin-bottom: 10px;
+    flex-grow: 1;
     overflow: auto;
 }
 
@@ -782,22 +780,19 @@ input.error {
 }
 
 #send-message-area {
-    width: 90%; /* 调整发送消息区域宽度 */
-    background-color: #fff;
-    border-radius: 10px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    position: absolute;
+    bottom: 20px;
+    width: calc(100% - 25px);
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px; /* 调整发送消息区域内边距 */
-    margin-bottom: 20px;
 }
 
 #execution-hint-select,
 #chat-input,
 #output-rows-input {
-    padding: 10px;
-    margin-right: 10px;
+    width: auto;
     border: 1px solid #ccc;
     border-radius: 5px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -813,8 +808,7 @@ input.error {
 }
 
 #send-button {
-    width: auto;
-    padding: 10px 20px;
+    width: 80px;
     background-color: #33cabb;
     color: #fff;
     border: none;
