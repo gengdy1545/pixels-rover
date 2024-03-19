@@ -688,7 +688,7 @@ input.error {
     background-color: #fff;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    margin: 20px 5px 20px 20px;
+    margin: 20px 0 20px 20px;
 }
 
 .right-content {
@@ -698,14 +698,25 @@ input.error {
     background-color: #fff;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    margin: 20px 20px 20px 5px;
+    margin: 20px 20px 20px 0;
 }
-/*!* 拖动条 *!*/
-/*.dragbar {*/
-/*    cursor: ew-resize; !* 设置光标样式为水平调整大小 *!*/
-/*    width: 8px; !* 拖动条的宽度 *!*/
-/*    background-color: #ccc; !* 拖动条的颜色 *!*/
-/*}*/
+
+/* 拖动条 */
+.resize {
+    flex: 1;
+    width: 4px;
+    height: calc(100% - 40px);
+    background-color: transparent;
+    margin: 20px 3px 20px 3px;
+    padding: 0;
+    cursor: ew-resize;
+    z-index: 1;
+}
+
+/* 鼠标悬停时显示的竖线 */
+.resize:hover {
+    background-color: #ccc; /* 高亮显示 */
+}
 
 /* Chat Styles */
 #chat-area {
