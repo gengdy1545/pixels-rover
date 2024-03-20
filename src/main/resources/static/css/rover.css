@@ -689,6 +689,7 @@ input.error {
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     margin: 20px 0 20px 20px;
+    overflow: hidden;
 }
 
 .right-content {
@@ -699,6 +700,7 @@ input.error {
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     margin: 20px 20px 20px 0;
+    overflow: hidden;
 }
 
 /* 拖动条 */
@@ -754,17 +756,26 @@ input.error {
     overflow: auto;
 }
 
-#chat-area::-webkit-scrollbar {
+#status-area {
+    width: 100%;
+    height: calc(100% - 69px);
+    margin-top: 10px;
+    margin-bottom: 10px;
+    flex-grow: 1;
+    overflow: auto;
+}
+
+#chat-area::-webkit-scrollbar, #status-area::-webkit-scrollbar {
     width: 8px; /* Set the width of the scrollbar */
 }
 
-#chat-area::-webkit-scrollbar-thumb {
+#chat-area::-webkit-scrollbar-thumb, #status-area::-webkit-scrollbar-thumb {
     background-color: rgba(51, 202, 187, 0.7); /* Use a lighter color with some opacity */
     border-radius: 5px;
     height: 1px;
 }
 
-#chat-area::-webkit-scrollbar-track {
+#chat-area::-webkit-scrollbar-track, #status-area::-webkit-scrollbar-track {
     background-color: #f0f0f0; /* Set the background color of the scrollbar track */
 }
 

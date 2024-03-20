@@ -72,7 +72,7 @@ showSchemas = function getSchemas() {
         contentType: 'application/json',
         data: JSON.stringify({}),
         success: function (response) {
-            console.log(response);
+            // console.log(response);
 
             var schemaMenu = $('#schemaMenu');
 
@@ -104,7 +104,7 @@ showTables = function getTables(schema) {
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema }),
         success: function(response) {
-            console.log(response);
+            // console.log(response);
 
             var tableMenu = $('#' + schema); // Use a unique ID for each schema's table menu
 
@@ -135,7 +135,7 @@ showColumns = function getColumns(schema, table) {
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema, "tableName": table }),
         success: function(response) {
-            console.log(response);
+            // console.log(response);
 
             var columnMenu = $('#' + schema + '_' + table); // Use a unique ID for each table's column menu
 
@@ -172,18 +172,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Prevent the default form submission behavior
                 event.preventDefault();
 
-                // Call the function to send the query
-                sendQuery();
+                // Call the function to send the message
+                sendMessage();
             }
         });
     }
 });
 
-// 添加一个函数，用于在聊天区域显示用户输入的消息和执行结果
-function sendQuery() {
+function sendMessage() {
     var chatInput = document.getElementById('chat-input').value;
-    // var executionHintSelect = document.getElementById('execution-hint-select').value;
-    // var outputRowsInput = document.getElementById('output-rows-input').value;
     var chatArea = document.getElementById('chat-area');
 
     // 创建一个新的消息元素，代表用户输入的消息
@@ -194,12 +191,109 @@ function sendQuery() {
     // 将新的消息元素添加到聊天区域
     chatArea.appendChild(userMessageElement);
 
-    // // 发送后端请求，执行查询
-    // executeQuery(chatInput, executionHintSelect, outputRowsInput, chatArea);
+    // ToDo: 通过调用text-to-sql接口将chatInput转成query进行查询，返回的query是一个systemMessage，能够修改，
+    //       右侧一个执行按钮，点击后选择执行的executionHint和limit row，也能编辑执行的query语句
+
+    executeQuery(chatInput, Math.floor(Math.random() * 3), 10);
+
+    // // 定义存储结果的对象
+    // var data = {
+    //     "schema": {
+    //         "schema_items": []
+    //     },
+    //     "text": chatInput
+    // };
+    //
+    // // 获取schemas
+    // $.ajax({
+    //     type: 'POST',
+    //     url: '/api/metadata/get-schemas',
+    //     contentType: 'application/json',
+    //     data: JSON.stringify({}),
+    //     success: function (response) {
+    //         response.schemas.forEach(function (schema) {
+    //             var schemaItem = {
+    //                 "table_name": schema.name,
+    //                 "column_names": [],
+    //                 "column_types": [],
+    //                 "column_comments": [],
+    //                 "column_contents": [],
+    //                 "pk_indicators": []
+    //             };
+    //
+    //             // 获取tables
+    //             $.ajax({
+    //                 type: 'POST',
+    //                 url: '/api/metadata/get-tables',
+    //                 contentType: 'application/json',
+    //                 data: JSON.stringify({ "schemaName": schema.name }),
+    //                 success: function (response) {
+    //                     response.tables.forEach(function (table) {
+    //                         var tableItem = {
+    //                             "rid": "",
+    //                             "table_name": table.name,
+    //                             "table_comment": "",
+    //                             "column_names": [],
+    //                             "column_types": [],
+    //                             "column_comments": [],
+    //                             "column_contents": [],
+    //                             "pk_indicators": []
+    //                         };
+    //
+    //                         // 获取columns
+    //                         $.ajax({
+    //                             type: 'POST',
+    //                             url: '/api/metadata/get-columns',
+    //                             contentType: 'application/json',
+    //                             data: JSON.stringify({ "schemaName": schema.name, "tableName": table.name }),
+    //                             success: function (response) {
+    //                                 response.columns.forEach(function (column) {
+    //                                     tableItem.column_names.push(column.name);
+    //                                     tableItem.column_types.push(column.type);
+    //                                     tableItem.column_comments.push("");
+    //                                     tableItem.column_contents.push([]);
+    //                                     tableItem.pk_indicators.push(0);
+    //                                 });
+    //
+    //                                 schemaItem.schema_items.push(tableItem);
+    //                             },
+    //                             error: function (error) {
+    //                                 console.error('Error fetching columns:', error);
+    //                             }
+    //                         });
+    //                     });
+    //                 },
+    //                 error: function (error) {
+    //                     console.error('Error fetching tables:', error);
+    //                 }
+    //             });
+    //
+    //             data.schema.schema_items.push(schemaItem);
+    //         });
+    //     },
+    //     error: function (error) {
+    //         console.error('Error fetching schemas:', error);
+    //     }
+    // });
+    // console.log(data);
+
+    // // 发送数据
+    // $.ajax({
+    //     type: 'POST',
+    //     url: 'YOUR_SEND_URL',
+    //     contentType: 'application/json',
+    //     data: JSON.stringify(data),
+    //     success: function (response) {
+    //         console.log('Message sent successfully:', response);
+    //     },
+    //     error: function (error) {
+    //         console.error('Error sending message:', error);
+    //     }
+    // });
 }
 
 // 发送后端请求，执行查询
-function executeQuery(query, executionHint, outputRows, chatArea) {
+function executeQuery(query, executionHint, outputRows) {
     // 构建SubmitQueryRequest对象
     var submitQueryRequest = {
         query: query,
@@ -224,6 +318,22 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
             var systemMessage = document.createElement('div');
             systemMessage.className = 'system-message';
 
+            // 根据 executionHint 修改显示背景颜色
+            // 根据executionHint的不同值设置不同的背景颜色
+            switch (executionHint) {
+                case 0: // Best Effort
+                    systemMessage.style.backgroundColor = '#f3f9e8';
+                    break;
+                case 1: // Relaxed
+                    systemMessage.style.backgroundColor = '#f9f0e8';
+                    break;
+                case 2: // Immediate
+                    systemMessage.style.backgroundColor = '#f9e8e8';
+                    break;
+                default:
+                    systemMessage.style.backgroundColor = '#e6f7ff'; // 默认颜色
+            }
+
             //  创建状态显示区域
             var statusDisplay = document.createElement('div');
             statusDisplay.className = 'query-status';
@@ -237,7 +347,7 @@ function executeQuery(query, executionHint, outputRows, chatArea) {
             systemMessage.appendChild(resultDisplay);
 
             //  将新的结果显示区域添加到聊天区域
-            document.getElementById('chat-area').appendChild(systemMessage);
+            document.getElementById('status-area').appendChild(systemMessage);
 
             //  如果查询成功，继续处理
             if (data.errorCode === 0) {
@@ -364,8 +474,16 @@ function getQueryResult(traceToken, callback) {
 
 // 修改显示查询结果的函数，保留第一行的状态信息
 function displayQueryResult(result, resultDisplay) {
+    // console.log(result);
+
     // 获取显示结果的DOM元素
     var resultDisplayContent = document.createElement('div');
+
+    if(result.errorCode !== 0) {
+        resultDisplayContent.textContent = result.errorMessage;
+        resultDisplay.appendChild(resultDisplayContent);
+        return;
+    }
 
     // 处理成功的情况
     var columnNames = result.columnNames;
@@ -436,7 +554,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 deltaX = 60 - row.offsetWidth / 2;
             else if(row.getBoundingClientRect().right - e.clientX <= 60)
                 deltaX = row.offsetWidth / 2 - 60;
-            console.log(deltaX);
+            // console.log(deltaX);
             const deltaPercentage = deltaX / row.offsetWidth;
 
             // 设置左右区域的宽度
