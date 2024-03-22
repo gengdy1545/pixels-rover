@@ -795,6 +795,24 @@ input.error {
     margin: 10px;
     border-radius: 15px; /* Rounded corners */
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Soft box shadow */
+    word-break: break-all;
+}
+
+.icon-container {
+    display: none;
+    position: absolute;
+    bottom: 0;
+    right: 0;
+}
+
+.system-message:hover .icon-container {
+    display: block;
+}
+
+.icon {
+    width: 20px;
+    height: 20px;
+    margin-left: 5px;
 }
 
 #send-message-area {
@@ -807,18 +825,29 @@ input.error {
     justify-content: space-between;
 }
 
-#execution-hint-select,
-#chat-input,
-#output-rows-input {
+#schema-select {
     width: auto;
+    height: 100%;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
+
+#chat-input {
+    width: auto;
+    height: 100%;
+    flex: 1; /* Expand to take available space */
+    padding: 10px;
+    margin-left: 10px;
+    margin-right: 10px;
     border: 1px solid #ccc;
     border-radius: 5px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-#execution-hint-select:focus,
-#chat-input:focus,
-#output-rows-input:focus {
+#schema-select:focus,
+#chat-input:focus {
     border-color: #33cabb;
     outline: 0;
     -webkit-box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .6);
@@ -827,6 +856,7 @@ input.error {
 
 #send-button {
     width: 80px;
+    height: 100%;
     background-color: #33cabb;
     color: #fff;
     border: none;
@@ -846,15 +876,6 @@ input.error {
 #output-rows-input::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
-}
-
-#chat-input {
-    flex: 1; /* Expand to take available space */
-    padding: 10px;
-    margin-right: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .toggle-results {

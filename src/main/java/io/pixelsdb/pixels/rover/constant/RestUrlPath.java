@@ -34,4 +34,6 @@ public class RestUrlPath
     public static final String SUBMIT_QUERY = "/api/query/submit-query";
     public static final String GET_QUERY_STATUS = "/api/query/get-query-status";
     public static final String GET_QUERY_RESULT = "/api/query/get-query-result";
+
+    public static final String Text_to_SQL = "/api/query/text-to-sql";
 }

@@ -159,6 +159,30 @@ showColumns = function getColumns(schema, table) {
     });
 }
 
+$(document).ready(function() {
+    $.ajax({
+        type: 'POST',
+        url: '/api/metadata/get-schemas',
+        contentType: 'application/json',
+        data: JSON.stringify({}),
+        success: function (response) {
+            const schemas = response.schemas || [];
+            if (schemas.length === 0) {
+                $('#schema-select').append('<option value="">Null</option>');
+            } else {
+                schemas.forEach((schema) => {
+                    $('#schema-select').append(`<option value="${schema.name}">${schema.name}</option>`);
+                });
+            }
+        },
+        error: function (error) {
+            console.error('Error fetching schemas:', error);
+        }
+    });
+});
+
+
+
 document.addEventListener('DOMContentLoaded', function () {
     // Get the input field
     var chatInput = document.getElementById('chat-input');
@@ -183,6 +207,9 @@ function sendMessage() {
     var chatInput = document.getElementById('chat-input').value;
     var chatArea = document.getElementById('chat-area');
 
+    // 恢复 query 默认值
+    document.getElementById('chat-input').value = "";
+
     // 创建一个新的消息元素，代表用户输入的消息
     var userMessageElement = document.createElement('div');
     userMessageElement.className = 'user-message';
@@ -191,105 +218,118 @@ function sendMessage() {
     // 将新的消息元素添加到聊天区域
     chatArea.appendChild(userMessageElement);
 
-    // ToDo: 通过调用text-to-sql接口将chatInput转成query进行查询，返回的query是一个systemMessage，能够修改，
-    //       右侧一个执行按钮，点击后选择执行的executionHint和limit row，也能编辑执行的query语句
+    const schema = $('#schema-select').val();
+    const schemaItemPromises = [];
 
-    executeQuery(chatInput, Math.floor(Math.random() * 3), 10);
+    // 获取选中schema下的所有表
+    $.ajax({
+        type: 'POST',
+        url: '/api/metadata/get-tables',
+        contentType: 'application/json',
+        data: JSON.stringify({ "schemaName": schema }),
+        success: function (response) {
+            const tables = response.tables || [];
 
-    // // 定义存储结果的对象
-    // var data = {
-    //     "schema": {
-    //         "schema_items": []
-    //     },
-    //     "text": chatInput
-    // };
-    //
-    // // 获取schemas
-    // $.ajax({
-    //     type: 'POST',
-    //     url: '/api/metadata/get-schemas',
-    //     contentType: 'application/json',
-    //     data: JSON.stringify({}),
-    //     success: function (response) {
-    //         response.schemas.forEach(function (schema) {
-    //             var schemaItem = {
-    //                 "table_name": schema.name,
-    //                 "column_names": [],
-    //                 "column_types": [],
-    //                 "column_comments": [],
-    //                 "column_contents": [],
-    //                 "pk_indicators": []
-    //             };
-    //
-    //             // 获取tables
-    //             $.ajax({
-    //                 type: 'POST',
-    //                 url: '/api/metadata/get-tables',
-    //                 contentType: 'application/json',
-    //                 data: JSON.stringify({ "schemaName": schema.name }),
-    //                 success: function (response) {
-    //                     response.tables.forEach(function (table) {
-    //                         var tableItem = {
-    //                             "rid": "",
-    //                             "table_name": table.name,
-    //                             "table_comment": "",
-    //                             "column_names": [],
-    //                             "column_types": [],
-    //                             "column_comments": [],
-    //                             "column_contents": [],
-    //                             "pk_indicators": []
-    //                         };
-    //
-    //                         // 获取columns
-    //                         $.ajax({
-    //                             type: 'POST',
-    //                             url: '/api/metadata/get-columns',
-    //                             contentType: 'application/json',
-    //                             data: JSON.stringify({ "schemaName": schema.name, "tableName": table.name }),
-    //                             success: function (response) {
-    //                                 response.columns.forEach(function (column) {
-    //                                     tableItem.column_names.push(column.name);
-    //                                     tableItem.column_types.push(column.type);
-    //                                     tableItem.column_comments.push("");
-    //                                     tableItem.column_contents.push([]);
-    //                                     tableItem.pk_indicators.push(0);
-    //                                 });
-    //
-    //                                 schemaItem.schema_items.push(tableItem);
-    //                             },
-    //                             error: function (error) {
-    //                                 console.error('Error fetching columns:', error);
-    //                             }
-    //                         });
-    //                     });
-    //                 },
-    //                 error: function (error) {
-    //                     console.error('Error fetching tables:', error);
-    //                 }
-    //             });
-    //
-    //             data.schema.schema_items.push(schemaItem);
-    //         });
-    //     },
-    //     error: function (error) {
-    //         console.error('Error fetching schemas:', error);
-    //     }
-    // });
-    // console.log(data);
+            // 遍历所有表，获取每个表的列信息
+            tables.forEach((table) => {
+                const schemaItemPromise = new Promise((resolve) => {
+                    $.ajax({
+                        type: 'POST',
+                        url: '/api/metadata/get-columns',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ "schemaName": schema, "tableName": table.name }),
+                        success: function (response) {
+                            const columns = response.columns || [];
+                            const schemaItem = {
+                                "table_name": table.name,
+                                "table_comment": table.comment || "",
+                                "column_names": [],
+                                "column_types": [],
+                                "column_comments": [],
+                                "column_contents": [],
+                                "pk_indicators": []
+                            };
 
-    // // 发送数据
-    // $.ajax({
-    //     type: 'POST',
-    //     url: 'YOUR_SEND_URL',
-    //     contentType: 'application/json',
-    //     data: JSON.stringify(data),
-    //     success: function (response) {
-    //         console.log('Message sent successfully:', response);
-    //     },
-    //     error: function (error) {
-    //         console.error('Error sending message:', error);
-    //     }
-    // });
+                            columns.forEach((column) => {
+                                schemaItem.column_names.push(column.name);
+                                schemaItem.column_types.push(column.type);
+                                schemaItem.column_comments.push(column.comment || "");
+                                schemaItem.column_contents.push([]);
+                                schemaItem.pk_indicators.push(column.is_pk ? 1 : 0);
+                            });
+
+                            resolve(schemaItem);
+                        },
+                        error: function (error) {
+                            console.error('Error fetching columns:', error);
+                            resolve(null);
+                        }
+                    });
+                });
+
+                schemaItemPromises.push(schemaItemPromise);
+            });
+
+            // 所有表的列信息获取完成后，构造data对象
+            Promise.all(schemaItemPromises).then((schemaItems) => {
+                const data = {
+                    "schema": {
+                        "schema_items": schemaItems.filter((item) => item !== null),
+                        "foreign_keys": []
+                    },
+                    "text": chatInput
+                }
+
+                // text-to-sql
+                $.ajax({
+                    type: 'POST',
+                    url: '/api/query/text-to-sql',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function(response) {
+                        // add schema name
+                        let querySQL = response.sql.replace(/(\bFROM\b|\bJOIN\b) (\w+)/g, function(match, p1, p2) {
+                            return `${p1} ${schema}.${p2}`;
+                        });
+
+                        var systemMessage = document.createElement('div');
+                        systemMessage.className = 'system-message';
+                        systemMessage.textContent = querySQL;
+
+                        var iconContainer = document.createElement('div');
+                        iconContainer.className = 'icon-container';
+
+                        var editIcon = document.createElement('img');
+                        editIcon.src = 'images/edit.svg';
+                        editIcon.alt = 'Edit';
+                        editIcon.className = 'icon';
+                        iconContainer.appendChild(editIcon);
+
+                        var executeIcon = document.createElement('img');
+                        executeIcon.src = 'images/execute.svg';
+                        executeIcon.alt = 'Execute';
+                        executeIcon.className = 'icon';
+                        iconContainer.appendChild(executeIcon);
+
+                        systemMessage.appendChild(iconContainer);
+
+                        document.getElementById('chat-area').appendChild(systemMessage);
+
+                        // executeQuery(chatInput, Math.floor(Math.random() * 3), 10);
+
+                        // console.log(data);
+                    },
+                    error: function(error) {
+                        console.error("Error: ", error);
+                    }
+                });
+            });
+
+        },
+        error: function (error) {
+            console.error('Error fetching tables:', error);
+        }
+    });
 }
 
 // 发送后端请求，执行查询
@@ -312,7 +352,7 @@ function executeQuery(query, executionHint, outputRows) {
         .then(response => response.json())
         .then(data => {
             // 恢复 query 默认值
-            document.getElementById('chat-input').value = ""
+            document.getElementById('chat-input').value = "";
 
             //  创建结果显示区域
             var systemMessage = document.createElement('div');

@@ -34,8 +34,6 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
-import java.net.URL;
-import java.net.MalformedURLException;
 
 @RestController
 public class MetadataController
