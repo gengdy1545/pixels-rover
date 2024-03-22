@@ -309,15 +309,17 @@ function sendMessage() {
                         executeIcon.src = 'images/execute.svg';
                         executeIcon.alt = 'Execute';
                         executeIcon.className = 'icon';
+                        executeIcon.addEventListener('click', function(event) {
+                            var clickedIcon = event.target;
+                            var systemMessage = clickedIcon.closest('.system-message');
+                            var querySQL = systemMessage.textContent;
+                            executeQuery(querySQL, Math.floor(Math.random() * 3), 10);
+                        });
                         iconContainer.appendChild(executeIcon);
 
                         systemMessage.appendChild(iconContainer);
 
                         document.getElementById('chat-area').appendChild(systemMessage);
-
-                        // executeQuery(chatInput, Math.floor(Math.random() * 3), 10);
-
-                        // console.log(data);
                     },
                     error: function(error) {
                         console.error("Error: ", error);
@@ -529,6 +531,8 @@ function displayQueryResult(result, resultDisplay) {
     var columnNames = result.columnNames;
     var rows = result.rows;
     var columnPrintSizes = result.columnPrintSizes;
+
+    // ToDo: 判断是否为空，为空时直接返回null
 
     // 创建表格元素
     var table = document.createElement('table');

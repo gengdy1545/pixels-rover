@@ -796,6 +796,7 @@ input.error {
     border-radius: 15px; /* Rounded corners */
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Soft box shadow */
     word-break: break-all;
+    position: relative;
 }
 
 .icon-container {
@@ -803,6 +804,7 @@ input.error {
     position: absolute;
     bottom: 0;
     right: 0;
+    z-index: 99;
 }
 
 .system-message:hover .icon-container {
@@ -810,9 +812,18 @@ input.error {
 }
 
 .icon {
-    width: 20px;
-    height: 20px;
-    margin-left: 5px;
+    width: 24px;
+    height: 24px;
+    margin-right: 6px;
+    margin-bottom: 5px;
+    background-color: transparent;
+    transition: background-color 0.3s, border-radius 0.3s;
+    border-radius: 35%;
+}
+
+.icon:hover {
+    background-color: #d3d3d3;
+    cursor: pointer;
 }
 
 #send-message-area {
