@@ -808,26 +808,37 @@ input.error {
 
 /* Style for modal window */
 .modal {
-    display: none; /* 默认隐藏 */
-    position: fixed; /* 固定位置 */
-    z-index: 99; /* 保证在其他元素之上 */
+    display: none;
+    position: fixed;
+    z-index: 99;
     left: 0;
     top: 0;
-    width: 100%; /* 全屏宽度 */
-    height: 100%; /* 全屏高度 */
-    overflow: auto; /* 如果内容超出，允许滚动 */
-    background-color: rgba(0,0,0,0.4); /* 背景色 */
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
 }
 
-.modal-content {
+.modal .modal-content {
     background-color: #fefefe;
-    margin: 15% auto; /* 15% from the top and centered */
+    margin: 15% auto;
     padding: 20px;
     border: 1px solid #888;
-    width: 40%; /* 宽度 */
+    width: 360px;
 }
 
-.close {
+.modal .options-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 20px;
+}
+
+.modal .close,
+.modal .confirm
+{
     color: #aaa;
     float: right;
     font-size: 28px;
@@ -836,16 +847,18 @@ input.error {
     margin-right: -10px;
 }
 
-.close:hover,
-.close:focus {
+.modal .close:hover,
+.modal .close:focus,
+.modal .confirm:hover,
+.modal .confirm.focus {
     color: black;
     text-decoration: none;
     cursor: pointer;
 }
 
 .modal .icon {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     background-color: transparent;
     transition: background-color 0.3s, border-radius 0.3s;
     border-radius: 35%;
@@ -856,42 +869,32 @@ input.error {
     cursor: pointer;
 }
 
-/*.options-bar {*/
-/*    height: 30px;*/
-/*    width: 100%;*/
-/*    margin-top: 16px;*/
-/*}*/
+.modal #modal-execution-hint-select {
+    width: 120px;
+    height: 30px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
 
-/*.options-bar #execution-hint-select {*/
-/*    width: auto;*/
-/*    height: 30px;*/
-/*    border: 1px solid #ccc;*/
-/*    border-radius: 5px;*/
-/*    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);*/
-/*    text-align: center;*/
-/*    margin-bottom: 0;*/
-/*}*/
+.modal #modal-output-rows-input {
+    -moz-appearance: textfield;
+    appearance: textfield;
+    height: 30px;
+    padding: 10px;
+    width: 100px;
+    text-align: center;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
 
-/*.options-bar #output-rows-input {*/
-/*    -moz-appearance: textfield;*/
-/*    appearance: textfield;*/
-/*    height: 30px;*/
-/*    padding: 10px;*/
-/*    width: 60px;*/
-/*    text-align: center;*/
-/*    margin-left: 10px;*/
-/*    margin-right: 10px;*/
-/*    margin-bottom: 0;*/
-/*    border: 1px solid #ccc;*/
-/*    border-radius: 5px;*/
-/*    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);*/
-/*}*/
-
-/*.options-bar #output-rows-input::-webkit-inner-spin-button,*/
-/*.options-bar #output-rows-input::-webkit-outer-spin-button {*/
-/*    -webkit-appearance: none;*/
-/*    margin: 0;*/
-/*}*/
+.modal #modal-output-rows-input::-webkit-inner-spin-button,
+.modal #modal-output-rows-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
 
 .icon-container {
     display: none;
@@ -951,6 +954,8 @@ input.error {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.modal #modal-execution-hint-select:focus,
+.modal #modal-output-rows-input:focus,
 #schema-select:focus,
 #chat-input:focus {
     border-color: #33cabb;

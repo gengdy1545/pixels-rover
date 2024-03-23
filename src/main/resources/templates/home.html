@@ -125,13 +125,15 @@
                         <div class="modal-content">
                             <span class="close">&times;</span>
                             <p id="modal-query-sql"></p>
-                            <select id="modal-execution-hint-select">
-                                <option value="0">Best Effort</option>
-                                <option value="1">Relaxed</option>
-                                <option value="2">Immediate</option>
-                            </select>
-                            <input type="number" id="modal-output-rows-input" placeholder="LIMIT">
-                            <img src="images/confirm.svg" alt="Confirm" id="modal-confirm-icon" class="icon">
+                            <div class="options-bar">
+                                <select id="modal-execution-hint-select">
+                                    <option value="0">Best Effort</option>
+                                    <option value="1">Relaxed</option>
+                                    <option value="2">Immediate</option>
+                                </select>
+                                <input type="number" id="modal-output-rows-input" placeholder="LIMIT">
+                                <img src="images/execute.svg" alt="Confirm" id="modal-confirm-icon" class="icon">
+                            </div>
                         </div>
                     </div>
                 </div>
