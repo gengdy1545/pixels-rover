@@ -799,6 +799,100 @@ input.error {
     position: relative;
 }
 
+.system-message:focus {
+    border-color: #33cabb;
+    outline: 0;
+    -webkit-box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .8);
+    box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(0, 150, 187, .9);
+}
+
+/* Style for modal window */
+.modal {
+    display: none; /* 默认隐藏 */
+    position: fixed; /* 固定位置 */
+    z-index: 99; /* 保证在其他元素之上 */
+    left: 0;
+    top: 0;
+    width: 100%; /* 全屏宽度 */
+    height: 100%; /* 全屏高度 */
+    overflow: auto; /* 如果内容超出，允许滚动 */
+    background-color: rgba(0,0,0,0.4); /* 背景色 */
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto; /* 15% from the top and centered */
+    padding: 20px;
+    border: 1px solid #888;
+    width: 40%; /* 宽度 */
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    margin-top: -20px;
+    margin-right: -10px;
+}
+
+.close:hover,
+.close:focus {
+    color: black;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.modal .icon {
+    width: 24px;
+    height: 24px;
+    background-color: transparent;
+    transition: background-color 0.3s, border-radius 0.3s;
+    border-radius: 35%;
+}
+
+.modal .icon:hover {
+    background-color: #d3d3d3;
+    cursor: pointer;
+}
+
+/*.options-bar {*/
+/*    height: 30px;*/
+/*    width: 100%;*/
+/*    margin-top: 16px;*/
+/*}*/
+
+/*.options-bar #execution-hint-select {*/
+/*    width: auto;*/
+/*    height: 30px;*/
+/*    border: 1px solid #ccc;*/
+/*    border-radius: 5px;*/
+/*    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);*/
+/*    text-align: center;*/
+/*    margin-bottom: 0;*/
+/*}*/
+
+/*.options-bar #output-rows-input {*/
+/*    -moz-appearance: textfield;*/
+/*    appearance: textfield;*/
+/*    height: 30px;*/
+/*    padding: 10px;*/
+/*    width: 60px;*/
+/*    text-align: center;*/
+/*    margin-left: 10px;*/
+/*    margin-right: 10px;*/
+/*    margin-bottom: 0;*/
+/*    border: 1px solid #ccc;*/
+/*    border-radius: 5px;*/
+/*    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);*/
+/*}*/
+
+/*.options-bar #output-rows-input::-webkit-inner-spin-button,*/
+/*.options-bar #output-rows-input::-webkit-outer-spin-button {*/
+/*    -webkit-appearance: none;*/
+/*    margin: 0;*/
+/*}*/
+
 .icon-container {
     display: none;
     position: absolute;
@@ -811,17 +905,17 @@ input.error {
     display: block;
 }
 
-.icon {
+.icon-container .icon {
     width: 24px;
     height: 24px;
-    margin-right: 6px;
-    margin-bottom: 5px;
+    margin-right: 10px;
+    margin-bottom: 8px;
     background-color: transparent;
     transition: background-color 0.3s, border-radius 0.3s;
     border-radius: 35%;
 }
 
-.icon:hover {
+.icon-container .icon:hover {
     background-color: #d3d3d3;
     cursor: pointer;
 }
@@ -873,20 +967,6 @@ input.error {
     border: none;
     border-radius: 5px;
     cursor: pointer;
-}
-
-#output-rows-input {
-    -moz-appearance: textfield;
-    appearance: textfield;
-    padding: 10px;
-    width: 60px; /* Adjust the width as needed */
-    text-align: center;
-}
-
-#output-rows-input::-webkit-inner-spin-button,
-#output-rows-input::-webkit-outer-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
 }
 
 .toggle-results {

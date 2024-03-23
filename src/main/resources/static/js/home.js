@@ -203,6 +203,20 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+// 定义modal确认图标的事件处理函数
+function handleConfirmClick() {
+    var querySQL = document.getElementById('modal-query-sql').innerText;
+    var executionHint = document.getElementById('modal-execution-hint-select').value;
+    var limit = document.getElementById('modal-output-rows-input').value;
+    executeQuery(querySQL, executionHint, limit);
+    document.getElementById('modal').style.display = "none";
+}
+
+// 定义modal中关闭图标的事件处理函数
+function handleCloseClick() {
+    document.getElementById('modal').style.display = "none";
+}
+
 function sendMessage() {
     var chatInput = document.getElementById('chat-input').value;
     var chatArea = document.getElementById('chat-area');
@@ -295,15 +309,10 @@ function sendMessage() {
                         var systemMessage = document.createElement('div');
                         systemMessage.className = 'system-message';
                         systemMessage.textContent = querySQL;
+                        systemMessage.contentEditable = "true";
 
                         var iconContainer = document.createElement('div');
                         iconContainer.className = 'icon-container';
-
-                        var editIcon = document.createElement('img');
-                        editIcon.src = 'images/edit.svg';
-                        editIcon.alt = 'Edit';
-                        editIcon.className = 'icon';
-                        iconContainer.appendChild(editIcon);
 
                         var executeIcon = document.createElement('img');
                         executeIcon.src = 'images/execute.svg';
@@ -312,8 +321,22 @@ function sendMessage() {
                         executeIcon.addEventListener('click', function(event) {
                             var clickedIcon = event.target;
                             var systemMessage = clickedIcon.closest('.system-message');
-                            var querySQL = systemMessage.textContent;
-                            executeQuery(querySQL, Math.floor(Math.random() * 3), 10);
+
+                            // 显示模态窗口
+                            document.getElementById('modal').style.display = "block";
+                            // 填充查询SQL
+                            document.getElementById('modal-query-sql').innerText = systemMessage.textContent;
+
+                            // 为确认图标添加点击事件监听器
+                            var confirmIcon = document.getElementById('modal-confirm-icon');
+                            confirmIcon.removeEventListener('click', handleConfirmClick);
+                            confirmIcon.addEventListener('click', handleConfirmClick);
+
+                            // 为关闭按钮添加点击事件监听器
+                            var closeButton = document.getElementsByClassName('close')[0];
+                            closeButton.removeEventListener('click', handleCloseClick);
+                            closeButton.addEventListener('click', handleCloseClick);
+
                         });
                         iconContainer.appendChild(executeIcon);
 
@@ -532,8 +555,6 @@ function displayQueryResult(result, resultDisplay) {
     var rows = result.rows;
     var columnPrintSizes = result.columnPrintSizes;
 
-    // ToDo: 判断是否为空，为空时直接返回null
-
     // 创建表格元素
     var table = document.createElement('table');
 
@@ -556,6 +577,10 @@ function displayQueryResult(result, resultDisplay) {
     var tbody = document.createElement('tbody');
 
     rows.forEach(function (row) {
+        if(row === undefined || row === null) {
+            //throw new Error("null row");
+            return;
+        }
         var tr = document.createElement('tr');
 
         columnNames.forEach(function (_, index) {
