@@ -72,8 +72,6 @@ showSchemas = function getSchemas() {
         contentType: 'application/json',
         data: JSON.stringify({}),
         success: function (response) {
-            // console.log(response);
-
             var schemaMenu = $('#schemaMenu');
 
             // Clear existing items
@@ -104,8 +102,6 @@ showTables = function getTables(schema) {
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema }),
         success: function(response) {
-            // console.log(response);
-
             var tableMenu = $('#' + schema); // Use a unique ID for each schema's table menu
 
             // Clear existing items
@@ -135,8 +131,6 @@ showColumns = function getColumns(schema, table) {
         contentType: 'application/json',
         data: JSON.stringify({ "schemaName": schema, "tableName": table }),
         success: function(response) {
-            // console.log(response);
-
             var columnMenu = $('#' + schema + '_' + table); // Use a unique ID for each table's column menu
 
             // Clear existing items
@@ -538,8 +532,6 @@ function getQueryResult(traceToken, callback) {
 
 // 修改显示查询结果的函数，保留第一行的状态信息
 function displayQueryResult(result, resultDisplay) {
-    // console.log(result);
-
     // 获取显示结果的DOM元素
     var resultDisplayContent = document.createElement('div');
 
@@ -598,6 +590,14 @@ function displayQueryResult(result, resultDisplay) {
     table.appendChild(tbody);
     resultDisplayContent.appendChild(table);
 
+    // 添加costCents信息
+    var costCentsDisplay = document.createElement('div');
+    costCentsDisplay.textContent = 'Cost: ' + result.costCents + ' cents';
+    costCentsDisplay.style.color = '#32CD32';
+    costCentsDisplay.style.fontSize = '16px';
+    costCentsDisplay.style.fontWeight = 'bold';
+    resultDisplayContent.appendChild(costCentsDisplay);
+
     // 将新的结果显示区域添加到已有的结果显示区域
     resultDisplay.appendChild(resultDisplayContent);
 }
@@ -622,7 +622,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 deltaX = 60 - row.offsetWidth / 2;
             else if(row.getBoundingClientRect().right - e.clientX <= 60)
                 deltaX = row.offsetWidth / 2 - 60;
-            // console.log(deltaX);
             const deltaPercentage = deltaX / row.offsetWidth;
 
             // 设置左右区域的宽度
