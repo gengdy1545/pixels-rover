@@ -383,9 +383,8 @@ function executeQuery(query, executionHint, outputRows) {
             var systemMessage = document.createElement('div');
             systemMessage.className = 'system-message';
 
-            // 根据 executionHint 修改显示背景颜色
             // 根据executionHint的不同值设置不同的背景颜色
-            switch (executionHint) {
+            switch (Number(executionHint)) {
                 case 0: // Best Effort
                     systemMessage.style.backgroundColor = '#f3f9e8';
                     break;
@@ -396,7 +395,7 @@ function executeQuery(query, executionHint, outputRows) {
                     systemMessage.style.backgroundColor = '#f9e8e8';
                     break;
                 default:
-                    systemMessage.style.backgroundColor = '#e6f7ff'; // 默认颜色
+                    systemMessage.style.backgroundColor= '#e6f7ff'; // 默认颜色
             }
 
             //  创建状态显示区域
