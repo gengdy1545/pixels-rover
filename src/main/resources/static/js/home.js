@@ -221,7 +221,17 @@ function sendMessage() {
     // 创建一个新的消息元素，代表用户输入的消息
     var userMessageElement = document.createElement('div');
     userMessageElement.className = 'user-message';
-    userMessageElement.textContent = chatInput;
+
+    var avatarImage = document.createElement('img');
+    avatarImage.className = 'avatar-image';
+    avatarImage.src = 'images/users/avatar-cat.jpg';
+
+    var messageDiv = document.createElement('div');
+    messageDiv.className = 'message';
+    messageDiv.textContent = chatInput;
+
+    userMessageElement.appendChild(avatarImage);
+    userMessageElement.appendChild(messageDiv);
 
     // 将新的消息元素添加到聊天区域
     chatArea.appendChild(userMessageElement);
@@ -302,8 +312,15 @@ function sendMessage() {
 
                         var systemMessage = document.createElement('div');
                         systemMessage.className = 'system-message';
-                        systemMessage.textContent = querySQL;
-                        systemMessage.contentEditable = "true";
+
+                        var avatarImage = document.createElement('img');
+                        avatarImage.className = 'avatar-image';
+                        avatarImage.src = 'images/logo-ico.png';
+
+                        var messageDiv = document.createElement('div');
+                        messageDiv.className = 'message';
+                        messageDiv.textContent = querySQL;
+                        messageDiv.contentEditable = "true";
 
                         var iconContainer = document.createElement('div');
                         iconContainer.className = 'icon-container';
@@ -314,7 +331,7 @@ function sendMessage() {
                         executeIcon.className = 'icon';
                         executeIcon.addEventListener('click', function(event) {
                             var clickedIcon = event.target;
-                            var systemMessage = clickedIcon.closest('.system-message');
+                            var systemMessage = clickedIcon.closest('.message');
 
                             // 显示模态窗口
                             document.getElementById('modal').style.display = "block";
@@ -334,7 +351,10 @@ function sendMessage() {
                         });
                         iconContainer.appendChild(executeIcon);
 
-                        systemMessage.appendChild(iconContainer);
+                        messageDiv.appendChild(iconContainer);
+
+                        systemMessage.appendChild(avatarImage);
+                        systemMessage.appendChild(messageDiv);
 
                         document.getElementById('chat-area').appendChild(systemMessage);
                     },
@@ -374,38 +394,38 @@ function executeQuery(query, executionHint, outputRows) {
             document.getElementById('chat-input').value = "";
 
             //  创建结果显示区域
-            var systemMessage = document.createElement('div');
-            systemMessage.className = 'system-message';
+            var resultMessage = document.createElement('div');
+            resultMessage.className = 'result-message';
 
             // 根据executionHint的不同值设置不同的背景颜色
             switch (Number(executionHint)) {
                 case 0: // Best Effort
-                    systemMessage.style.backgroundColor = '#f3f9e8';
+                    resultMessage.style.backgroundColor = '#f3f9e8';
                     break;
                 case 1: // Relaxed
-                    systemMessage.style.backgroundColor = '#f9f0e8';
+                    resultMessage.style.backgroundColor = '#f9f0e8';
                     break;
                 case 2: // Immediate
-                    systemMessage.style.backgroundColor = '#f9e8e8';
+                    resultMessage.style.backgroundColor = '#f9e8e8';
                     break;
                 default:
-                    systemMessage.style.backgroundColor= '#e6f7ff'; // 默认颜色
+                    resultMessage.style.backgroundColor= '#e6f7ff'; // 默认颜色
             }
 
             //  创建状态显示区域
             var statusDisplay = document.createElement('div');
             statusDisplay.className = 'query-status';
             statusDisplay.textContent = 'Query Status: unknown\n';
-            systemMessage.appendChild(statusDisplay);
+            resultMessage.appendChild(statusDisplay);
 
             //  创建结果显示区域
             var resultDisplay = document.createElement('div');
             resultDisplay.className = 'query-results';
             resultDisplay.style.display = 'none'; //  默认隐藏结果
-            systemMessage.appendChild(resultDisplay);
+            resultMessage.appendChild(resultDisplay);
 
             //  将新的结果显示区域添加到聊天区域
-            document.getElementById('status-area').appendChild(systemMessage);
+            document.getElementById('status-area').appendChild(resultMessage);
 
             //  如果查询成功，继续处理
             if (data.errorCode === 0) {
