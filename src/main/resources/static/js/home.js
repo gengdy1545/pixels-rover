@@ -322,6 +322,29 @@ function sendMessage() {
                         messageDiv.textContent = querySQL;
                         messageDiv.contentEditable = "true";
 
+                        // fix error: message 中换行符被理解为创建一个空div
+                        messageDiv.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') {
+                                e.preventDefault(); // 阻止默认行为
+
+                                // 获取当前的Selection对象
+                                var selection = window.getSelection();
+                                var range = selection.getRangeAt(0);
+
+                                // 创建一个新的<br>元素
+                                var br = document.createElement('br');
+
+                                // 将<br>元素插入到当前的光标位置
+                                range.insertNode(br);
+
+                                // 将光标移动到<br>元素之后
+                                range.setStartAfter(br);
+                                range.setEndAfter(br);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                            }
+                        });
+
                         var iconContainer = document.createElement('div');
                         iconContainer.className = 'icon-container';
 
