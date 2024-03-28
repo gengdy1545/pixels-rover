@@ -226,6 +226,12 @@ function queryStatusScrollToBottom() {
 
 function sendMessage() {
     var chatInput = document.getElementById('chat-input').value;
+
+    // 如果为空白串直接返回
+    if(chatInput.trim() === '') {
+        return;
+    }
+
     var chatArea = document.getElementById('chat-area');
 
     // 恢复 query 默认值
