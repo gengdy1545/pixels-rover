@@ -766,13 +766,11 @@ input.error {
 }
 
 #chat-area::-webkit-scrollbar, #status-area::-webkit-scrollbar {
-    width: 8px; /* Set the width of the scrollbar */
+    width: 0; /* Set the width of the scrollbar */
 }
 
 #chat-area::-webkit-scrollbar-thumb, #status-area::-webkit-scrollbar-thumb {
-    background-color: rgba(51, 202, 187, 0.7); /* Use a lighter color with some opacity */
-    border-radius: 5px;
-    height: 1px;
+    background-color: transparent; /* Use a lighter color with some opacity */
 }
 
 #chat-area::-webkit-scrollbar-track, #status-area::-webkit-scrollbar-track {
