@@ -211,6 +211,19 @@ function handleCloseClick() {
     document.getElementById('modal').style.display = "none";
 }
 
+
+// chat-area 自动滚动到底部
+function chatAreaScrollToBottom() {
+    var chatArea = document.getElementById('chat-area');
+    chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+// query-status 自动滚到底部
+function queryStatusScrollToBottom() {
+    var statusArea = document.getElementById('status-area');
+    statusArea.scrollTop = statusArea.scrollHeight;
+}
+
 function sendMessage() {
     var chatInput = document.getElementById('chat-input').value;
     var chatArea = document.getElementById('chat-area');
@@ -235,6 +248,8 @@ function sendMessage() {
 
     // 将新的消息元素添加到聊天区域
     chatArea.appendChild(userMessageElement);
+
+    chatAreaScrollToBottom();
 
     const schema = $('#schema-select').val();
     const schemaItemPromises = [];
@@ -380,6 +395,8 @@ function sendMessage() {
                         systemMessage.appendChild(messageDiv);
 
                         document.getElementById('chat-area').appendChild(systemMessage);
+
+                        chatAreaScrollToBottom();
                     },
                     error: function(error) {
                         console.error("Error: ", error);
@@ -449,6 +466,8 @@ function executeQuery(query, executionHint, outputRows) {
 
             //  将新的结果显示区域添加到聊天区域
             document.getElementById('status-area').appendChild(resultMessage);
+
+            queryStatusScrollToBottom();
 
             //  如果查询成功，继续处理
             if (data.errorCode === 0) {
