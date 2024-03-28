@@ -991,10 +991,6 @@ input.error {
     z-index: 99;
 }
 
-.system-message .message:hover .icon-container {
-    display: block;
-}
-
 .icon-container .icon {
     width: 24px;
     height: 24px;
@@ -1003,11 +999,6 @@ input.error {
     background-color: transparent;
     transition: background-color 0.3s, border-radius 0.3s;
     border-radius: 35%;
-}
-
-.icon-container .icon:hover {
-    background-color: #d3d3d3;
-    cursor: pointer;
 }
 
 #send-message-area {

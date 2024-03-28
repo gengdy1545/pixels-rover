@@ -195,22 +195,25 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+
+    // Get the input field
+    var queryInput = document.getElementById('query-input');
+
+    // Check if the element exists before adding the event listener
+    if (queryInput) {
+        // Add an event listener for the "keydown" event
+        queryInput.addEventListener('keydown', function (event) {
+            // Check if the pressed key is Enter (key code 13)
+            if (event.keyCode === 13) {
+                // Prevent the default form submission behavior
+                event.preventDefault();
+
+                // Call the function to send the message
+                sendQuery();
+            }
+        });
+    }
 });
-
-// 定义modal确认图标的事件处理函数
-function handleConfirmClick() {
-    var querySQL = document.getElementById('modal-query-sql').innerText;
-    var executionHint = document.getElementById('modal-execution-hint-select').value;
-    var limit = document.getElementById('modal-output-rows-input').value;
-    executeQuery(querySQL, executionHint, limit);
-    document.getElementById('modal').style.display = "none";
-}
-
-// 定义modal中关闭图标的事件处理函数
-function handleCloseClick() {
-    document.getElementById('modal').style.display = "none";
-}
-
 
 // chat-area 自动滚动到底部
 function chatAreaScrollToBottom() {
@@ -341,61 +344,6 @@ function sendMessage() {
                         var messageDiv = document.createElement('div');
                         messageDiv.className = 'message';
                         messageDiv.textContent = querySQL;
-                        // messageDiv.contentEditable = "true";
-
-                        // fix error: message 中换行符被理解为创建一个空div
-                        messageDiv.addEventListener('keydown', function(e) {
-                            if (e.key === 'Enter') {
-                                e.preventDefault(); // 阻止默认行为
-
-                                // 获取当前的Selection对象
-                                var selection = window.getSelection();
-                                var range = selection.getRangeAt(0);
-
-                                // 创建一个新的<br>元素
-                                var br = document.createElement('br');
-
-                                // 将<br>元素插入到当前的光标位置
-                                range.insertNode(br);
-
-                                // 将光标移动到<br>元素之后
-                                range.setStartAfter(br);
-                                range.setEndAfter(br);
-                                selection.removeAllRanges();
-                                selection.addRange(range);
-                            }
-                        });
-
-                        var iconContainer = document.createElement('div');
-                        iconContainer.className = 'icon-container';
-
-                        var executeIcon = document.createElement('img');
-                        executeIcon.src = 'images/execute.svg';
-                        executeIcon.alt = 'Execute';
-                        executeIcon.className = 'icon';
-                        executeIcon.addEventListener('click', function(event) {
-                            var clickedIcon = event.target;
-                            var systemMessage = clickedIcon.closest('.message');
-
-                            // 显示模态窗口
-                            document.getElementById('modal').style.display = "block";
-                            // 填充查询SQL
-                            document.getElementById('modal-query-sql').innerText = systemMessage.textContent;
-
-                            // 为确认图标添加点击事件监听器
-                            var confirmIcon = document.getElementById('modal-confirm-icon');
-                            confirmIcon.removeEventListener('click', handleConfirmClick);
-                            confirmIcon.addEventListener('click', handleConfirmClick);
-
-                            // 为关闭按钮添加点击事件监听器
-                            var closeButton = document.getElementsByClassName('close')[0];
-                            closeButton.removeEventListener('click', handleCloseClick);
-                            closeButton.addEventListener('click', handleCloseClick);
-
-                        });
-                        iconContainer.appendChild(executeIcon);
-
-                        messageDiv.appendChild(iconContainer);
 
                         systemMessage.appendChild(avatarImage);
                         systemMessage.appendChild(messageDiv);
@@ -403,6 +351,9 @@ function sendMessage() {
                         document.getElementById('chat-area').appendChild(systemMessage);
 
                         chatAreaScrollToBottom();
+
+                        // 同时更新 query-input 的内容
+                        document.getElementById('query-input').value = querySQL;
                     },
                     error: function(error) {
                         console.error("Error: ", error);
@@ -415,6 +366,44 @@ function sendMessage() {
             console.error('Error fetching tables:', error);
         }
     });
+}
+
+// 定义modal确认图标的事件处理函数
+function handleConfirmClick() {
+    var querySQL = document.getElementById('modal-query-sql').innerText;
+    var executionHint = document.getElementById('modal-execution-hint-select').value;
+    var limit = document.getElementById('modal-output-rows-input').value;
+    executeQuery(querySQL, executionHint, limit);
+    document.getElementById('modal').style.display = "none";
+}
+
+// 定义modal中关闭图标的事件处理函数
+function handleCloseClick() {
+    document.getElementById('modal').style.display = "none";
+}
+
+function sendQuery() {
+    var queryInput = document.getElementById('query-input').value;
+
+    // 如果为空白串直接返回
+    if(queryInput.trim() === '') {
+        return;
+    }
+
+    // 显示模态窗口
+    document.getElementById('modal').style.display = "block";
+    // 填充查询SQL
+    document.getElementById('modal-query-sql').innerText = queryInput;
+
+    // 为确认图标添加点击事件监听器
+    var confirmIcon = document.getElementById('modal-confirm-icon');
+    confirmIcon.removeEventListener('click', handleConfirmClick);
+    confirmIcon.addEventListener('click', handleConfirmClick);
+
+    // 为关闭按钮添加点击事件监听器
+    var closeButton = document.getElementsByClassName('close')[0];
+    closeButton.removeEventListener('click', handleCloseClick);
+    closeButton.addEventListener('click', handleCloseClick);
 }
 
 // 发送后端请求，执行查询
@@ -437,7 +426,7 @@ function executeQuery(query, executionHint, outputRows) {
         .then(response => response.json())
         .then(data => {
             // 恢复 query 默认值
-            document.getElementById('chat-input').value = "";
+            document.getElementById('query-input').value = "";
 
             //  创建结果显示区域
             var resultMessage = document.createElement('div');
