@@ -335,7 +335,7 @@ function sendMessage() {
                         var messageDiv = document.createElement('div');
                         messageDiv.className = 'message';
                         messageDiv.textContent = querySQL;
-                        messageDiv.contentEditable = "true";
+                        // messageDiv.contentEditable = "true";
 
                         // fix error: message 中换行符被理解为创建一个空div
                         messageDiv.addEventListener('keydown', function(e) {
@@ -472,7 +472,7 @@ function executeQuery(query, executionHint, outputRows) {
             //  如果查询成功，继续处理
             if (data.errorCode === 0) {
                 //  显示查询状态
-                updateQueryStatusAndResults(data.traceToken, statusDisplay, resultDisplay);
+                updateQueryStatusAndResults(data.traceToken, submitQueryRequest, statusDisplay, resultDisplay);
             } else {
                 //  如果查询失败，显示错误消息
                 resultDisplay.textContent = 'Error: ' + data.errorMessage;
@@ -486,7 +486,7 @@ function executeQuery(query, executionHint, outputRows) {
 }
 
 // 更新查询状态和结果
-function updateQueryStatusAndResults(traceToken, statusDisplay, resultDisplay) {
+function updateQueryStatusAndResults(traceToken, submitQueryRequest, statusDisplay, resultDisplay) {
     // 更新查询状态
     updateQueryStatus(traceToken, function (status) {
         // 显示查询状态
@@ -512,7 +512,7 @@ function updateQueryStatusAndResults(traceToken, statusDisplay, resultDisplay) {
 
             getQueryResult(traceToken, function (result) {
                 // 显示查询结果
-                displayQueryResult(result, resultDisplay);
+                displayQueryResult(result, submitQueryRequest, resultDisplay);
             });
         }
     });
@@ -593,9 +593,24 @@ function getQueryResult(traceToken, callback) {
 }
 
 // 修改显示查询结果的函数，保留第一行的状态信息
-function displayQueryResult(result, resultDisplay) {
+function displayQueryResult(result, submitQueryRequest, resultDisplay) {
     // 获取显示结果的DOM元素
     var resultDisplayContent = document.createElement('div');
+
+    // 添加 query 信息
+    var queryDisplay = document.createElement('div');
+    queryDisplay.textContent = 'Query: ' + submitQueryRequest.query;
+    resultDisplayContent.appendChild(queryDisplay);
+
+    // 添加 executionHint 信息
+    var executionHintDisplay = document.createElement('div');
+    executionHintDisplay.textContent = 'ExecutionHint: ' + submitQueryRequest.executionHint;
+    resultDisplayContent.appendChild(executionHintDisplay);
+
+    // 添加 limitRow 信息
+    var limitRowsDisplay = document.createElement('div')
+    limitRowsDisplay.textContent = 'LimitRows: ' + submitQueryRequest.limitRows;
+    resultDisplayContent.appendChild(limitRowsDisplay);
 
     if(result.errorCode !== 0) {
         resultDisplayContent.textContent = result.errorMessage;

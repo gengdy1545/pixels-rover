@@ -119,8 +119,8 @@
                     <div id="send-message-area">
                         <select id="schema-select">
                         </select>
-                        <input type="text" id="chat-input" placeholder="Type a query...">
-                        <button class="btn btn-block btn-primary" id="send-button" onclick="sendMessage()">Chat</button>
+                        <input type="text" id="chat-input">
+                        <button class="btn btn-block btn-primary" id="send-message-button" onclick="sendMessage()">Chat</button>
                     </div>
 
                     <!-- 模态窗口 -->
@@ -152,7 +152,10 @@
                         <img class="fullscreen-btn" src="images/fullscreen.svg" onclick="toggleFullscreen('right')">
                     </div>
                     <div id="status-area">
-
+                    </div>
+                    <div id="send-query-area">
+                        <input type="text" id="query-input" placeholder="Type a query...">
+                        <button class="btn btn-block btn-primary" id="send-query-button" onclick="">Execute</button>
                     </div>
                 </div>
             </div>
