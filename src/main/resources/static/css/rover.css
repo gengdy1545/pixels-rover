@@ -789,7 +789,7 @@ input.error {
 
 #status-area {
     width: 100%;
-    height: calc(100% - 69px);
+    height: calc(100% - 129px);
     margin-top: 10px;
     margin-bottom: 10px;
     flex-grow: 1;
