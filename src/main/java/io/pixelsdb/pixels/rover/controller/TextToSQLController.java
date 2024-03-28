@@ -25,7 +25,7 @@ public class TextToSQLController {
 
     @Autowired
     public TextToSQLController(WebClient.Builder webClientBuilder) {
-        String BASE_URL = "http://10.77.110.162:10000";
+        String BASE_URL = "http://10.77.110.127:10000";
         this.webClient = webClientBuilder.baseUrl(BASE_URL).build();
     }
 
