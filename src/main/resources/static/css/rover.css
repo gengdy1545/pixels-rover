@@ -746,37 +746,6 @@ input.error {
     cursor: pointer;
 }
 
-#send-query-area {
-    position: absolute;
-    bottom: 20px;
-    width: calc(100% - 25px);
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-#query-input {
-    width: auto;
-    height: 100%;
-    flex: 1; /* Expand to take available space */
-    padding: 10px;
-    margin-right: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-#send-query-button {
-    width: 100px;
-    height: 100%;
-    background-color: #33cabb;
-    color: #fff;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
 /* Chat Styles */
 #chat-area {
     width: 100%;
@@ -1035,8 +1004,7 @@ input.error {
 .modal #modal-execution-hint-select:focus,
 .modal #modal-output-rows-input:focus,
 #schema-select:focus,
-#chat-input:focus,
-#query-input:focus {
+#chat-input:focus {
     border-color: #33cabb;
     outline: 0;
     -webkit-box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .6);

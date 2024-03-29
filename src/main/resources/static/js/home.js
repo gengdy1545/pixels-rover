@@ -195,24 +195,6 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
-
-    // Get the input field
-    var queryInput = document.getElementById('query-input');
-
-    // Check if the element exists before adding the event listener
-    if (queryInput) {
-        // Add an event listener for the "keydown" event
-        queryInput.addEventListener('keydown', function (event) {
-            // Check if the pressed key is Enter (key code 13)
-            if (event.keyCode === 13) {
-                // Prevent the default form submission behavior
-                event.preventDefault();
-
-                // Call the function to send the message
-                sendQuery();
-            }
-        });
-    }
 });
 
 // chat-area 自动滚动到底部
@@ -382,29 +364,30 @@ function handleCloseClick() {
     document.getElementById('modal').style.display = "none";
 }
 
-function sendQuery() {
-    var queryInput = document.getElementById('query-input').value;
-
-    // 如果为空白串直接返回
-    if(queryInput.trim() === '') {
-        return;
-    }
-
-    // 显示模态窗口
-    document.getElementById('modal').style.display = "block";
-    // 填充查询SQL
-    document.getElementById('modal-query-sql').innerText = queryInput;
-
-    // 为确认图标添加点击事件监听器
-    var confirmIcon = document.getElementById('modal-confirm-icon');
-    confirmIcon.removeEventListener('click', handleConfirmClick);
-    confirmIcon.addEventListener('click', handleConfirmClick);
-
-    // 为关闭按钮添加点击事件监听器
-    var closeButton = document.getElementsByClassName('close')[0];
-    closeButton.removeEventListener('click', handleCloseClick);
-    closeButton.addEventListener('click', handleCloseClick);
-}
+//
+// function sendQuery() {
+//     var queryInput = document.getElementById('query-input').value;
+//
+//     // 如果为空白串直接返回
+//     if(queryInput.trim() === '') {
+//         return;
+//     }
+//
+//     // 显示模态窗口
+//     document.getElementById('modal').style.display = "block";
+//     // 填充查询SQL
+//     document.getElementById('modal-query-sql').innerText = queryInput;
+//
+//     // 为确认图标添加点击事件监听器
+//     var confirmIcon = document.getElementById('modal-confirm-icon');
+//     confirmIcon.removeEventListener('click', handleConfirmClick);
+//     confirmIcon.addEventListener('click', handleConfirmClick);
+//
+//     // 为关闭按钮添加点击事件监听器
+//     var closeButton = document.getElementsByClassName('close')[0];
+//     closeButton.removeEventListener('click', handleCloseClick);
+//     closeButton.addEventListener('click', handleCloseClick);
+// }
 
 // 发送后端请求，执行查询
 function executeQuery(query, executionHint, outputRows) {
