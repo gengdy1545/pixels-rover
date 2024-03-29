@@ -209,6 +209,43 @@ function queryStatusScrollToBottom() {
     statusArea.scrollTop = statusArea.scrollHeight;
 }
 
+// 定义modal确认图标的事件处理函数
+function handleConfirmClick() {
+    var querySQL = document.getElementById('modal-query-sql').innerText;
+    var executionHint = document.getElementById('modal-execution-hint-select').value;
+    var limit = document.getElementById('modal-output-rows-input').value;
+    executeQuery(querySQL, executionHint, limit);
+    document.getElementById('modal').style.display = "none";
+}
+
+// 定义modal中关闭图标的事件处理函数
+function handleCloseClick() {
+    document.getElementById('modal').style.display = "none";
+}
+
+
+function sendQuery(queryInput) {
+    // 如果为空白串直接返回
+    if(queryInput.trim() === '') {
+        return;
+    }
+
+    // 显示模态窗口
+    document.getElementById('modal').style.display = "block";
+    // 填充查询SQL
+    document.getElementById('modal-query-sql').innerText = queryInput;
+
+    // 为确认图标添加点击事件监听器
+    var confirmIcon = document.getElementById('modal-confirm-icon');
+    confirmIcon.removeEventListener('click', handleConfirmClick);
+    confirmIcon.addEventListener('click', handleConfirmClick);
+
+    // 为关闭按钮添加点击事件监听器
+    var closeButton = document.getElementsByClassName('close')[0];
+    closeButton.removeEventListener('click', handleCloseClick);
+    closeButton.addEventListener('click', handleCloseClick);
+}
+
 function sendMessage() {
     var chatInput = document.getElementById('chat-input').value;
 
@@ -322,20 +359,35 @@ function sendMessage() {
                         var avatarImage = document.createElement('img');
                         avatarImage.className = 'avatar-image';
                         avatarImage.src = 'images/logo-ico.png';
+                        systemMessage.appendChild(avatarImage);
 
                         var messageDiv = document.createElement('div');
                         messageDiv.className = 'message';
                         messageDiv.textContent = querySQL;
-
-                        systemMessage.appendChild(avatarImage);
                         systemMessage.appendChild(messageDiv);
+
+                        var iconContainer = document.createElement('div');
+                        iconContainer.className = 'icon-container';
+
+                        var editIcon = document.createElement('img');
+                        editIcon.src = 'images/edit.svg';
+                        editIcon.alt = 'Edit';
+                        editIcon.className = 'icon';
+                        iconContainer.appendChild(editIcon);
+
+                        var executeIcon = document.createElement('img');
+                        executeIcon.src = 'images/execute.svg';
+                        executeIcon.alt = 'Execute';
+                        executeIcon.className = 'icon';
+                        executeIcon.addEventListener('click', function(event) {
+                            sendQuery(querySQL);
+                        });
+                        iconContainer.appendChild(executeIcon);
+                        systemMessage.appendChild(iconContainer);
 
                         document.getElementById('chat-area').appendChild(systemMessage);
 
                         chatAreaScrollToBottom();
-
-                        // 同时更新 query-input 的内容
-                        document.getElementById('query-input').value = querySQL;
                     },
                     error: function(error) {
                         console.error("Error: ", error);
@@ -349,45 +401,6 @@ function sendMessage() {
         }
     });
 }
-
-// 定义modal确认图标的事件处理函数
-function handleConfirmClick() {
-    var querySQL = document.getElementById('modal-query-sql').innerText;
-    var executionHint = document.getElementById('modal-execution-hint-select').value;
-    var limit = document.getElementById('modal-output-rows-input').value;
-    executeQuery(querySQL, executionHint, limit);
-    document.getElementById('modal').style.display = "none";
-}
-
-// 定义modal中关闭图标的事件处理函数
-function handleCloseClick() {
-    document.getElementById('modal').style.display = "none";
-}
-
-//
-// function sendQuery() {
-//     var queryInput = document.getElementById('query-input').value;
-//
-//     // 如果为空白串直接返回
-//     if(queryInput.trim() === '') {
-//         return;
-//     }
-//
-//     // 显示模态窗口
-//     document.getElementById('modal').style.display = "block";
-//     // 填充查询SQL
-//     document.getElementById('modal-query-sql').innerText = queryInput;
-//
-//     // 为确认图标添加点击事件监听器
-//     var confirmIcon = document.getElementById('modal-confirm-icon');
-//     confirmIcon.removeEventListener('click', handleConfirmClick);
-//     confirmIcon.addEventListener('click', handleConfirmClick);
-//
-//     // 为关闭按钮添加点击事件监听器
-//     var closeButton = document.getElementsByClassName('close')[0];
-//     closeButton.removeEventListener('click', handleCloseClick);
-//     closeButton.addEventListener('click', handleCloseClick);
-// }
 
 // 发送后端请求，执行查询
 function executeQuery(query, executionHint, outputRows) {
@@ -408,9 +421,6 @@ function executeQuery(query, executionHint, outputRows) {
     })
         .then(response => response.json())
         .then(data => {
-            // 恢复 query 默认值
-            document.getElementById('query-input').value = "";
-
             //  创建结果显示区域
             var resultMessage = document.createElement('div');
             resultMessage.className = 'result-message';

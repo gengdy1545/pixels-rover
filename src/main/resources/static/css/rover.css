@@ -787,6 +787,7 @@ input.error {
 .user-message .message{
     /*flex-grow: 1;*/
     width: auto;
+    max-width: calc(100% - 178px);
     background-color: #f2f2f2; /* Light gray background */
     padding: 10px;
     margin: 10px;
@@ -794,17 +795,6 @@ input.error {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Soft box shadow */
     position: relative;
 }
-
-/*.user-message .message::before {*/
-/*    content: '';*/
-/*    position: absolute;*/
-/*    right: -8px;*/
-/*    top: calc(50% - 8px);*/
-/*    border-width: 8px 8px 8px 8px;*/
-/*    border-style: solid;*/
-/*    border-color: transparent transparent transparent #f2f2f2;*/
-/*}*/
-
 
 /* Style for system messages */
 .system-message {
@@ -818,31 +808,27 @@ input.error {
 .system-message .message {
     /*flex-grow: 1;*/
     width: auto;
+    max-width: calc(100% - 178px);
     background-color: #e6f7ff; /* Light blue background */
     padding: 10px;
-    margin: 10px;
+    margin: 10px 0 10px 10px;
     border-radius: 15px; /* Rounded corners */
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Soft box shadow */
     word-break: break-all;
     position: relative;
 }
 
-/*.system-message .message::before {*/
-/*    content: '';*/
-/*    position: absolute;*/
-/*    left: -8px;*/
-/*    top: calc(50% - 8px);*/
-/*    border-width: 8px 8px 8px 0;*/
-/*    border-style: solid;*/
-/*    border-color: transparent #e6f7ff transparent transparent;*/
-/*}*/
-
-.system-message .message:focus {
-    border-color: #33cabb;
-    outline: 0;
-    -webkit-box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .8);
-    box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(0, 150, 187, .9);
+.system-message .message:hover + .icon-container, .icon-container:hover {
+    display: flex;
+    align-items: flex-end;
 }
+
+/*.system-message .message:focus {*/
+/*    border-color: #33cabb;*/
+/*    outline: 0;*/
+/*    -webkit-box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(51, 202, 187, .8);*/
+/*    box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(0, 150, 187, .9);*/
+/*}*/
 
 /* result message */
 .result-message {
@@ -954,20 +940,24 @@ input.error {
 
 .icon-container {
     display: none;
-    position: absolute;
-    bottom: 0;
-    right: 0;
     z-index: 99;
+    margin-top: auto;
+    margin-bottom: 10px;
+    height: 40px;
 }
 
 .icon-container .icon {
     width: 24px;
     height: 24px;
-    margin-right: 10px;
-    margin-bottom: 8px;
     background-color: transparent;
     transition: background-color 0.3s, border-radius 0.3s;
     border-radius: 35%;
+    margin-left: 10px;
+}
+
+.icon-container .icon:hover {
+    background-color: #d3d3d3;
+    cursor: pointer;
 }
 
 #send-message-area {
