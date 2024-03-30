@@ -225,7 +225,7 @@ function handleConfirmClick(messageID) {
     var limit = document.getElementById('modal-output-rows-input').value;
     var resultID = executeQuery(querySQL, executionHint, limit);
 
-    // 实现message的click处理，高亮对应的resultMessage
+    // 实现message的click处理，高亮对应resultMessage
     var resultMessage = document.getElementById(resultID);
     var systemMessage = document.getElementById(messageID);
     systemMessage.addEventListener('click', function() {
@@ -235,6 +235,17 @@ function handleConfirmClick(messageID) {
             resultMessage.classList.add('highlighted');
         }, 0); // 使用setTimeout确保在下一个事件循环中添加类
     });
+
+    // remove: 不好看，在点击result展开按钮会触发
+    // // 实现result的clcik处理，高亮对应systemMessage.message
+    // var message = systemMessage.querySelector('.message');
+    // resultMessage.addEventListener('click', function () {
+    //     // 移除.highlight类，然后再添加回来，以重新触发动画
+    //     message.classList.remove('highlighted');
+    //     setTimeout(function() {
+    //         message.classList.add('highlighted');
+    //     }, 0); // 使用setTimeout确保在下一个事件循环中添加类
+    // });
 
     // 执行查询后就隐藏所有icon按钮
     var iconContainer = systemMessage.querySelector('.icon-container');
