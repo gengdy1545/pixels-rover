@@ -65,6 +65,15 @@ jQuery( function() {
 	});
 });
 
+// 生成 uuid
+function uuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = (Math.random() * 16) | 0,
+            v = c == 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+    });
+}
+
 showSchemas = function getSchemas() {
     $.ajax({
         type: 'POST',
@@ -210,11 +219,27 @@ function queryStatusScrollToBottom() {
 }
 
 // 定义modal确认图标的事件处理函数
-function handleConfirmClick() {
+function handleConfirmClick(messageID) {
     var querySQL = document.getElementById('modal-query-sql').innerText;
     var executionHint = document.getElementById('modal-execution-hint-select').value;
     var limit = document.getElementById('modal-output-rows-input').value;
-    executeQuery(querySQL, executionHint, limit);
+    var resultID = executeQuery(querySQL, executionHint, limit);
+
+    // 实现message的click处理，高亮对应的resultMessage
+    var resultMessage = document.getElementById(resultID);
+    var systemMessage = document.getElementById(messageID);
+    systemMessage.addEventListener('click', function() {
+        // 移除.highlight类，然后再添加回来，以重新触发动画
+        resultMessage.classList.remove('highlighted');
+        setTimeout(function() {
+            resultMessage.classList.add('highlighted');
+        }, 0); // 使用setTimeout确保在下一个事件循环中添加类
+    });
+
+    // 执行查询后就隐藏所有icon按钮
+    var iconContainer = systemMessage.querySelector('.icon-container');
+    iconContainer.style.display = 'none';
+
     document.getElementById('modal').style.display = "none";
 }
 
@@ -223,8 +248,11 @@ function handleCloseClick() {
     document.getElementById('modal').style.display = "none";
 }
 
+function sendQuery(messageID) {
+    var systemMessage = document.getElementById(messageID);
+    var messageDiv = systemMessage.querySelector('.message');
+    var queryInput = messageDiv.textContent;
 
-function sendQuery(queryInput) {
     // 如果为空白串直接返回
     if(queryInput.trim() === '') {
         return;
@@ -237,13 +265,79 @@ function sendQuery(queryInput) {
 
     // 为确认图标添加点击事件监听器
     var confirmIcon = document.getElementById('modal-confirm-icon');
-    confirmIcon.removeEventListener('click', handleConfirmClick);
-    confirmIcon.addEventListener('click', handleConfirmClick);
+    confirmIcon.addEventListener('click', function() { handleConfirmClick(messageID); }, { once: true });
 
     // 为关闭按钮添加点击事件监听器
     var closeButton = document.getElementsByClassName('close')[0];
     closeButton.removeEventListener('click', handleCloseClick);
     closeButton.addEventListener('click', handleCloseClick);
+}
+
+function hideMessage(messageID) {
+    var systemMessage = document.getElementById(messageID);
+    var messageDiv = systemMessage.querySelector('.message');
+    var messageEditDiv = systemMessage.querySelector('.message-textarea');
+    var iconContainer = systemMessage.querySelector('.icon-container');
+    var editIcon = iconContainer.querySelector('.icon[alt="Edit"]');
+    var executeIcon = iconContainer.querySelector('.icon[alt="Execute"]');
+    var cancelIcon = iconContainer.querySelector('.icon[alt="Cancel"]');
+    var confirmIcon = iconContainer.querySelector('.icon[alt="Confirm"]');
+
+    // 隐藏messageDiv,edit和execute按钮
+    messageDiv.style.display = 'none';
+    editIcon.style.display = 'none';
+    executeIcon.style.display = 'none';
+    // 显示messageEditDiv,cancel和confirm按钮
+    messageEditDiv.style.display = 'block';
+    cancelIcon.style.display = 'block';
+    confirmIcon.style.display = 'block';
+}
+
+function showMessage(messageID) {
+    var systemMessage = document.getElementById(messageID);
+    var messageDiv = systemMessage.querySelector('.message');
+    var messageEditDiv = systemMessage.querySelector('.message-textarea');
+    var iconContainer = systemMessage.querySelector('.icon-container');
+    var editIcon = iconContainer.querySelector('.icon[alt="Edit"]');
+    var executeIcon = iconContainer.querySelector('.icon[alt="Execute"]');
+    var cancelIcon = iconContainer.querySelector('.icon[alt="Cancel"]');
+    var confirmIcon = iconContainer.querySelector('.icon[alt="Confirm"]');
+
+    // 隐藏messageEditDiv,cancel和confirm按钮
+    messageEditDiv.style.display = 'none';
+    cancelIcon.style.display = 'none';
+    confirmIcon.style.display = 'none';
+    // 显示messageDiv,edit和execute按钮
+    messageDiv.style.display = 'block';
+    editIcon.style.display = 'block';
+    executeIcon.style.display = 'block';
+}
+
+function editQuery(messageID) {
+    var systemMessage = document.getElementById(messageID);
+    var messageDiv = systemMessage.querySelector('.message');
+    var messageEditDiv = systemMessage.querySelector('.message-textarea');
+    // 将messageEditDiv的内容设置成messageDiv的内容
+    messageEditDiv.value = messageDiv.textContent;
+    // 将messageEditDiv的长宽设置与messageDiv相同
+    messageEditDiv.style.width = messageDiv.offsetWidth + 'px';
+    messageEditDiv.style.height = messageDiv.offsetHeight + 'px';
+
+    hideMessage(messageID);
+}
+
+function cancelEdit(messageID) {
+    showMessage(messageID);
+}
+
+function confirmEdit(messageID) {
+    var systemMessage = document.getElementById(messageID);
+    var messageDiv = systemMessage.querySelector('.message');
+    var messageEditDiv = systemMessage.querySelector('.message-textarea');
+    // 将messageDiv的内容设置成messageEditDiv的内容
+    messageDiv.textContent = messageEditDiv.value;
+
+    showMessage(messageID);
 }
 
 function sendMessage() {
@@ -262,6 +356,7 @@ function sendMessage() {
     // 创建一个新的消息元素，代表用户输入的消息
     var userMessageElement = document.createElement('div');
     userMessageElement.className = 'user-message';
+    userMessageElement.id = uuid();
 
     var avatarImage = document.createElement('img');
     avatarImage.className = 'avatar-image';
@@ -355,6 +450,7 @@ function sendMessage() {
 
                         var systemMessage = document.createElement('div');
                         systemMessage.className = 'system-message';
+                        systemMessage.id = uuid();
 
                         var avatarImage = document.createElement('img');
                         avatarImage.className = 'avatar-image';
@@ -366,6 +462,11 @@ function sendMessage() {
                         messageDiv.textContent = querySQL;
                         systemMessage.appendChild(messageDiv);
 
+                        var messageEditDiv = document.createElement('textarea');
+                        messageEditDiv.className = 'message-textarea';
+                        messageEditDiv.style.display = 'none';
+                        systemMessage.appendChild(messageEditDiv);
+
                         var iconContainer = document.createElement('div');
                         iconContainer.className = 'icon-container';
 
@@ -373,6 +474,9 @@ function sendMessage() {
                         editIcon.src = 'images/edit.svg';
                         editIcon.alt = 'Edit';
                         editIcon.className = 'icon';
+                        editIcon.addEventListener('click', function(event) {
+                            editQuery(systemMessage.id);
+                        });
                         iconContainer.appendChild(editIcon);
 
                         var executeIcon = document.createElement('img');
@@ -380,9 +484,30 @@ function sendMessage() {
                         executeIcon.alt = 'Execute';
                         executeIcon.className = 'icon';
                         executeIcon.addEventListener('click', function(event) {
-                            sendQuery(querySQL);
+                            sendQuery(systemMessage.id);
                         });
                         iconContainer.appendChild(executeIcon);
+
+                        var cancelIcon = document.createElement('img');
+                        cancelIcon.src = 'images/cancel.svg';
+                        cancelIcon.alt = 'Cancel';
+                        cancelIcon.className = 'icon';
+                        cancelIcon.addEventListener('click', function(event) {
+                            cancelEdit(systemMessage.id);
+                        });
+                        cancelIcon.style.display = 'none';
+                        iconContainer.appendChild(cancelIcon);
+
+                        var confirmIcon = document.createElement('img');
+                        confirmIcon.src = 'images/confirm.svg';
+                        confirmIcon.alt = 'Confirm';
+                        confirmIcon.className = 'icon';
+                        confirmIcon.addEventListener('click', function(event) {
+                           confirmEdit(systemMessage.id);
+                        });
+                        confirmIcon.style.display = 'none';
+                        iconContainer.appendChild(confirmIcon);
+
                         systemMessage.appendChild(iconContainer);
 
                         document.getElementById('chat-area').appendChild(systemMessage);
@@ -411,6 +536,43 @@ function executeQuery(query, executionHint, outputRows) {
         limitRows: outputRows,
     };
 
+    //  创建结果显示区域
+    var resultMessage = document.createElement('div');
+    resultMessage.className = 'result-message';
+    resultMessage.id = uuid();
+
+    // 根据executionHint的不同值设置不同的背景颜色
+    switch (Number(executionHint)) {
+        case 0: // Best Effort
+            resultMessage.style.backgroundColor = '#f3f9e8';
+            break;
+        case 1: // Relaxed
+            resultMessage.style.backgroundColor = '#f9f0e8';
+            break;
+        case 2: // Immediate
+            resultMessage.style.backgroundColor = '#f9e8e8';
+            break;
+        default:
+            resultMessage.style.backgroundColor= '#e6f7ff'; // 默认颜色
+    }
+
+    //  创建状态显示区域
+    var statusDisplay = document.createElement('div');
+    statusDisplay.className = 'query-status';
+    statusDisplay.textContent = 'Query Status: unknown\n';
+    resultMessage.appendChild(statusDisplay);
+
+    //  创建结果显示区域
+    var resultDisplay = document.createElement('div');
+    resultDisplay.className = 'query-results';
+    resultDisplay.style.display = 'none'; //  默认隐藏结果
+    resultMessage.appendChild(resultDisplay);
+
+    //  将新的结果显示区域添加到聊天区域
+    document.getElementById('status-area').appendChild(resultMessage);
+
+    queryStatusScrollToBottom();
+
     // 发起submitQuery请求
     fetch('/api/query/submit-query', {
         method: 'POST',
@@ -421,42 +583,6 @@ function executeQuery(query, executionHint, outputRows) {
     })
         .then(response => response.json())
         .then(data => {
-            //  创建结果显示区域
-            var resultMessage = document.createElement('div');
-            resultMessage.className = 'result-message';
-
-            // 根据executionHint的不同值设置不同的背景颜色
-            switch (Number(executionHint)) {
-                case 0: // Best Effort
-                    resultMessage.style.backgroundColor = '#f3f9e8';
-                    break;
-                case 1: // Relaxed
-                    resultMessage.style.backgroundColor = '#f9f0e8';
-                    break;
-                case 2: // Immediate
-                    resultMessage.style.backgroundColor = '#f9e8e8';
-                    break;
-                default:
-                    resultMessage.style.backgroundColor= '#e6f7ff'; // 默认颜色
-            }
-
-            //  创建状态显示区域
-            var statusDisplay = document.createElement('div');
-            statusDisplay.className = 'query-status';
-            statusDisplay.textContent = 'Query Status: unknown\n';
-            resultMessage.appendChild(statusDisplay);
-
-            //  创建结果显示区域
-            var resultDisplay = document.createElement('div');
-            resultDisplay.className = 'query-results';
-            resultDisplay.style.display = 'none'; //  默认隐藏结果
-            resultMessage.appendChild(resultDisplay);
-
-            //  将新的结果显示区域添加到聊天区域
-            document.getElementById('status-area').appendChild(resultMessage);
-
-            queryStatusScrollToBottom();
-
             //  如果查询成功，继续处理
             if (data.errorCode === 0) {
                 //  显示查询状态
@@ -471,6 +597,7 @@ function executeQuery(query, executionHint, outputRows) {
             // 在出错时更新结果显示区域
             resultDisplay.textContent = 'Error occurred during query execution.';
         });
+    return resultMessage.id;
 }
 
 // 更新查询状态和结果
