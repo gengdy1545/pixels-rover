@@ -570,7 +570,7 @@ function executeQuery(query, executionHint, outputRows) {
     //  创建状态显示区域
     var statusDisplay = document.createElement('div');
     statusDisplay.className = 'query-status';
-    statusDisplay.textContent = 'Query Status: unknown\n';
+    statusDisplay.innerHTML = 'Query Status: <span class="unknown">UNKNOWN</span>';
     resultMessage.appendChild(statusDisplay);
 
     //  创建结果显示区域
@@ -615,10 +615,25 @@ function executeQuery(query, executionHint, outputRows) {
 function updateQueryStatusAndResults(traceToken, submitQueryRequest, statusDisplay, resultDisplay) {
     // 更新查询状态
     updateQueryStatus(traceToken, function (status) {
-        // 显示查询状态
-        statusDisplay.textContent = 'Query Status: ' + status + '\n';
+        // 更新 status 显示
+        var statusSpan = statusDisplay.querySelector('span:first-of-type');
+        statusSpan.textContent = status;
+        switch (status.toLowerCase()) {
+            case 'running':
+                statusSpan.classList.remove('unknown', 'finished');
+                statusSpan.classList.add('running');
+                break;
+            case 'finished':
+                statusSpan.classList.remove('unknown', 'running');
+                statusSpan.classList.add('finished');
+                break;
+            default :
+                statusSpan.classList.remove('running', 'finished');
+                statusSpan.classList.add('unknown');
+                break;
+        }
 
-        // 如果查询状态为 "finished"，获取结果并更新显示
+        // 如果查询状态为 "finished"，获取结果并更新结果显示
         if (status.toLowerCase() === 'finished') {
             //   添加折叠/展开按钮
             var toggleResults = document.createElement('span');
@@ -638,7 +653,7 @@ function updateQueryStatusAndResults(traceToken, submitQueryRequest, statusDispl
 
             getQueryResult(traceToken, function (result) {
                 // 显示查询结果
-                displayQueryResult(result, submitQueryRequest, resultDisplay);
+                displayQueryResult(result, submitQueryRequest, statusDisplay, resultDisplay);
             });
         }
     });
@@ -719,7 +734,7 @@ function getQueryResult(traceToken, callback) {
 }
 
 // 修改显示查询结果的函数，保留第一行的状态信息
-function displayQueryResult(result, submitQueryRequest, resultDisplay) {
+function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDisplay) {
     // 获取显示结果的DOM元素
     var resultDisplayContent = document.createElement('div');
 
@@ -739,6 +754,11 @@ function displayQueryResult(result, submitQueryRequest, resultDisplay) {
     resultDisplayContent.appendChild(limitRowsDisplay);
 
     if(result.errorCode !== 0) {
+        // 更新 status 显示
+        var statusSpan = statusDisplay.querySelector('span:first-of-type');
+        statusSpan.textContent = 'FAILED';
+        statusSpan.classList.remove('finished');
+        statusSpan.classList.add('failed');
         resultDisplayContent.textContent = result.errorMessage;
         resultDisplay.appendChild(resultDisplayContent);
         return;
