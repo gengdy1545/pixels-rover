@@ -932,6 +932,26 @@ input.error {
     border-bottom: 1px solid #cbcbcb; /* 底部边框 */
 }
 
+.result-message .query-display,
+.result-message .execution-hint-display,
+.result-message .limit-rows-display {
+    margin-top: 10px;
+}
+
+.result-message .cost-display {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+
+.result-message .cost-display .latency-ms {
+    color: #FF6347;
+    margin-right: 20px;
+}
+
+.result-message .cost-display .cost-cents {
+    color: #32CD32;
+}
 
 /* Style for modal window */
 .modal {

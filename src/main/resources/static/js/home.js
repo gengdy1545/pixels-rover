@@ -740,16 +740,32 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
 
     // 添加 query 信息
     var queryDisplay = document.createElement('div');
+    queryDisplay.className = 'query-display';
     queryDisplay.textContent = 'Query: ' + submitQueryRequest.query;
     resultDisplayContent.appendChild(queryDisplay);
 
     // 添加 executionHint 信息
     var executionHintDisplay = document.createElement('div');
-    executionHintDisplay.textContent = 'ExecutionHint: ' + submitQueryRequest.executionHint;
+    executionHintDisplay.className = 'execution-hint-display';
+    // 使用switch语句根据executionHint的值选择相应的中文文字
+    switch (submitQueryRequest.executionHint) {
+        case '0':
+            executionHintDisplay.textContent = 'ExecutionHint: Best-of-effort';
+            break;
+        case '1':
+            executionHintDisplay.textContent = 'ExecutionHint: Relaxed';
+            break;
+        case '2':
+            executionHintDisplay.textContent = 'ExecutionHint: Immediate';
+            break;
+        default:
+            executionHintDisplay.textContent = 'ExecutionHint: Unknown';
+    }
     resultDisplayContent.appendChild(executionHintDisplay);
 
     // 添加 limitRow 信息
     var limitRowsDisplay = document.createElement('div')
+    limitRowsDisplay.className = 'limit-rows-display';
     limitRowsDisplay.textContent = 'LimitRows: ' + submitQueryRequest.limitRows;
     resultDisplayContent.appendChild(limitRowsDisplay);
 
@@ -815,12 +831,13 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
     resultDisplayContent.appendChild(table);
 
     // 添加costCents信息
-    var costCentsDisplay = document.createElement('div');
-    costCentsDisplay.textContent = 'Cost: ' + result.costCents + ' cents';
-    costCentsDisplay.style.color = '#32CD32';
-    costCentsDisplay.style.fontSize = '16px';
-    costCentsDisplay.style.fontWeight = 'bold';
-    resultDisplayContent.appendChild(costCentsDisplay);
+    var costDisplay = document.createElement('div');
+    costDisplay.className = 'cost-display';
+    costDisplay.innerHTML = `
+        <span class="latency-ms">Lantency: ${result.latencyMs} ms</span>
+        <span class="cost-cents">Cost: ${result.costCents} cents</span>
+    `;
+    resultDisplayContent.appendChild(costDisplay);
 
     // 将新的结果显示区域添加到已有的结果显示区域
     resultDisplay.appendChild(resultDisplayContent);
