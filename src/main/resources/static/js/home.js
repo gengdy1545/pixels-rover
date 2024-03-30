@@ -771,13 +771,14 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
 
     // 创建表格元素
     var table = document.createElement('table');
+    table.className = 'result-table result-table-bordered';
 
     // 创建表头
     var thead = document.createElement('thead');
     var headerRow = document.createElement('tr');
 
     columnNames.forEach(function (columnName, index) {
-        var columnPrintSize = columnPrintSizes[index] || columnName.length + 2;
+        var columnPrintSize = Math.max(columnPrintSizes[index], columnName.length);
         var th = document.createElement('th');
         th.textContent = columnName;
         th.style.width = columnPrintSize + 3 + 'ch'; // 增加固定长度

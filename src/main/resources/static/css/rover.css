@@ -898,6 +898,41 @@ input.error {
     color: #d9534f;
 }
 
+/* 基础表格样式 */
+.result-table {
+    border-collapse: collapse;
+    border-spacing: 0;
+    border-style: hidden;
+    box-shadow: 0 0 0 1px #cbcbcb;
+    width: 100%;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+/* 表格头部样式 */
+.result-table thead {
+    background-color: #e0e0e0;
+    color: #000;
+    vertical-align: bottom;
+}
+
+/* 表格单元格样式 */
+.result-table td, .result-table th {
+    border: 1px solid #cbcbcb;
+    font-size: inherit;
+    margin: 0;
+    overflow: visible;
+    padding: .5em 1em;
+}
+
+/* 表格边框样式 */
+.result-table-bordered td {
+    border-bottom: 1px solid #cbcbcb; /* 底部边框 */
+}
+
+
 /* Style for modal window */
 .modal {
     display: none;
