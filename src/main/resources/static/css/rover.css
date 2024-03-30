@@ -279,6 +279,15 @@ input.error {
 	height: calc(100% - 68px);
     position: relative;
     background-color: #fff;
+    overflow: auto;
+}
+
+.pixels-layout-sidebar-scroll::-webkit-scrollbar {
+    width: 0; /* Set the width of the scrollbar */
+}
+
+.pixels-layout-sidebar-scroll::-webkit-scrollbar-thumb {
+    background-color: transparent; /* Use a lighter color with some opacity */
 }
 
 /* sidebar-switch Styles */
