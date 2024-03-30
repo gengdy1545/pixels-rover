@@ -218,8 +218,10 @@ function queryStatusScrollToBottom() {
     statusArea.scrollTop = statusArea.scrollHeight;
 }
 
+let modalMessageID;
+
 // 定义modal确认图标的事件处理函数
-function handleConfirmClick(messageID) {
+function handleConfirmClick() {
     var querySQL = document.getElementById('modal-query-sql').innerText;
     var executionHint = document.getElementById('modal-execution-hint-select').value;
     var limit = document.getElementById('modal-output-rows-input').value;
@@ -227,7 +229,7 @@ function handleConfirmClick(messageID) {
 
     // 实现message的click处理，高亮对应resultMessage
     var resultMessage = document.getElementById(resultID);
-    var systemMessage = document.getElementById(messageID);
+    var systemMessage = document.getElementById(modalMessageID);
     systemMessage.addEventListener('click', function() {
         // 移除.highlight类，然后再添加回来，以重新触发动画
         resultMessage.classList.remove('highlighted');
@@ -269,6 +271,9 @@ function sendQuery(messageID) {
         return;
     }
 
+    // 明确打开modal的message
+    modalMessageID = messageID;
+
     // 显示模态窗口
     document.getElementById('modal').style.display = "block";
     // 填充查询SQL
@@ -276,7 +281,8 @@ function sendQuery(messageID) {
 
     // 为确认图标添加点击事件监听器
     var confirmIcon = document.getElementById('modal-confirm-icon');
-    confirmIcon.addEventListener('click', function() { handleConfirmClick(messageID); }, { once: true });
+    confirmIcon.removeEventListener('click', handleConfirmClick);
+    confirmIcon.addEventListener('click', handleConfirmClick);
 
     // 为关闭按钮添加点击事件监听器
     var closeButton = document.getElementsByClassName('close')[0];
