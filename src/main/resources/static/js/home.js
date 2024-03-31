@@ -849,7 +849,7 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
     var costDisplay = document.createElement('div');
     costDisplay.className = 'cost-display';
     costDisplay.innerHTML = `
-        <span class="latency-ms">Lantency: ${result.latencyMs} ms</span>
+        <span class="latency-ms">Latency: ${result.latencyMs} ms</span>
         <span class="cost-cents">Cost: ${result.costCents} cents</span>
     `;
     resultDisplayContent.appendChild(costDisplay);
