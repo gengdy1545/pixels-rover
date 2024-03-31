@@ -238,10 +238,9 @@ function handleConfirmClick() {
         }, 0); // 使用setTimeout确保在下一个事件循环中添加类
     });
 
-    // 实现result的dbclcik处理，高亮对应systemMessage.message
+    // 实现result的dblclcik处理，高亮对应systemMessage.message
     var message = systemMessage.querySelector('.message');
-    resultMessage.addEventListener('dbclick', function () {
-        console.log('dbclick');
+    resultMessage.addEventListener('dblclick', function (event) {
         // 移除.highlight类，然后再添加回来，以重新触发动画
         message.classList.remove('highlighted');
         setTimeout(function() {
@@ -575,7 +574,7 @@ function executeQuery(query, executionHint, outputRows) {
 
     //  创建状态显示区域
     var statusDisplay = document.createElement('div');
-    statusDisplay.className = 'query-status';
+    statusDisplay.className = 'query-status no-select';
     statusDisplay.innerHTML = 'Query Status: <span class="unknown">UNKNOWN</span>';
     resultMessage.appendChild(statusDisplay);
 
