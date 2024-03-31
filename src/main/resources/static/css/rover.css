@@ -998,8 +998,12 @@ input.error {
     font-weight: bold;
 }
 
+.result-message .cost-display .pending-ms {
+    color: #FF6347;
+    margin-right: 20px;
+}
 
-.result-message .cost-display .latency-ms {
+.result-message .cost-display .execution-ms {
     color: #FF6347;
     margin-right: 20px;
 }

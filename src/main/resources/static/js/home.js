@@ -845,12 +845,18 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
     table.appendChild(tbody);
     resultDisplayContent.appendChild(table);
 
+    // Todo: pending-ms 和 cost-cents
+    var pendingTime = Math.floor(Math.random() * 100);
+    var costCents = Math.floor(Math.random() * 100);
+
     // 添加costCents信息
     var costDisplay = document.createElement('div');
     costDisplay.className = 'cost-display';
     costDisplay.innerHTML = `
-        <span class="latency-ms">Latency: ${result.latencyMs} ms</span>
-        <span class="cost-cents">Cost: ${result.costCents} cents</span>
+        <span class="pending-ms">pending: ${pendingTime} ms</span>
+        <span class="execution-ms">execution: ${result.latencyMs} ms</span>
+        <!-- <span class="cost-cents">cost: ${result.costCents} cents</span> -->
+        <span class="cost-cents">cost: ${costCents} cents</span>
     `;
     resultDisplayContent.appendChild(costDisplay);
 
