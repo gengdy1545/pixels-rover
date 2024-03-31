@@ -230,7 +230,8 @@ function handleConfirmClick() {
     // 实现message的click处理，高亮对应resultMessage
     var resultMessage = document.getElementById(resultID);
     var systemMessage = document.getElementById(modalMessageID);
-    systemMessage.addEventListener('click', function() {
+    var message = systemMessage.querySelector('.message');
+    message.addEventListener('dblclick', function() {
         // 移除.highlight类，然后再添加回来，以重新触发动画
         resultMessage.classList.remove('highlighted');
         setTimeout(function() {
@@ -239,7 +240,6 @@ function handleConfirmClick() {
     });
 
     // 实现result的dblclcik处理，高亮对应systemMessage.message
-    var message = systemMessage.querySelector('.message');
     resultMessage.addEventListener('dblclick', function (event) {
         // 移除.highlight类，然后再添加回来，以重新触发动画
         message.classList.remove('highlighted');
@@ -474,7 +474,7 @@ function sendMessage() {
                         systemMessage.appendChild(avatarImage);
 
                         var messageDiv = document.createElement('div');
-                        messageDiv.className = 'message';
+                        messageDiv.className = 'message no-select';
                         messageDiv.textContent = querySQL;
                         systemMessage.appendChild(messageDiv);
 
