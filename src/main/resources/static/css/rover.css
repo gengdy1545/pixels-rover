@@ -360,13 +360,13 @@ input.error {
     transform: translateZ(0);
 }
 .nav-drawer img {
-    width: 20px;
-    height: 20px;
-    margin-right: 20px;
+    width: 25px;
+    height: 25px;
+    margin-right: 10px;
 }
 .nav-drawer li a {
     padding-right: 24px;
-    padding-left: 40px;
+    padding-left: 25px;
     color: inherit;
     font-weight: 500;
     white-space: nowrap;
@@ -393,6 +393,9 @@ input.error {
 .nav-drawer > .active > a:active {
     background-color: rgba(0,0,0,.0125);
     border-color: #33cabb;
+}
+.nav-drawer .nav-subnav > li > a {
+    padding-left: 65px;
 }
 .nav-drawer .nav-subnav > li.active > a,
 .nav-drawer .nav-subnav > li > a:hover {
@@ -651,7 +654,7 @@ input.error {
 }
 @media (min-width: 1024px) {
     .pixels-layout-sidebar-close .nav-drawer > li > a {
-        padding: 15px 28px 15px 20px;
+        padding: 15px 28px 15px 15px;
     }
     .pixels-layout-sidebar-close .nav-drawer > li > a span {
         display: none;
@@ -681,7 +684,7 @@ input.error {
         width: 240px;
     }
     .pixels-layout-sidebar-close .pixels-layout-sidebar:hover .nav-drawer > li > a {
-        padding: 15px 24px 15px 40px;
+        padding: 15px 24px 15px 25px;
     }
     .pixels-layout-sidebar-close .pixels-layout-sidebar:hover .nav-drawer > li > a span {
         display: inline-block;
