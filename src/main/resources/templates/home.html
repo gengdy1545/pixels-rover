@@ -34,17 +34,26 @@
                     <ul class="nav nav-drawer">
                         <li class="nav-item active">
                         <li class="nav-item nav-item-has-subnav" id="schemasMenu">
-                            <a href="javascript:void(0)" onclick="showSchemas()"><span>Schemas</span></a>
+                            <a href="javascript:void(0)" onclick="showSchemas()">
+                                <img src="images/schema.svg" alt="Schema Icon">
+                                <span>Schemas</span>
+                            </a>
                             <ul class="nav nav-subnav" id="schemaMenu">
                             </ul>
                         </li>
                         <li class="nav-item nav-item-has-subnav">
-                            <a href="javascript:void(0)"><span>Reports</span></a>
+                            <a href="javascript:void(0)">
+                                <img src="images/report.svg" alt="Report Icon">
+                                <span>Reports</span>
+                            </a>
                             <ul class="nav nav-subnav">
                             </ul>
                         </li>
                         <li class="nav-item nav-item-has-subnav">
-                            <a href="javascript:void(0)"><span>Settings</span></a>
+                            <a href="javascript:void(0)">
+                                <img src="images/setting.svg" alt="Setting Icon">
+                                <span>Settings</span>
+                            </a>
                             <ul class="nav nav-subnav">
                             </ul>
                         </li>
@@ -79,12 +88,12 @@
                             </a>
                             <ul class="dropdown-menu dropdown-menu-right">
                                 <li><a class="multitabs" data-url="pixels_pages_profile.html"
-                                       href="javascript:void(0)">个人信息</a></li>
+                                       href="javascript:void(0)">personal profile</a></li>
                                 <li><a class="multitabs" data-url="pixels_pages_edit_pwd.html"
-                                       href="javascript:void(0)">修改密码</a></li>
-                                <li><a href="javascript:void(0)">清空缓存</a></li>
+                                       href="javascript:void(0)">change password</a></li>
+                                <li><a href="javascript:void(0)">clear cache</a></li>
                                 <li class="divider"></li>
-                                <li><a th:href="@{/logout}">退出登录</a></li>
+                                <li><a th:href="@{/logout}">sign out</a></li>
                             </ul>
                         </li>
                     </ul>
