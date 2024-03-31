@@ -224,7 +224,7 @@ let modalMessageID;
 function handleConfirmClick() {
     var querySQL = document.getElementById('modal-query-sql').innerText;
     var executionHint = document.getElementById('modal-execution-hint-select').value;
-    var limit = document.getElementById('modal-output-rows-input').value;
+    var limit = document.getElementById('modal-output-rows-input').value || 0;
     var resultID = executeQuery(querySQL, executionHint, limit);
 
     // 实现message的click处理，高亮对应resultMessage
@@ -238,16 +238,16 @@ function handleConfirmClick() {
         }, 0); // 使用setTimeout确保在下一个事件循环中添加类
     });
 
-    // remove: 不好看，在点击result展开按钮会触发
-    // // 实现result的clcik处理，高亮对应systemMessage.message
-    // var message = systemMessage.querySelector('.message');
-    // resultMessage.addEventListener('click', function () {
-    //     // 移除.highlight类，然后再添加回来，以重新触发动画
-    //     message.classList.remove('highlighted');
-    //     setTimeout(function() {
-    //         message.classList.add('highlighted');
-    //     }, 0); // 使用setTimeout确保在下一个事件循环中添加类
-    // });
+    // 实现result的dbclcik处理，高亮对应systemMessage.message
+    var message = systemMessage.querySelector('.message');
+    resultMessage.addEventListener('dbclick', function () {
+        console.log('dbclick');
+        // 移除.highlight类，然后再添加回来，以重新触发动画
+        message.classList.remove('highlighted');
+        setTimeout(function() {
+            message.classList.add('highlighted');
+        }, 0); // 使用setTimeout确保在下一个事件循环中添加类
+    });
 
     // 执行查询后就隐藏所有icon按钮
     var iconContainer = systemMessage.querySelector('.icon-container');
