@@ -100,6 +100,19 @@ h6, .h6 {
     margin-bottom: 0.5rem;
 }
 
+li[showtitle]:hover:after {
+    line-height: 1.25;
+    content: attr(showtitle);
+    color: #fff;
+    padding: 2px 8px;
+    position: absolute;
+    left: 10%;
+    top: 100%;
+    z-index: 20;
+    white-space: pre-wrap;
+    background-color: rgba(37, 39, 42, .85);
+}
+
 /* Navigation-related */
 .navbar-toggle {
     background-color: transparent;
@@ -427,7 +440,7 @@ input.error {
     transition: transform 0.3s linear, -webkit-transform 0.3s linear;
 }
 .nav-item-has-subnav .nav-item-has-subnav > a:after {
-    top: 10px;
+    top: 16px;
 }
 .nav-item-has-subnav.open > a:after {
     -webkit-transform: rotate(90deg);

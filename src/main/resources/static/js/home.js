@@ -88,7 +88,12 @@ showSchemas = function getSchemas() {
 
             if (Array.isArray(response.schemas) && response.schemas.length > 0) {
                 response.schemas.forEach(function (schema) {
-                    var listItem = $('<li class="nav-item nav-item-has-subnav"><a href="#" onclick="showTables(\'' + schema.name + '\')">' + schema.name + '</a><ul class="nav nav-subnav" id="' + schema.name + '"></ul></li>');
+                    var listItem = $(`
+                        <li class="nav-item nav-item-has-subnav">
+                            <a href="#" onclick="showTables('${schema.name}')">${schema.name}</a>
+                            <ul class="nav nav-subnav" id="${schema.name}"></ul>
+                        </li>
+                    `);
                     schemaMenu.append(listItem);
                 });
             } else {
@@ -117,7 +122,12 @@ showTables = function getTables(schema) {
             tableMenu.empty();
             if (Array.isArray(response.tables) && response.tables.length > 0) {
                 response.tables.forEach(function(table) {
-                    var listItem = $('<li class="nav-item nav-item-has-subnav"><a href="javascript:void(0)" onclick="showColumns(\'' + schema + '\', \'' + table.name + '\')">' + table.name + '</a><ul class="nav nav-subnav" id="' + schema + '_' + table.name + '"></ul></li>');
+                    var listItem = $(`
+                        <li class="nav-item nav-item-has-subnav">
+                            <a href="javascript:void(0)" onclick="showColumns('${schema}', '${table.name}')">${table.name}</a>
+                            <ul class="nav nav-subnav" id="${schema}_${table.name}"></ul>
+                        </li>
+                    `);
                     tableMenu.append(listItem);
                 });
             } else {
@@ -147,7 +157,7 @@ showColumns = function getColumns(schema, table) {
 
             if (Array.isArray(response.columns) && response.columns.length > 0) {
                 response.columns.forEach(function(column) {
-                    var listItem = $('<li><a href="#">' + column.name + '</a></li>');
+                    var listItem = $(`<li><a href="#" title="${column.type}">${column.name}</a></li>`);
                     columnMenu.append(listItem);
                 });
             } else {
