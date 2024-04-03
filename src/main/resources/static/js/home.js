@@ -229,6 +229,7 @@ function queryStatusScrollToBottom() {
 }
 
 let modalMessageID;
+let codeMirror;
 
 // 定义modal确认图标的事件处理函数
 function handleConfirmClick() {
@@ -286,7 +287,7 @@ function sendQuery(messageID) {
     // 显示模态窗口
     document.getElementById('modal').style.display = "block";
     // 填充查询SQL
-    document.getElementById('modal-query-sql').innerText = queryInput;
+    document.getElementById('modal-query-sql').innerHTML = hljs.highlight(queryInput, {language: "sql", ignoreIllegals: true}).value;
 
     // 为确认图标添加点击事件监听器
     var confirmIcon = document.getElementById('modal-confirm-icon');
@@ -317,6 +318,12 @@ function hideMessage(messageID) {
     messageEditDiv.style.display = 'block';
     cancelIcon.style.display = 'block';
     confirmIcon.style.display = 'block';
+    // 添加codemirror
+    codeMirror = CodeMirror.fromTextArea(messageEditDiv, {
+        mode: 'text/x-sql',
+        lineNumber: false,
+        lineWrapping: true
+    });
 }
 
 function showMessage(messageID) {
@@ -337,6 +344,8 @@ function showMessage(messageID) {
     messageDiv.style.display = 'block';
     editIcon.style.display = 'block';
     executeIcon.style.display = 'block';
+    // 删除codeMirror
+    systemMessage.querySelector('.CodeMirror').remove();
 }
 
 function editQuery(messageID) {
@@ -361,7 +370,7 @@ function confirmEdit(messageID) {
     var messageDiv = systemMessage.querySelector('.message');
     var messageEditDiv = systemMessage.querySelector('.message-textarea');
     // 将messageDiv的内容设置成messageEditDiv的内容
-    messageDiv.textContent = messageEditDiv.value;
+    messageDiv.innerHTML = hljs.highlight(codeMirror.getValue(), {language: "sql", ignoreIllegals: true}).value;
 
     showMessage(messageID);
 }
@@ -473,6 +482,8 @@ function sendMessage() {
                         let querySQL = response.sql.replace(/(\bFROM\b|\bJOIN\b) (\w+)/g, function(match, p1, p2) {
                             return `${p1} ${schema}.${p2}`;
                         });
+                        // highlight
+                        var hightlightedSQL = hljs.highlight(querySQL, {language: "sql", ignoreIllegals: true}).value;
 
                         var systemMessage = document.createElement('div');
                         systemMessage.className = 'system-message';
@@ -485,11 +496,12 @@ function sendMessage() {
 
                         var messageDiv = document.createElement('div');
                         messageDiv.className = 'message no-select';
-                        messageDiv.textContent = querySQL;
+                        messageDiv.innerHTML = hightlightedSQL;
                         systemMessage.appendChild(messageDiv);
 
                         var messageEditDiv = document.createElement('textarea');
                         messageEditDiv.className = 'message-textarea';
+                        messageEditDiv.spellcheck = false;
                         messageEditDiv.style.display = 'none';
                         systemMessage.appendChild(messageEditDiv);
 
@@ -585,7 +597,7 @@ function executeQuery(query, executionHint, outputRows) {
     //  创建状态显示区域
     var statusDisplay = document.createElement('div');
     statusDisplay.className = 'query-status no-select';
-    statusDisplay.innerHTML = 'Query Status: <span class="unknown">UNKNOWN</span>';
+    statusDisplay.innerHTML = 'Query Status: <span class="pending">PENDING</span>';
     resultMessage.appendChild(statusDisplay);
 
     //  创建结果显示区域
@@ -635,16 +647,16 @@ function updateQueryStatusAndResults(traceToken, submitQueryRequest, statusDispl
         statusSpan.textContent = status;
         switch (status.toLowerCase()) {
             case 'running':
-                statusSpan.classList.remove('unknown', 'finished');
+                statusSpan.classList.remove('pending', 'finished');
                 statusSpan.classList.add('running');
                 break;
             case 'finished':
-                statusSpan.classList.remove('unknown', 'running');
+                statusSpan.classList.remove('pending', 'running');
                 statusSpan.classList.add('finished');
                 break;
             default :
                 statusSpan.classList.remove('running', 'finished');
-                statusSpan.classList.add('unknown');
+                statusSpan.classList.add('pending');
                 break;
         }
 
@@ -756,7 +768,7 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
     // 添加 query 信息
     var queryDisplay = document.createElement('div');
     queryDisplay.className = 'query-display';
-    queryDisplay.textContent = 'Query: ' + submitQueryRequest.query;
+    queryDisplay.innerHTML = 'Query: ' + hljs.highlight(submitQueryRequest.query, {language: "sql", ignoreIllegals: true}).value;
     resultDisplayContent.appendChild(queryDisplay);
 
     // 添加 executionHint 信息

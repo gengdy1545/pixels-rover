@@ -9,14 +9,20 @@
     <meta name="description" content="The Rover of Pixels, a cloud-native data lake. See pixelsdb.io">
     <meta name="author" content="DongyangGeng">
     <!-- CSS -->
+    <link rel="stylesheet" type="text/css" href="js/highlight/highlight.min.css">
     <link rel="stylesheet" type="text/css" href="css/bootstrap.min.css">
     <link rel="stylesheet" type="text/css" href="css/rover.css">
     <!-- JS -->
     <script type="text/javascript" src="js/jquery.min.js"></script>
     <script type="text/javascript" src="js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="js/highlight/highlight.min.js"></script>
     <script type="text/javascript" src="js/perfect-scrollbar.min.js"></script>
     <script type="text/javascript" src="js/bootstrap-multitabs/multitabs.js"></script>
     <script type="text/javascript" src="js/home.js"></script>
+    <!-- codeMirror -->
+    <script src="js/codemirror/codemirror.js"></script>
+    <link rel="stylesheet" href="js/codemirror/codemirror.css">
+    <script src="js/codemirror/sql.js"></script>
 </head>
 
 <body>
@@ -24,7 +30,6 @@
     <div class="pixels-layout-container">
         <!--左侧导航-->
         <aside class="pixels-layout-sidebar">
-
             <!-- logo -->
             <div id="logo" class="sidebar-header">
                 <a th:href="@{/home}"><img src="images/logo-sidebar.png" title="PixelsDB" alt="PixelsDB"/></a>

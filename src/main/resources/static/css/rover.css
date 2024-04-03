@@ -874,7 +874,7 @@ input.error {
     position: relative;
 }
 
-.system-message .message-textarea {
+.system-message .message-textarea, .system-message .CodeMirror {
     max-width: calc(100% - 178px);
     background-color: #e6f7ff;
     padding: 10px;
@@ -889,13 +889,14 @@ input.error {
     outline: none;
 }
 
-.system-message .message-textarea::-webkit-scrollbar {
+.system-message .message-textarea::-webkit-scrollbar, .system-message .CodeMirror::-webkit-scrollbar{
     display: none;
 }
 
 .icon-container:hover,
 .system-message .message:hover ~ .icon-container,
-.system-message .message-textarea:hover ~ .icon-container {
+.system-message .message-textarea:hover ~ .icon-container,
+.system-message .CodeMirror:hover ~ .icon-container {
     display: flex;
     align-items: flex-end;
 }
@@ -937,7 +938,7 @@ input.error {
     font-weight: bold;
 }
 
-.result-message .query-status .unknown {
+.result-message .query-status .pending {
     color: #f0ad4e;
 }
 
