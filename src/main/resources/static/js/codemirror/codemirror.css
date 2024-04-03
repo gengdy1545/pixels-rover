@@ -2,7 +2,7 @@
 
 .CodeMirror {
   /* Set height, width, borders, and global font properties here */
-  font-family: monospace;
+  /*font-family: monospace;*/
   /*height: 300px;*/
   color: black;
   direction: ltr;
@@ -11,11 +11,11 @@
 /* PADDING */
 
 .CodeMirror-lines {
-  padding: 4px 0; /* Vertical padding around content */
+  padding: 0; /* Vertical padding around content */
 }
 .CodeMirror pre.CodeMirror-line,
 .CodeMirror pre.CodeMirror-line-like {
-  padding: 0 4px; /* Horizontal padding of content */
+  padding: 0; /* Horizontal padding of content */
 }
 
 .CodeMirror-scrollbar-filler, .CodeMirror-gutter-filler {
@@ -106,7 +106,7 @@
 .cm-negative {color: #d44;}
 .cm-positive {color: #292;}
 .cm-header, .cm-strong {font-weight: bold;}
-.cm-em {font-style: italic;}
+/*.cm-em {font-style: italic;}*/
 .cm-link {text-decoration: underline;}
 .cm-strikethrough {text-decoration: line-through;}
 
