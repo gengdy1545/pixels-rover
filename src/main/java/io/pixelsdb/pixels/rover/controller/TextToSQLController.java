@@ -35,14 +35,13 @@ public class TextToSQLController {
     public TextToSQLResponse getSqlFromText(@RequestBody TextToSQLRequest request) {
         try {
             // Use WebClient to call the other REST API
-            TextToSQLResponse response = webClient.post()
+            return webClient.post()
                     .uri("/get")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Mono.just(request), TextToSQLResponse.class)
                     .retrieve()
                     .bodyToMono(TextToSQLResponse.class)
                     .block(); // block to wait for the response;
-            return response;
         } catch (Exception e) {
             System.out.println("error");
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);

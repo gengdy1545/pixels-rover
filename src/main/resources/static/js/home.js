@@ -322,7 +322,7 @@ function hideMessage(messageID) {
     codeMirror = CodeMirror.fromTextArea(messageEditDiv, {
         mode: 'text/x-sql',
         lineNumber: false,
-        lineWrapping: true
+        lineWrapping: true,
     });
 }
 
@@ -470,7 +470,6 @@ function sendMessage() {
                     },
                     "text": chatInput
                 }
-
                 // text-to-sql
                 $.ajax({
                     type: 'POST',
@@ -858,8 +857,24 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
     resultDisplayContent.appendChild(table);
 
     // Todo: pending-ms 和 cost-cents
-    var pendingTime = Math.floor(Math.random() * 100);
-    var costCents = Math.floor(Math.random() * 100);
+    var random = Math.random();
+    var pendingTime = Math.random();
+    var costPerSec;
+    switch (submitQueryRequest.executionHint) {
+        case '0':
+            costPerSec = 0.1 * random + 0.4; // 0.4-0.5
+            pendingTime = Math.floor(pendingTime * 100);
+            break;
+        case '1':
+            costPerSec = 0.1 * random + 0.6; // 0.6-0.7
+            pendingTime = Math.floor(pendingTime * 80);
+            break;
+        case '2':
+            costPerSec = 0.1 * random + 0.9; // 0.9-1.0
+            pendingTime = Math.floor(pendingTime * 60);
+            break;
+    }
+    var costCents = (costPerSec * result.latencyMs / 1000).toFixed(3);
 
     // 添加costCents信息
     var costDisplay = document.createElement('div');

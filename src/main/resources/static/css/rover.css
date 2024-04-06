@@ -249,10 +249,11 @@ input.error {
     backdrop-filter: blur(10px);
 }
 .login-title {
-    font-size: 50px;
     margin-bottom: 30px;
-    color: #fff;
-    /*text-shadow: 0 0 10px #00ffff80;*/
+}
+
+.login-title img {
+    height: 60px;
 }
 
 .login-header {
