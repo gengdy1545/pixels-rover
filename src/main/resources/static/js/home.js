@@ -856,34 +856,13 @@ function displayQueryResult(result, submitQueryRequest, statusDisplay, resultDis
     table.appendChild(tbody);
     resultDisplayContent.appendChild(table);
 
-    // Todo: pending-ms 和 cost-cents
-    var random = Math.random();
-    var pendingTime = Math.random();
-    var costPerSec;
-    switch (submitQueryRequest.executionHint) {
-        case '0':
-            costPerSec = 0.1 * random + 0.4; // 0.4-0.5
-            pendingTime = Math.floor(pendingTime * 100);
-            break;
-        case '1':
-            costPerSec = 0.1 * random + 0.6; // 0.6-0.7
-            pendingTime = Math.floor(pendingTime * 80);
-            break;
-        case '2':
-            costPerSec = 0.1 * random + 0.9; // 0.9-1.0
-            pendingTime = Math.floor(pendingTime * 60);
-            break;
-    }
-    var costCents = (costPerSec * result.latencyMs / 1000).toFixed(3);
-
     // 添加costCents信息
     var costDisplay = document.createElement('div');
     costDisplay.className = 'cost-display';
     costDisplay.innerHTML = `
-        <span class="pending-ms">pending: ${pendingTime} ms</span>
-        <span class="execution-ms">execution: ${result.latencyMs} ms</span>
-        <!-- <span class="cost-cents">cost: ${result.costCents} cents</span> -->
-        <span class="cost-cents">cost: ${costCents} cents</span>
+        <span class="pending-ms">pending: ${result.pendingTimeMs} ms</span>
+        <span class="execution-ms">execution: ${result.executionTimeMs} ms</span>
+        <span class="cost-cents">cost: ${result.billedCents} cents</span>
     `;
     resultDisplayContent.appendChild(costDisplay);
 
