@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 PixelsDB.
+ * Copyright 2024 PixelsDB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,9 @@
 package io.pixelsdb.pixels.rover.config.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.code.kaptcha.Constants;
+import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.mapper.UserRepository;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -30,74 +27,100 @@ import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
+import java.util.List;
 
 /**
- * @author hank
- * @create 2023-04-05
+ * Security configuration with JWT-based stateless authentication and CORS support.
+ *
+ * @author pixels
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig
 {
+    private final JwtTokenProvider jwtTokenProvider;
+
+    public SecurityConfig(JwtTokenProvider jwtTokenProvider)
+    {
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                    UserDetailsService userDetailsService) throws Exception
     {
-        // Configure the paths that do not require authentication.
-        http.authorizeHttpRequests((requests) -> requests
-                        .requestMatchers("/", "/signin", "/login", "/signup", "/signup_success",
-                                "/css/**", "/js/**", "/ajax/**", "/images/**", "/fonts/**",
-                                "/captcha/captchaImage") // the paths
-                        .permitAll()
-                        .anyRequest().authenticated());
-        //loginPage 指定默认登陆页面。这里需要注意：在自定义登陆页面后，必须指定登录地址
-        http.formLogin().loginPage("/signin").loginProcessingUrl("/login")
-                // 对参数用户名、密码的参数名进行设置
-                .usernameParameter("username").passwordParameter("password")
-                // 认证成功处理器
-                .successHandler(new JsonAuthenticationSuccessHandler())
-                .failureHandler(new JsonAuthenticationFailHandler());
-        http.logout().logoutUrl("logout")   //注销登录URL，默认请求方式为GET请求
-                .invalidateHttpSession(true)    // 会话失效httpSession，默认true
-                .clearAuthentication(true)     // 清除认证信息，默认true
-                .logoutSuccessUrl("/home");   // 注销登录，成功跳回首页
+        ObjectMapper objectMapper = new ObjectMapper();
 
-        // 增加Filter, 处理验证码
-        http.addFilterBefore((servletRequest, servletResponse, filterChain) -> {
-            HttpServletRequest request = (HttpServletRequest) servletRequest;
-            HttpServletResponse response = (HttpServletResponse) servletResponse;
-            HttpSession session = request.getSession();
+        http
+                // Enable CORS
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                // Disable CSRF (not needed for stateless JWT)
+                .csrf(csrf -> csrf.disable())
+                // Stateless session management
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // Configure authorization rules
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/register",
+                                "/api/v1/auth/captcha",
+                                "/api/v1/auth/refresh"
+                        ).permitAll()
+                        .anyRequest().authenticated()
+                )
+                // Disable form login (we use JWT)
+                .formLogin(form -> form.disable())
+                // Disable default logout
+                .logout(logout -> logout.disable())
+                // Handle authentication errors
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.setStatus(HttpStatus.UNAUTHORIZED);
+                            ApiResponse<?> result = ApiResponse.unauthorized("Unauthorized, please login");
+                            response.getWriter().write(objectMapper.writeValueAsString(result));
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.setStatus(HttpStatus.FORBIDDEN);
+                            ApiResponse<?> result = ApiResponse.forbidden("Access denied");
+                            response.getWriter().write(objectMapper.writeValueAsString(result));
+                        })
+                )
+                // Add JWT filter before UsernamePasswordAuthenticationFilter
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(jwtTokenProvider, userDetailsService),
+                        UsernamePasswordAuthenticationFilter.class
+                );
 
-            if(request.getServletPath().equals("/login")) {
-                // 如果是登录页面, 才处理验证码
-                String verifyCode = request.getParameter("validateCode");
-                String sessionVerifyCode = (String) session.getAttribute(Constants.KAPTCHA_SESSION_KEY);
-                if(verifyCode == null || !verifyCode.equals(sessionVerifyCode)) {
-                    // 验证码不正确
-                  /*  throw new CaptchaException();*/
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("msg", "Verification code error");
-                    result.put("code", HttpStatus.ERROR);
-                    response.setContentType("application/json;charset=UTF-8");
-                    String jsonData = new ObjectMapper().writeValueAsString(result);
-                    response.getWriter().write(jsonData);
-                    return;
-                }
-            }
-            // 让请求继续向下执行
-            filterChain.doFilter(request, response);
-        }, UsernamePasswordAuthenticationFilter.class);
-
-        http.csrf().disable();
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource()
+    {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOriginPatterns(List.of("*"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 
     @Bean

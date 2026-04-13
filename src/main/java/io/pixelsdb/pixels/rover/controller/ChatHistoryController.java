@@ -15,71 +15,76 @@
  */
 package io.pixelsdb.pixels.rover.controller;
 
+import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.model.MessageDetail;
 import io.pixelsdb.pixels.rover.model.QueryResults;
 import io.pixelsdb.pixels.rover.rest.request.*;
 import io.pixelsdb.pixels.rover.service.ChatService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/chat")
+@RequestMapping("/api/v1/chat")
 public class ChatHistoryController
 {
     @Autowired
     private ChatService chatService;
 
     @PostMapping("/save-sql")
-    public void saveSQLStatement(@RequestBody SaveSQLRequest request)
+    public ApiResponse<?> saveSQLStatement(@RequestBody SaveSQLRequest request)
     {
         chatService.saveSQLStatement(request.getUuid(), request.getSqlText());
+        return ApiResponse.success();
     }
 
-    @PostMapping("/update-sql")
-    public void updateSQLStatement(@RequestBody UpdateSQLRequest request)
+    @PutMapping("/update-sql")
+    public ApiResponse<?> updateSQLStatement(@RequestBody UpdateSQLRequest request)
     {
         chatService.updateSQLStatement(request.getUuid(), request.getNewSQL());
+        return ApiResponse.success();
     }
 
     @PostMapping("/get-sql")
-    public String getSQLStatement(@RequestBody GetSQLRequest request)
+    public ApiResponse<String> getSQLStatement(@RequestBody GetSQLRequest request)
     {
-        return chatService.getSQLStatement(request.getUuid());
+        String sql = chatService.getSQLStatement(request.getUuid());
+        return ApiResponse.success(sql);
     }
 
     @PostMapping("/save-message")
-    public void saveMessage(@RequestBody SaveMessageRequest request)
+    public ApiResponse<?> saveMessage(@RequestBody SaveMessageRequest request)
     {
         chatService.saveMessage(request.getUuid(), request.getSqlText(), request.getUserMessage(), request.getUserMessageUuid());
+        return ApiResponse.success();
     }
 
     @PostMapping("/save-query-result")
-    public void saveQueryResult(@RequestBody SaveQueryResultRequest request)
+    public ApiResponse<?> saveQueryResult(@RequestBody SaveQueryResultRequest request)
     {
         chatService.saveQueryResult(request.getUuid(), request.getResult(), request.getResultLimit(), request.getResultUuid());
+        return ApiResponse.success();
     }
 
-    @GetMapping("/get-chat-history")
-    public ResponseEntity<List<MessageDetail>> getAllMessagesWithDetails()
+    @GetMapping("/history")
+    public ApiResponse<List<MessageDetail>> getAllMessagesWithDetails()
     {
         List<MessageDetail> detailList = chatService.getAllMessageWithDetails();
-        return ResponseEntity.ok(detailList);
+        return ApiResponse.success(detailList);
     }
 
-    @GetMapping("/get-query-results")
-    public ResponseEntity<List<QueryResults>> getAllResultsOrderByTimeStamp()
+    @GetMapping("/query-results")
+    public ApiResponse<List<QueryResults>> getAllResultsOrderByTimeStamp()
     {
         List<QueryResults> queryResultsList = chatService.getAllQueryResultsOrderByTimestamp();
-        return  ResponseEntity.ok(queryResultsList);
+        return ApiResponse.success(queryResultsList);
     }
 
-    @PostMapping("/get-query-results-between")
-    public ResponseEntity<List<QueryResults>> getResultsBetweenTimeStamp(@RequestBody GetQueryResultsBetweenRequest request)
+    @PostMapping("/query-results-between")
+    public ApiResponse<List<QueryResults>> getResultsBetweenTimeStamp(@RequestBody GetQueryResultsBetweenRequest request)
     {
         List<QueryResults> queryResults = chatService.getQueryResultsBetween(request.getStartTime(), request.getEndTime());
-        return ResponseEntity.ok(queryResults);
+        return ApiResponse.success(queryResults);
     }
 }

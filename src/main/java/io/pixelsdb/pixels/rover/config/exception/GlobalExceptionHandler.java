@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 PixelsDB.
+ * Copyright 2024 PixelsDB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
  */
 package io.pixelsdb.pixels.rover.config.exception;
 
-import io.pixelsdb.pixels.rover.config.common.AjaxResult;
+import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.exception.CaptchaException;
 import io.pixelsdb.pixels.rover.exception.DemoModeException;
 import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.utils.StringUtils;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,12 +31,10 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import javax.servlet.http.HttpServletRequest;
-
 /**
- * 全局异常处理器
- * 
- * @author zhxypjxt
+ * Global exception handler that returns unified ApiResponse format.
+ *
+ * @author pixels
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler
@@ -43,101 +42,102 @@ public class GlobalExceptionHandler
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
-     * 权限校验异常
+     * Handle access denied exception.
      */
     @ExceptionHandler(AccessDeniedException.class)
-    public AjaxResult handleAccessDeniedException(AccessDeniedException e, HttpServletRequest request)
+    public ApiResponse<?> handleAccessDeniedException(AccessDeniedException e, HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
-        log.error("Request URI'{}', permission check failed'{}'", requestURI, e.getMessage());
-        return AjaxResult.error(HttpStatus.FORBIDDEN, "No permission, please contact the administrator");
+        log.error("Request URI '{}', permission check failed: '{}'", requestURI, e.getMessage());
+        return ApiResponse.forbidden("No permission, please contact the administrator");
     }
 
     /**
-     * 请求方式不支持
+     * Handle unsupported HTTP method.
      */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public AjaxResult handleHttpRequestMethodNotSupported(HttpRequestMethodNotSupportedException e,
-            HttpServletRequest request)
+    public ApiResponse<?> handleHttpRequestMethodNotSupported(HttpRequestMethodNotSupportedException e,
+                                                              HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
-        log.error("Request URI'{}', request'{}' is not supported", requestURI, e.getMethod());
-        return AjaxResult.error(e.getMessage());
+        log.error("Request URI '{}', HTTP method '{}' is not supported", requestURI, e.getMethod());
+        return ApiResponse.error(HttpStatus.BAD_METHOD, e.getMessage());
     }
 
     /**
-     * 验证码错误
+     * Handle captcha exception.
      */
     @ExceptionHandler(CaptchaException.class)
-    public AjaxResult handleCaptcha(HttpRequestMethodNotSupportedException e,
-                                                          HttpServletRequest request)
+    public ApiResponse<?> handleCaptcha(CaptchaException e, HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
-        log.error("Request URI'{}', captcha'{}'", requestURI, e.getMessage());
-        return AjaxResult.error(e.getMessage());
+        log.error("Request URI '{}', captcha error: '{}'", requestURI, e.getMessage());
+        return ApiResponse.error(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 
     /**
-     * 业务异常
+     * Handle business service exception.
      */
     @ExceptionHandler(ServiceException.class)
-    public AjaxResult handleServiceException(ServiceException e, HttpServletRequest request)
+    public ApiResponse<?> handleServiceException(ServiceException e, HttpServletRequest request)
     {
         log.error(e.getMessage(), e);
         Integer code = e.getCode();
-        return StringUtils.isNotNull(code) ? AjaxResult.error(code, e.getMessage()) : AjaxResult.error(e.getMessage());
+        return StringUtils.isNotNull(code)
+                ? ApiResponse.error(code, e.getMessage())
+                : ApiResponse.error(e.getMessage());
     }
 
     /**
-     * 拦截未知的运行时异常
+     * Handle unknown runtime exception.
      */
     @ExceptionHandler(RuntimeException.class)
-    public AjaxResult handleRuntimeException(RuntimeException e, HttpServletRequest request)
+    public ApiResponse<?> handleRuntimeException(RuntimeException e, HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
-        log.error("Request URI'{}', unknown exception", requestURI, e);
-        return AjaxResult.error(e.getMessage());
+        log.error("Request URI '{}', unknown runtime exception", requestURI, e);
+        return ApiResponse.error(e.getMessage());
     }
 
     /**
-     * 系统异常
+     * Handle generic system exception.
      */
     @ExceptionHandler(Exception.class)
-    public AjaxResult handleException(Exception e, HttpServletRequest request)
+    public ApiResponse<?> handleException(Exception e, HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
-        log.error("Request URI'{}', system exception", requestURI, e);
-        return AjaxResult.error(e.getMessage());
+        log.error("Request URI '{}', system exception", requestURI, e);
+        return ApiResponse.error(e.getMessage());
     }
 
     /**
-     * 自定义验证异常
+     * Handle bean validation bind exception.
      */
     @ExceptionHandler(BindException.class)
-    public AjaxResult handleBindException(BindException e)
+    public ApiResponse<?> handleBindException(BindException e)
     {
         log.error(e.getMessage(), e);
         String message = e.getAllErrors().get(0).getDefaultMessage();
-        return AjaxResult.error(message);
+        return ApiResponse.error(HttpStatus.BAD_REQUEST, message);
     }
 
     /**
-     * 自定义验证异常
+     * Handle method argument validation exception.
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public Object handleMethodArgumentNotValidException(MethodArgumentNotValidException e)
+    public ApiResponse<?> handleMethodArgumentNotValidException(MethodArgumentNotValidException e)
     {
         log.error(e.getMessage(), e);
         String message = e.getBindingResult().getFieldError().getDefaultMessage();
-        return AjaxResult.error(message);
+        return ApiResponse.error(HttpStatus.BAD_REQUEST, message);
     }
 
     /**
-     * 演示模式异常
+     * Handle demo mode exception.
      */
     @ExceptionHandler(DemoModeException.class)
-    public AjaxResult handleDemoModeException(DemoModeException e)
+    public ApiResponse<?> handleDemoModeException(DemoModeException e)
     {
-        return AjaxResult.error("Demo mode, operation is not permitted");
+        return ApiResponse.error("Demo mode, operation is not permitted");
     }
 }

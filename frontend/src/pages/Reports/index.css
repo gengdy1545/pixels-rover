@@ -1,0 +1,51 @@
+.reports-layout {
+  padding: 0;
+}
+
+.reports-filter {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.query-info-section {
+  margin-top: 16px;
+}
+
+.query-info-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.query-info-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.query-info-item:last-child {
+  border-bottom: none;
+}
+
+.query-info-label {
+  font-weight: 500;
+  color: #333;
+}
+
+.query-info-time {
+  color: #666;
+  font-size: 13px;
+}
+
+.query-info-limit {
+  color: #1890ff;
+  font-size: 13px;
+}
+
+.no-data {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}

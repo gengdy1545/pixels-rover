@@ -15,18 +15,17 @@
  */
 package io.pixelsdb.pixels.rover.controller;
 
+import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.constant.RestUrlPath;
 import io.pixelsdb.pixels.rover.rest.request.TextToSQLRequest;
 import io.pixelsdb.pixels.rover.rest.response.TextToSQLResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
 @RestController
@@ -40,24 +39,24 @@ public class TextToSQLController
         this.webClient = webClientBuilder.baseUrl(BASE_URL).build();
     }
 
-    @PostMapping(value = RestUrlPath.Text_to_SQL,
+    @PostMapping(value = RestUrlPath.TEXT_TO_SQL,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public TextToSQLResponse getSqlFromText(@RequestBody TextToSQLRequest request)
+    public ApiResponse<TextToSQLResponse> getSqlFromText(@RequestBody TextToSQLRequest request)
     {
         try
         {
-            // Use WebClient to call the other REST API
-            return webClient.post()
+            TextToSQLResponse response = webClient.post()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(request), TextToSQLResponse.class)
+                    .body(Mono.just(request), TextToSQLRequest.class)
                     .retrieve()
                     .bodyToMono(TextToSQLResponse.class)
-                    .block(); // block to wait for the response;
-        } catch (Exception e)
+                    .block();
+            return ApiResponse.success(response);
+        }
+        catch (Exception e)
         {
-            System.out.println("error");
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
+            return ApiResponse.error(e.getMessage());
         }
     }
 }

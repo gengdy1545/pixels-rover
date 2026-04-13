@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 PixelsDB.
+ * Copyright 2024 PixelsDB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 package io.pixelsdb.pixels.rover.config.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.pixelsdb.pixels.rover.constant.HttpStatus;
+import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -27,16 +27,33 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Authentication success handler that returns JWT tokens in the response.
+ *
+ * @author pixels
+ */
 public class JsonAuthenticationSuccessHandler implements AuthenticationSuccessHandler
 {
+    private final JwtTokenProvider jwtTokenProvider;
+
+    public JsonAuthenticationSuccessHandler(JwtTokenProvider jwtTokenProvider)
+    {
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException
     {
-        Map<String, Object> result = new HashMap<>();
-        result.put("msg", "Login success");
-        result.put("code", HttpStatus.SUCCESS);
-        result.put("authentication", authentication);
+        String accessToken = jwtTokenProvider.generateAccessToken(authentication);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(authentication);
+
+        Map<String, String> tokenData = new HashMap<>();
+        tokenData.put("accessToken", accessToken);
+        tokenData.put("refreshToken", refreshToken);
+
+        ApiResponse<Map<String, String>> result = ApiResponse.success("Login success", tokenData);
+
         response.setContentType("application/json;charset=UTF-8");
         String jsonData = new ObjectMapper().writeValueAsString(result);
         response.getWriter().write(jsonData);

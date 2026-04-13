@@ -1,0 +1,63 @@
+.sidebar {
+  width: 220px;
+  min-height: 100vh;
+  background: #2c3e50;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s;
+  overflow: hidden;
+}
+
+.sidebar-collapsed {
+  width: 60px;
+}
+
+.sidebar-header {
+  padding: 15px;
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-logo {
+  max-width: 160px;
+  height: auto;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sidebar-nav .ant-menu {
+  background: transparent;
+  color: #fff;
+}
+
+.sidebar-nav .ant-menu-item,
+.sidebar-nav .ant-menu-submenu-title {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sidebar-nav .ant-menu-item:hover,
+.sidebar-nav .ant-menu-submenu-title:hover {
+  color: #fff;
+}
+
+.sidebar-nav .ant-menu-item-selected {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #fff;
+}
+
+.schema-tree {
+  padding: 10px 15px;
+}
+
+.schema-tree .ant-tree {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.schema-tree .ant-tree-node-content-wrapper:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}

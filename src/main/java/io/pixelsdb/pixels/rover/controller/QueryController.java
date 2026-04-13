@@ -22,16 +22,15 @@ import io.pixelsdb.pixels.common.server.rest.response.GetQueryResultResponse;
 import io.pixelsdb.pixels.common.server.rest.response.GetQueryStatusResponse;
 import io.pixelsdb.pixels.common.server.rest.response.SubmitQueryResponse;
 import io.pixelsdb.pixels.common.utils.ConfigFactory;
+import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.constant.RestUrlPath;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
 @RestController
@@ -51,66 +50,66 @@ public class QueryController
     @PostMapping(value = RestUrlPath.SUBMIT_QUERY,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public SubmitQueryResponse submitQuery(@RequestBody SubmitQueryRequest request)
+    public ApiResponse<SubmitQueryResponse> submitQuery(@RequestBody SubmitQueryRequest request)
     {
         try
         {
-            // Use WebClient to call the other REST API
-            return webClient.post()
-                    .uri(RestUrlPath.SUBMIT_QUERY)
+            SubmitQueryResponse response = webClient.post()
+                    .uri(RestUrlPath.UPSTREAM_SUBMIT_QUERY)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Mono.just(request), SubmitQueryRequest.class)
                     .retrieve()
                     .bodyToMono(SubmitQueryResponse.class)
-                    .block(); // block to wait for the response
+                    .block();
+            return ApiResponse.success(response);
         }
         catch (Exception e)
         {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
+            return ApiResponse.error(e.getMessage());
         }
     }
 
     @PostMapping(value = RestUrlPath.GET_QUERY_STATUS,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public GetQueryStatusResponse getQueryStatus(@RequestBody GetQueryStatusRequest request)
+    public ApiResponse<GetQueryStatusResponse> getQueryStatus(@RequestBody GetQueryStatusRequest request)
     {
         try
         {
-            // Use WebClient to call the other REST API
-            return webClient.post()
-                    .uri(RestUrlPath.GET_QUERY_STATUS)
+            GetQueryStatusResponse response = webClient.post()
+                    .uri(RestUrlPath.UPSTREAM_GET_QUERY_STATUS)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Mono.just(request), GetQueryStatusRequest.class)
                     .retrieve()
                     .bodyToMono(GetQueryStatusResponse.class)
-                    .block(); // block to wait for the response
+                    .block();
+            return ApiResponse.success(response);
         }
         catch (Exception e)
         {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
+            return ApiResponse.error(e.getMessage());
         }
     }
 
     @PostMapping(value = RestUrlPath.GET_QUERY_RESULT,
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public GetQueryResultResponse getQueryResult(@RequestBody GetQueryResultRequest request)
+    public ApiResponse<GetQueryResultResponse> getQueryResult(@RequestBody GetQueryResultRequest request)
     {
         try
         {
-            // Use WebClient to call the other REST API
-            return webClient.post()
-                    .uri(RestUrlPath.GET_QUERY_RESULT)
+            GetQueryResultResponse response = webClient.post()
+                    .uri(RestUrlPath.UPSTREAM_GET_QUERY_RESULT)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Mono.just(request), GetQueryResultRequest.class)
                     .retrieve()
                     .bodyToMono(GetQueryResultResponse.class)
-                    .block(); // block to wait for the response
+                    .block();
+            return ApiResponse.success(response);
         }
         catch (Exception e)
         {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), e);
+            return ApiResponse.error(e.getMessage());
         }
     }
 }

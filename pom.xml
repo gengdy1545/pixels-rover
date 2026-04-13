@@ -27,6 +27,8 @@
 		<!-- web frameworks and packaging -->
 		<dep.spring.boot.version>3.0.5</dep.spring.boot.version>
 		<dep.kaptcha.version>2.3.3</dep.kaptcha.version>
+		<dep.jjwt.version>0.12.5</dep.jjwt.version>
+		<dep.slf4j.version>2.0.12</dep.slf4j.version>
 	</properties>
 
 	<dependencyManagement>
@@ -37,6 +39,12 @@
 				<version>${dep.spring.boot.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
+			</dependency>
+			<!-- Override slf4j-api version from parent POM to be compatible with Spring Boot 3 / Logback 1.4+ -->
+			<dependency>
+				<groupId>org.slf4j</groupId>
+				<artifactId>slf4j-api</artifactId>
+				<version>${dep.slf4j.version}</version>
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
@@ -131,6 +139,25 @@
 			<version>${dep.kaptcha.version}</version>
 		</dependency>
 
+		<!-- JWT -->
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>${dep.jjwt.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>${dep.jjwt.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-jackson</artifactId>
+			<version>${dep.jjwt.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+
 		<!--apache commons -->
 		<dependency>
 			<groupId>org.apache.commons</groupId>
@@ -141,10 +168,6 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-thymeleaf</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -168,12 +191,6 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-tomcat</artifactId>
 			<scope>provided</scope>
-		</dependency>
-
-		<!-- thymeleaf -->
-		<dependency>
-			<groupId>org.thymeleaf.extras</groupId>
-			<artifactId>thymeleaf-extras-springsecurity6</artifactId>
 		</dependency>
 
         <!-- Web Client -->
