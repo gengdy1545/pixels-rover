@@ -21,18 +21,19 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor: unified error handling
+// Response interceptor: handle both Java-wrapped {code,data} and Python raw JSON
 api.interceptors.response.use(
   (response) => {
-    const data = response.data as ApiResponse;
-    if (data.code !== 200) {
-      return Promise.reject(new Error(data.message || 'Request failed'));
+    const data = response.data;
+    if (data && typeof data === 'object' && 'code' in data) {
+      if ((data as ApiResponse).code !== 200) {
+        return Promise.reject(new Error((data as ApiResponse).message || 'Request failed'));
+      }
     }
     return response;
   },
   (error: AxiosError<ApiResponse>) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid, redirect to login
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       window.location.href = '/login';

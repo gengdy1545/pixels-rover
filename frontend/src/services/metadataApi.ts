@@ -1,16 +1,18 @@
 import api from './api';
-import type { ApiResponse } from '../types/api';
+import type { BackendInfo, TableInfo, ColumnInfo } from '../types/analysis';
 
 export const metadataApi = {
-  getSchemas: () =>
-    api.post<ApiResponse<unknown>>('/api/v1/metadata/get-schemas', {}),
+  getBackends: () =>
+    api.get<BackendInfo[]>('/api/v1/backends'),
 
-  getTables: (schemaName: string) =>
-    api.post<ApiResponse<unknown>>('/api/v1/metadata/get-tables', { schemaName }),
+  getSchemas: (backendId: string) =>
+    api.get<{ schemas: string[] }>(`/api/v1/backends/${backendId}/schemas`),
 
-  getColumns: (schemaName: string, tableName: string) =>
-    api.post<ApiResponse<unknown>>('/api/v1/metadata/get-columns', { schemaName, tableName }),
+  getTables: (backendId: string, schema: string) =>
+    api.get<{ tables: TableInfo[] }>(`/api/v1/backends/${backendId}/schemas/${schema}/tables`),
 
-  getViews: (schemaName: string) =>
-    api.post<ApiResponse<unknown>>('/api/v1/metadata/get-views', { schemaName }),
+  getColumns: (backendId: string, schema: string, tableName: string) =>
+    api.get<{ columns: ColumnInfo[] }>(
+      `/api/v1/backends/${backendId}/schemas/${schema}/tables/${tableName}/columns`,
+    ),
 };

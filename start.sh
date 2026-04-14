@@ -1,29 +1,31 @@
 #!/usr/bin/env bash
 #
-# Automated startup script for Pixels Rover.
+# Unified startup script for Pixels Rover.
 #
 # Usage:
-#   ./start.sh              Start both backend and frontend
-#   ./start.sh backend      Start backend only
-#   ./start.sh frontend     Start frontend only
-#   ./start.sh --prod       Build frontend for production and start backend serving static files
+#   ./start.sh              Start all services (Java + Python + Frontend)
+#   ./start.sh java         Start Java backend only (auth, :8081)
+#   ./start.sh python       Start Python backend only (analysis, :8090)
+#   ./start.sh frontend     Start frontend dev server only (:3000)
+#   ./start.sh --prod       Build frontend for production and start both backends
 #
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_DIR="$SCRIPT_DIR"
+JAVA_DIR="$SCRIPT_DIR"
+PYTHON_DIR="$SCRIPT_DIR/backend"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
-BACKEND_PID=""
+JAVA_PID=""
+PYTHON_PID=""
 FRONTEND_PID=""
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
@@ -34,17 +36,14 @@ cleanup() {
     echo ""
     log_info "Shutting down..."
 
-    if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
-        log_info "Stopping frontend (PID: $FRONTEND_PID)..."
-        kill "$FRONTEND_PID" 2>/dev/null || true
-        wait "$FRONTEND_PID" 2>/dev/null || true
-    fi
-
-    if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
-        log_info "Stopping backend (PID: $BACKEND_PID)..."
-        kill "$BACKEND_PID" 2>/dev/null || true
-        wait "$BACKEND_PID" 2>/dev/null || true
-    fi
+    for pid_var in FRONTEND_PID PYTHON_PID JAVA_PID; do
+        pid="${!pid_var}"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            log_info "Stopping $pid_var (PID: $pid)..."
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
 
     log_info "All services stopped."
     exit 0
@@ -52,53 +51,80 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-check_prerequisites() {
-    local missing=0
-
+check_java() {
     if ! command -v java &>/dev/null; then
         log_error "Java is not installed. JDK 17+ is required."
-        missing=1
+        return 1
     fi
-
     if ! command -v mvn &>/dev/null; then
         log_error "Maven is not installed."
-        missing=1
+        return 1
     fi
-
-    if ! command -v node &>/dev/null; then
-        log_error "Node.js is not installed."
-        missing=1
-    fi
-
-    if ! command -v npm &>/dev/null; then
-        log_error "npm is not installed."
-        missing=1
-    fi
-
-    if [[ $missing -eq 1 ]]; then
-        log_error "Please install the missing prerequisites and try again."
-        exit 1
-    fi
-
-    log_info "Prerequisites check passed (java, mvn, node, npm)."
+    return 0
 }
 
-start_backend() {
-    log_step "Starting backend (Spring Boot) on port 8081..."
-    cd "$BACKEND_DIR"
+check_python() {
+    if ! command -v python3 &>/dev/null; then
+        log_error "Python 3 is not installed. Python 3.10+ is required."
+        return 1
+    fi
+    return 0
+}
+
+check_node() {
+    if ! command -v node &>/dev/null; then
+        log_error "Node.js is not installed."
+        return 1
+    fi
+    if ! command -v npm &>/dev/null; then
+        log_error "npm is not installed."
+        return 1
+    fi
+    return 0
+}
+
+start_java() {
+    check_java || exit 1
+    log_step "Starting Java backend (auth) on port 8081..."
+    cd "$JAVA_DIR"
     mvn spring-boot:run -q &
-    BACKEND_PID=$!
-    log_info "Backend started (PID: $BACKEND_PID)."
+    JAVA_PID=$!
+    log_info "Java backend started (PID: $JAVA_PID)."
+}
+
+start_python() {
+    check_python || exit 1
+    log_step "Starting Python backend (analysis) on port 8090..."
+    cd "$PYTHON_DIR"
+
+    if [[ ! -d ".venv" ]]; then
+        log_step "Creating Python virtual environment..."
+        python3 -m venv .venv
+        source .venv/bin/activate
+        pip install --quiet -e .
+    else
+        source .venv/bin/activate
+    fi
+
+    if [[ ! -f ".env" ]] && [[ -f ".env.example" ]]; then
+        log_warn "No .env file found. Copying from .env.example — please edit backend/.env with your LLM API key."
+        cp .env.example .env
+    fi
+
+    uvicorn app.main:app --host 0.0.0.0 --port 8090 --reload &
+    PYTHON_PID=$!
+    log_info "Python backend started (PID: $PYTHON_PID)."
 }
 
 start_frontend() {
+    check_node || exit 1
     log_step "Installing frontend dependencies..."
     cd "$FRONTEND_DIR"
 
     if [[ ! -d "node_modules" ]]; then
         npm install
     else
-        log_info "node_modules already exists, skipping npm install. Run 'npm install' manually if needed."
+        log_info "node_modules exists, skipping npm install."
     fi
 
     log_step "Starting frontend dev server on port 3000..."
@@ -108,6 +134,7 @@ start_frontend() {
 }
 
 build_frontend_prod() {
+    check_node || exit 1
     log_step "Building frontend for production..."
     cd "$FRONTEND_DIR"
 
@@ -116,7 +143,7 @@ build_frontend_prod() {
     fi
 
     npm run build
-    log_info "Frontend production build completed. Output: frontend/dist/"
+    log_info "Frontend production build completed → frontend/dist/"
 }
 
 print_banner() {
@@ -131,12 +158,13 @@ print_banner() {
 }
 
 print_usage() {
-    echo "Usage: $0 [backend|frontend|--prod]"
+    echo "Usage: $0 [java|python|frontend|--prod|-h]"
     echo ""
-    echo "  (no args)    Start both backend and frontend in development mode"
-    echo "  backend      Start backend only"
-    echo "  frontend     Start frontend dev server only"
-    echo "  --prod       Build frontend for production and start backend"
+    echo "  (no args)    Start all services (Java + Python + Frontend)"
+    echo "  java         Start Java backend only (auth, :8081)"
+    echo "  python       Start Python backend only (analysis, :8090)"
+    echo "  frontend     Start frontend dev server only (:3000)"
+    echo "  --prod       Build frontend and start both backends"
     echo ""
 }
 
@@ -147,68 +175,69 @@ print_banner
 MODE="${1:-all}"
 
 case "$MODE" in
-    backend)
-        check_prerequisites
-        start_backend
+    java|backend)
+        start_java
         echo ""
         log_info "========================================="
-        log_info "  Backend API is running at:"
-        log_info "    👉  ${CYAN}http://localhost:8081${NC}"
+        log_info "  Java Backend (Auth) running at:"
+        log_info "    ${CYAN}http://localhost:8081${NC}"
         log_info "========================================="
         log_info "Press Ctrl+C to stop."
+        wait "$JAVA_PID"
+        ;;
+    python)
+        start_python
         echo ""
-        wait "$BACKEND_PID"
+        log_info "========================================="
+        log_info "  Python Backend (Analysis) running at:"
+        log_info "    ${CYAN}http://localhost:8090${NC}"
+        log_info "========================================="
+        log_info "Press Ctrl+C to stop."
+        wait "$PYTHON_PID"
         ;;
     frontend)
-        check_prerequisites
         start_frontend
         echo ""
         log_info "========================================="
         log_info "  Frontend dev server is ready!"
-        log_info "  Open your browser and visit:"
+        log_info "    ${CYAN}http://localhost:3000${NC}"
         log_info ""
-        log_info "    👉  ${CYAN}http://localhost:3000${NC}"
-        log_info ""
-        log_info "  (API requests are proxied to backend at :8081)"
+        log_info "  Proxy: /api/v1/auth/* → :8081 (Java)"
+        log_info "  Proxy: /api/*        → :8090 (Python)"
         log_info "========================================="
         log_info "Press Ctrl+C to stop."
-        echo ""
         wait "$FRONTEND_PID"
         ;;
     --prod)
-        check_prerequisites
         build_frontend_prod
-        start_backend
+        start_java
+        start_python
         echo ""
         log_info "=========================================="
         log_info "  Production mode is ready!"
         log_info ""
-        log_info "  Backend API → ${CYAN}http://localhost:8081${NC}"
-        log_info ""
-        log_info "  Frontend static files built at: frontend/dist/"
-        log_info "  Serve them with nginx or similar, e.g.:"
-        log_info "    👉  ${CYAN}http://localhost${NC} (via nginx)"
+        log_info "  Java Backend (Auth)     → ${CYAN}http://localhost:8081${NC}"
+        log_info "  Python Backend (Analysis)→ ${CYAN}http://localhost:8090${NC}"
+        log_info "  Frontend static files   → frontend/dist/"
         log_info "=========================================="
         log_info "Press Ctrl+C to stop."
-        echo ""
-        wait "$BACKEND_PID"
+        wait
         ;;
     all)
-        check_prerequisites
-        start_backend
+        start_java
+        start_python
         start_frontend
         echo ""
         log_info "=========================================="
         log_info "  All services are running!"
         log_info ""
-        log_info "  Backend API → ${CYAN}http://localhost:8081${NC}"
-        log_info "  Frontend UI → ${CYAN}http://localhost:3000${NC}"
+        log_info "  Java Backend (Auth)      → ${CYAN}http://localhost:8081${NC}"
+        log_info "  Python Backend (Analysis) → ${CYAN}http://localhost:8090${NC}"
+        log_info "  Frontend UI              → ${CYAN}http://localhost:3000${NC}"
         log_info ""
-        log_info "  Open your browser and visit:"
-        log_info "    👉  ${CYAN}http://localhost:3000${NC}"
+        log_info "  Open: ${CYAN}http://localhost:3000${NC}"
         log_info "=========================================="
         log_info "Press Ctrl+C to stop all services."
-        echo ""
         wait
         ;;
     -h|--help)

@@ -1,0 +1,55 @@
+.analysis-input-wrapper {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.analysis-input-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.analysis-textarea {
+  flex: 1;
+  font-size: 15px !important;
+  border-radius: 8px !important;
+}
+
+.analysis-submit-btn {
+  border-radius: 8px;
+  height: 42px;
+  padding: 0 24px;
+  font-weight: 500;
+}
+
+.analysis-input-hints {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hint-label {
+  color: #8c8c8c;
+  font-size: 12px;
+  margin-right: 8px;
+}
+
+.metrics-hint,
+.quick-questions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.quick-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-tag:hover {
+  color: #1890ff;
+  border-color: #1890ff;
+}

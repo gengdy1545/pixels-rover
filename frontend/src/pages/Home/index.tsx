@@ -4,17 +4,16 @@ import Sidebar from '../../components/Sidebar';
 import AppHeader from '../../components/Header';
 import './index.css';
 
-// Lazy load content pages
-const Translator = React.lazy(() => import('../Translator'));
+const Analysis = React.lazy(() => import('../Analysis'));
 const Reports = React.lazy(() => import('../Reports'));
 
 const Home: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
-  const [activeView, setActiveView] = useState<string>('translator');
+  const [activeView, setActiveView] = useState<string>('analysis');
 
   const handleMenuSelect = (key: string) => {
-    if (key === 'schemas' || key === 'translator') {
-      setActiveView('translator');
+    if (key === 'schemas' || key === 'analysis') {
+      setActiveView('analysis');
     } else if (key === 'reports') {
       setActiveView('reports');
     }
@@ -24,9 +23,9 @@ const Home: React.FC = () => {
     switch (activeView) {
       case 'reports':
         return <Reports />;
-      case 'translator':
+      case 'analysis':
       default:
-        return <Translator />;
+        return <Analysis />;
     }
   };
 

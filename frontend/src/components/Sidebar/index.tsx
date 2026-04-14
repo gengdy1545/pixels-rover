@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Tree, Menu } from 'antd';
-import { DatabaseOutlined, BarChartOutlined, SettingOutlined } from '@ant-design/icons';
-import { metadataApi } from '../../services/metadataApi';
+import { Tree, Menu, Select } from 'antd';
+import {
+  DatabaseOutlined,
+  BarChartOutlined,
+  RocketOutlined,
+  TableOutlined,
+} from '@ant-design/icons';
 import { useSchemaStore } from '../../stores/schemaStore';
 import type { DataNode } from 'antd/es/tree';
 import './index.css';
@@ -12,49 +16,50 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ onMenuSelect, collapsed }) => {
-  const { schemas, setSchemas, setTables, tables, setSelectedSchema } = useSchemaStore();
+  const {
+    backends,
+    selectedBackend,
+    schemas,
+    selectedSchema,
+    tables,
+    loadBackends,
+    selectBackend,
+    setSelectedSchema,
+    loadTables,
+  } = useSchemaStore();
+
   const [treeData, setTreeData] = useState<DataNode[]>([]);
-  const [activeMenu, setActiveMenu] = useState('translator');
+  const [activeMenu, setActiveMenu] = useState('analysis');
 
   useEffect(() => {
-    loadSchemas();
+    loadBackends();
   }, []);
+
+  useEffect(() => {
+    if (selectedSchema) {
+      loadTables(selectedSchema);
+    }
+  }, [selectedSchema]);
 
   useEffect(() => {
     const nodes: DataNode[] = schemas.map((schema) => ({
       title: schema,
       key: schema,
+      icon: <DatabaseOutlined />,
       children: (tables[schema] || []).map((table) => ({
-        title: table,
-        key: `${schema}.${table}`,
+        title: table.name || String(table),
+        key: `${schema}.${typeof table === 'string' ? table : table.name}`,
+        icon: <TableOutlined />,
         isLeaf: true,
       })),
     }));
     setTreeData(nodes);
   }, [schemas, tables]);
 
-  const loadSchemas = async () => {
-    try {
-      const response = await metadataApi.getSchemas();
-      const data = response.data.data as { schemaNames?: string[] };
-      const schemaNames = data?.schemaNames || [];
-      setSchemas(schemaNames);
-    } catch {
-      // Silently fail
-    }
-  };
-
   const onLoadData = async (node: DataNode) => {
     const schemaName = node.key as string;
     if (tables[schemaName]) return;
-    try {
-      const response = await metadataApi.getTables(schemaName);
-      const data = response.data.data as { tableNames?: string[] };
-      const tableNames = data?.tableNames || [];
-      setTables(schemaName, tableNames);
-    } catch {
-      // Silently fail
-    }
+    await loadTables(schemaName);
   };
 
   const handleMenuClick = (key: string) => {
@@ -84,33 +89,46 @@ const Sidebar: React.FC<SidebarProps> = ({ onMenuSelect, collapsed }) => {
           style={{ borderRight: 0 }}
           items={[
             {
+              key: 'analysis',
+              icon: <RocketOutlined />,
+              label: '智能分析',
+            },
+            {
               key: 'schemas',
               icon: <DatabaseOutlined />,
               label: 'Schemas',
-              children: [],
             },
             {
               key: 'reports',
               icon: <BarChartOutlined />,
               label: 'Reports',
             },
-            {
-              key: 'settings',
-              icon: <SettingOutlined />,
-              label: 'Settings',
-            },
           ]}
           onClick={({ key }) => handleMenuClick(key)}
         />
 
-        <div className="schema-tree">
-          <Tree
-            treeData={treeData}
-            loadData={onLoadData}
-            onSelect={handleSchemaSelect}
-            showLine
-          />
-        </div>
+        {!collapsed && activeMenu === 'schemas' && (
+          <div className="schema-tree">
+            {backends.length > 1 && (
+              <Select
+                value={selectedBackend}
+                onChange={selectBackend}
+                style={{ width: '100%', marginBottom: 8 }}
+                size="small"
+                options={backends.map((b) => ({
+                  value: b.backend_id,
+                  label: `${b.backend_id} (${b.backend_type})`,
+                }))}
+              />
+            )}
+            <Tree
+              treeData={treeData}
+              loadData={onLoadData}
+              onSelect={handleSchemaSelect}
+              showLine
+            />
+          </div>
+        )}
       </nav>
     </aside>
   );

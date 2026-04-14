@@ -46,6 +46,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+### Python Backend ###
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.db
+backend/.env
+*.pyc
+*.pyo
+
 ### OS ###
 .DS_Store
 Thumbs.db

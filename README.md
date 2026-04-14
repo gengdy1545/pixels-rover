@@ -1,5 +1,6 @@
-# pixels-rover
-The web UI of Pixels — a modern frontend-backend separated architecture.
+# Pixels Rover
+
+Pixels Rover — 基于 LLM 的智能数据分析系统，自动将自然语言问题转化为多步查询计划并生成分析结论。
 
 Watch the demonstration video:
 [![IMAGE](video/pixels-rover-720p-cover.png)](https://www.bilibili.com/video/BV1awDQYcEsN/?vd_source=da6f80d8fe2bab1291999a9535251c78)
@@ -7,79 +8,114 @@ Watch the demonstration video:
 
 ## Architecture
 
-- **Backend**: Spring Boot 3 + Spring Security (JWT) + Spring Data JPA + MySQL
-- **Frontend**: React 18 + TypeScript + Vite + Ant Design 5 + Zustand + ECharts
+```
+┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐
+│   Frontend   │─────▶│  Java Backend    │      │  Python Backend  │
+│  React 18    │      │  Spring Boot 3   │      │  FastAPI         │
+│  :3000       │─────▶│  :8081 (auth)    │      │  :8090 (analysis)│
+└──────────────┘      └──────────────────┘      └──────────────────┘
+                              │                         │
+                              ▼                         ▼
+                         ┌─────────┐             ┌────────────┐
+                         │  MySQL  │             │  DuckDB /  │
+                         │  (auth) │             │  Pixels DB │
+                         └─────────┘             └────────────┘
+```
 
-The backend serves as a pure REST API (`/api/v1/**`), and the frontend is an independent SPA application.
+- **Java Backend** (Spring Boot 3): 认证服务 — JWT 登录、注册、验证码、Token 刷新
+- **Python Backend** (FastAPI): 智能分析引擎 — 任务理解、语义解析、查询规划、SQL 执行、结论生成
+- **Frontend** (React 18 + TypeScript + Vite + Ant Design 5): 智能分析交互界面，实时 SSE 流式展示分析进度
 
 ## Quick Start
 
-After completing the database setup (see below), use the automated startup script:
+### Prerequisites
+
+| Component | Requirement |
+|-----------|-------------|
+| Java      | JDK 17+    |
+| Maven     | 3.8+       |
+| Python    | 3.10+      |
+| Node.js   | 18+        |
+| npm       | 9+         |
+| MySQL     | 8.0+       |
+
+### One-command startup
 
 ```bash
-# Start both backend and frontend
+# Start all three services (Java + Python + Frontend)
 ./start.sh
 
-# Start backend only
-./start.sh backend
+# Start individual services
+./start.sh java        # Java backend only (auth, :8081)
+./start.sh python      # Python backend only (analysis, :8090)
+./start.sh frontend    # Frontend dev server only (:3000)
 
-# Start frontend dev server only
-./start.sh frontend
-
-# Build frontend for production and start backend
+# Production build
 ./start.sh --prod
 ```
 
 Press `Ctrl+C` to gracefully stop all services.
 
-## Install Step-by-Step
+## Step-by-Step Setup
 
 ### 1. Database Setup
 
-Login MySQL and create a user and a `pixels_rover` database for Pixels:
+Login MySQL and create the `pixels_rover` database:
 
 ```sql
 CREATE USER 'pixels'@'%' IDENTIFIED BY 'password';
 CREATE DATABASE pixels_rover;
-GRANT ALL PRIVILEGES ON pixels_rover.* to 'pixels'@'%';
+GRANT ALL PRIVILEGES ON pixels_rover.* TO 'pixels'@'%';
 FLUSH PRIVILEGES;
 ```
 
 Use `db/pixels_rover.sql` to create tables in `pixels_rover`.
 
-### 2. Backend Configuration
+### 2. Java Backend Configuration
 
-Adjust the configuration in `src/main/resources/application.properties`:
+Adjust `src/main/resources/application.properties`:
 
 ```properties
-# mysql
 spring.datasource.username=pixels
 spring.datasource.password=password
-
-# pixels_rover port
 server.port=8081
-
-# text to sql url
 text2sql.url=http://localhost/text2sql
-
-# pixels server port
 pixels.server.port=18890
-
-# JWT (change the secret in production)
 jwt.secret=cGl4ZWxzZGItcm92ZXItand0LXNlY3JldC1rZXktMjAyNC1taW5pbXVtLTI1Ni1iaXRz
-jwt.access-token-expiration-ms=3600000
-jwt.refresh-token-expiration-ms=604800000
 ```
 
-### 3. Start the Backend
+Start:
 
 ```bash
 mvn spring-boot:run
 ```
 
-The backend API will be available at `http://localhost:8081`.
+### 3. Python Backend Configuration
 
-### 4. Start the Frontend
+```bash
+cd backend
+cp .env.example .env
+```
+
+Edit `backend/.env` with your LLM API key and other settings:
+
+```env
+ROVER_LLM_MODEL=gpt-4o-mini
+ROVER_LLM_API_KEY=sk-your-api-key-here
+ROVER_DATABASE_URL=sqlite+aiosqlite:///./rover.db
+ROVER_DUCKDB_PATH=:memory:
+```
+
+Start:
+
+```bash
+cd backend
+./run.sh
+```
+
+The Python backend will be available at `http://localhost:8090`.
+
+### 4. Frontend
 
 ```bash
 cd frontend
@@ -87,23 +123,68 @@ npm install
 npm run dev
 ```
 
-The frontend dev server will be available at `http://localhost:3000`, with API requests proxied to the backend.
+The frontend dev server runs at `http://localhost:3000`:
+- `/api/v1/auth/*` requests are proxied to the Java backend (:8081)
+- All other `/api/*` requests are proxied to the Python backend (:8090)
 
-### 5. Build for Production
+### 5. Production Build
 
 ```bash
 cd frontend
 npm run build
 ```
 
-The production-ready static files will be generated in `frontend/dist/`.
+Output: `frontend/dist/`
 
 ## API Overview
 
-| Module     | Endpoint Prefix          | Description                        |
-|------------|--------------------------|------------------------------------|
-| Auth       | `/api/v1/auth/*`         | Login, register, captcha, refresh  |
-| Metadata   | `/api/v1/metadata/*`     | Schemas, tables, columns, views    |
-| Query      | `/api/v1/query/*`        | Submit query, status, results      |
-| Text-to-SQL| `/api/v1/query/text-to-sql` | Natural language to SQL         |
-| Chat       | `/api/v1/chat/*`         | Chat history, SQL statements       |
+### Java Backend (:8081) — Authentication
+
+| Endpoint              | Description               |
+|-----------------------|---------------------------|
+| `POST /api/v1/auth/login`    | Login with captcha  |
+| `POST /api/v1/auth/register` | Register new user   |
+| `GET  /api/v1/auth/captcha`  | Get captcha image   |
+| `POST /api/v1/auth/refresh`  | Refresh JWT tokens  |
+| `GET  /api/v1/auth/user`     | Get current user    |
+
+### Python Backend (:8090) — Intelligent Analysis
+
+| Endpoint                           | Description                         |
+|------------------------------------|-------------------------------------|
+| `POST /api/v1/analysis`           | Submit question (SSE stream response) |
+| `GET  /api/v1/analysis/{id}`      | Get completed analysis result        |
+| `GET  /api/v1/backends`           | List registered storage backends     |
+| `GET  /api/v1/backends/{id}/schemas` | List schemas in a backend         |
+| `GET  /api/v1/backends/{id}/schemas/{s}/tables` | List tables         |
+| `GET  /api/v1/backends/{id}/schemas/{s}/tables/{t}/columns` | List columns |
+| `GET  /api/v1/semantic/metrics`   | List semantic metrics                |
+| `GET  /api/v1/semantic/dimensions`| List semantic dimensions             |
+
+## Project Structure
+
+```
+pixels-rover/
+├── src/main/java/          # Java backend (Spring Boot — auth only)
+├── backend/                # Python backend (FastAPI — analysis engine)
+│   ├── app/
+│   │   ├── api/            #   API routes (analysis, backends, semantic)
+│   │   ├── core/           #   Core modules (harness, interpreter, planner, executor, ...)
+│   │   ├── models/         #   SQLAlchemy ORM models
+│   │   ├── schemas/        #   Pydantic data contracts
+│   │   ├── services/       #   Orchestration service
+│   │   └── storage/        #   Storage backend abstraction (DuckDB, Pixels)
+│   ├── .env.example
+│   ├── pyproject.toml
+│   └── run.sh
+├── frontend/               # React frontend
+│   └── src/
+│       ├── pages/          #   Analysis, Reports, Login, Register
+│       ├── components/     #   AnalysisInput, TaskCard, PlanTimeline, StepDetail, SummaryCard, ...
+│       ├── stores/         #   Zustand stores (analysis, schema, auth)
+│       ├── services/       #   API clients (analysisApi, metadataApi, authApi)
+│       └── types/          #   TypeScript type definitions
+├── docs/                   # Design documents
+├── start.sh                # Unified startup script
+└── pom.xml                 # Maven config (Java backend)
+```
