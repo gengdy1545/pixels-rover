@@ -4,7 +4,6 @@ import type {
   AnalysisPlan,
   PlanStep,
   AnalysisResponse,
-  SSEEventType,
   SSEStatusChangeData,
   SSEStepStartedData,
   SSEStepSqlData,
@@ -13,7 +12,8 @@ import type {
   SSEErrorData,
   SemanticMetric,
 } from '../types/analysis';
-import { submitAnalysis, getSemanticMetrics } from '../services/analysisApi';
+import type { SSEEventName, SSEConnection } from '../types/sse';
+import { submitAnalysis, getSemanticMetrics } from '../api';
 import { useAuthStore } from './authStore';
 
 export type SessionStatus =
@@ -40,9 +40,12 @@ interface AnalysisState {
   error: string | null;
   isLoading: boolean;
   availableMetrics: SemanticMetric[];
+  /** Active SSE connection handle for user cancellation. */
+  _connection: SSEConnection | null;
 
-  startAnalysis: (question: string) => Promise<void>;
-  handleSSEEvent: (eventType: SSEEventType, data: unknown) => void;
+  startAnalysis: (question: string) => void;
+  cancelAnalysis: () => void;
+  handleSSEEvent: (eventType: SSEEventName, data: unknown) => void;
   reset: () => void;
   loadMetrics: () => Promise<void>;
 }
@@ -57,35 +60,54 @@ const initialState = {
   warnings: [],
   error: null,
   isLoading: false,
+  _connection: null as SSEConnection | null,
 };
 
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   ...initialState,
   availableMetrics: [],
 
-  startAnalysis: async (question: string) => {
+  startAnalysis: (question: string) => {
+    // Cancel any existing connection
+    get()._connection?.abort();
+
     set({ ...initialState, isLoading: true, status: 'received', availableMetrics: get().availableMetrics });
 
     const user = useAuthStore.getState().user;
     const userId = user?.id || 1;
 
-    await submitAnalysis(
+    const connection = submitAnalysis(
       { question, user_id: userId },
       {
         onEvent: (eventType, data) => {
-          get().handleSSEEvent(eventType, data);
+          get().handleSSEEvent(eventType, data as unknown);
         },
         onError: (error) => {
-          set({ error: error.message, status: 'failed', isLoading: false });
+          set({ error: error.message, status: 'failed', isLoading: false, _connection: null });
         },
         onComplete: () => {
-          set({ isLoading: false });
+          set({ isLoading: false, _connection: null });
+        },
+        onDisconnect: (error) => {
+          set({
+            error: `Connection lost: ${error.message}. Please retry your analysis.`,
+            status: 'failed',
+            isLoading: false,
+            _connection: null,
+          });
         },
       },
     );
+
+    set({ _connection: connection });
   },
 
-  handleSSEEvent: (eventType: SSEEventType, data: unknown) => {
+  cancelAnalysis: () => {
+    get()._connection?.abort();
+    set({ isLoading: false, status: 'idle', _connection: null });
+  },
+
+  handleSSEEvent: (eventType: SSEEventName, data: unknown) => {
     const d = data as Record<string, unknown>;
 
     switch (eventType) {

@@ -35,8 +35,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -70,28 +68,9 @@ public class SecurityConfig
         http
                 // Enable CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                // Enable CSRF protection with cookie-based token repository.
-                // The XSRF-TOKEN cookie is non-HttpOnly so JavaScript can read it
-                // and send it back via the X-XSRF-TOKEN header.
-                .csrf(csrf -> {
-                    CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-                    CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
-                    // Do not defer loading the CSRF token so it is always available
-                    requestHandler.setCsrfRequestAttributeName(null);
-                    csrf
-                            .csrfTokenRepository(csrfTokenRepository)
-                            .csrfTokenRequestHandler(requestHandler)
-                            // Exempt public endpoints and GET requests from CSRF
-                            .ignoringRequestMatchers(
-                                    "/health",
-                                    "/api/v1/auth/login",
-                                    "/api/v1/auth/register",
-                                    "/api/v1/auth/captcha",
-                                    "/api/v1/auth/refresh",
-                                    "/api/v1/auth/jwks",
-                                    "/api/v1/auth/me"
-                            );
-                })
+                // CSRF protection is handled at the API gateway layer (NJS).
+                // Java Auth Service is not directly exposed to browsers.
+                .csrf(csrf -> csrf.disable())
                 // Stateless session management
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

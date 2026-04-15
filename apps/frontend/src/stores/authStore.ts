@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { UserInfo } from '../types/user';
-import { authApi } from '../services/authApi';
+import { authApi } from '../api';
 import { isLoggedInCookie } from '../services/cookie';
 
 interface AuthState {
@@ -29,8 +29,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   checkAuth: async () => {
     try {
-      const response = await authApi.me();
-      const user = response.data.data;
+      const user = await authApi.me();
       if (user) {
         set({ user, isAuthenticated: true, isLoading: false });
       } else {

@@ -46,6 +46,9 @@ public class ApiResponse<T> implements Serializable
     /** Request trace id */
     private String requestId;
 
+    /** API version identifier for version evolution */
+    private String apiVersion = "v1";
+
     public ApiResponse()
     {
     }
@@ -56,6 +59,7 @@ public class ApiResponse<T> implements Serializable
         this.message = message;
         this.errorCode = ErrorCodeName.fromCode(code);
         this.requestId = RequestIdContext.get();
+        this.apiVersion = "v1";
     }
 
     public ApiResponse(int code, String message, T data)
@@ -65,6 +69,7 @@ public class ApiResponse<T> implements Serializable
         this.data = data;
         this.errorCode = ErrorCodeName.fromCode(code);
         this.requestId = RequestIdContext.get();
+        this.apiVersion = "v1";
     }
 
     // --- Static factory methods ---
@@ -154,5 +159,15 @@ public class ApiResponse<T> implements Serializable
     public void setErrorCode(String errorCode)
     {
         this.errorCode = errorCode;
+    }
+
+    public String getApiVersion()
+    {
+        return apiVersion;
+    }
+
+    public void setApiVersion(String apiVersion)
+    {
+        this.apiVersion = apiVersion;
     }
 }

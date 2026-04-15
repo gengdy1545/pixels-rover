@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Input, Button, Select, Modal, InputNumber, message, Table } from 'antd';
 import { SendOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import ChatMessage from '../../components/ChatMessage';
-import { chatApi } from '../../services/chatApi';
-import { queryApi } from '../../services/queryApi';
+import { chatApi, queryApi } from '../../api';
 import { useSchemaStore } from '../../stores/schemaStore';
 import './index.css';
 
@@ -58,8 +57,7 @@ const Translator: React.FC = () => {
 
   const loadChatHistory = async () => {
     try {
-      const response = await chatApi.getChatHistory();
-      const history = response.data.data;
+      const history = await chatApi.getChatHistory();
       if (history && history.length > 0) {
         const historyMessages: ChatMsg[] = [];
         history.forEach((item) => {
@@ -110,13 +108,12 @@ const Translator: React.FC = () => {
     setLoading(true);
 
     try {
-      const response = await chatApi.textToSql({
+      const data = await chatApi.textToSql({
         question: inputValue,
         schemaName: selectedSchema,
         tables: [],
         columns: {},
-      });
-      const data = response.data.data as { sql?: string };
+      }) as { sql?: string };
       const sqlText = data?.sql || '';
       const sqlUuid = generateUuid();
 
@@ -149,11 +146,10 @@ const Translator: React.FC = () => {
   const confirmExecuteSql = async () => {
     setExecuteModalVisible(false);
     try {
-      const response = await queryApi.submitQuery({
+      const data = await queryApi.submitQuery({
         sql: pendingSql,
         schemaName: selectedSchema || '',
-      });
-      const data = response.data.data as { queryId?: string };
+      }) as { queryId?: string };
       if (data?.queryId) {
         // Poll for results
         await pollQueryResult(data.queryId, pendingSqlUuid);
@@ -169,11 +165,9 @@ const Translator: React.FC = () => {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       try {
-        const statusResponse = await queryApi.getQueryStatus(queryId);
-        const statusData = statusResponse.data.data as { status?: string };
+        const statusData = await queryApi.getQueryStatus(queryId) as { status?: string };
         if (statusData?.status === 'FINISHED') {
-          const resultResponse = await queryApi.getQueryResult(queryId);
-          const resultData = resultResponse.data.data as { columns?: string[]; rows?: Record<string, unknown>[] };
+          const resultData = await queryApi.getQueryResult(queryId) as { columns?: string[]; rows?: Record<string, unknown>[] };
           if (resultData) {
             setQueryResult({
               columns: resultData.columns || [],

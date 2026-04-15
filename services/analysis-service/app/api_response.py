@@ -9,6 +9,7 @@ def api_success(data: Any = None, message: str = "success") -> dict[str, Any]:
         "message": message,
         "data": data,
         "requestId": get_request_id(),
+        "apiVersion": "v1",
     }
 
 
@@ -17,6 +18,7 @@ def api_error(code: int, message: str, error_code: str | None = None) -> dict[st
         "code": code,
         "message": message,
         "requestId": get_request_id(),
+        "apiVersion": "v1",
     }
     if error_code:
         payload["errorCode"] = error_code

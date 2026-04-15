@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, message } from 'antd';
 import { UserOutlined, MailOutlined, LockOutlined, BankOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
-import { authApi } from '../../services/authApi';
+import { authApi } from '../../api';
 import '../Login/index.css';
 
 const Register: React.FC = () => {
@@ -13,11 +13,7 @@ const Register: React.FC = () => {
 
   const loadCaptcha = async () => {
     try {
-      const response = await authApi.getCaptcha();
-      const data = response.data.data;
-      if (!data) {
-        throw new Error('Captcha payload is empty');
-      }
+      const data = await authApi.getCaptcha();
       setCaptchaImage(data.captchaImage);
       setCaptchaKey(data.captchaKey);
     } catch {

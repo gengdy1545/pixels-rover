@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { metadataApi } from '../services/metadataApi';
+import { metadataApi } from '../api';
 import type { BackendInfo, TableInfo, ColumnInfo } from '../types/analysis';
 
 interface SchemaState {

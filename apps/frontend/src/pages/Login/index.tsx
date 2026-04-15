@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, message } from 'antd';
 import { MailOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
-import { authApi } from '../../services/authApi';
+import { authApi } from '../../api';
 import { useAuthStore } from '../../stores/authStore';
 import './index.css';
 
@@ -15,11 +15,7 @@ const Login: React.FC = () => {
 
   const loadCaptcha = async () => {
     try {
-      const response = await authApi.getCaptcha();
-      const data = response.data.data;
-      if (!data) {
-        throw new Error('Captcha payload is empty');
-      }
+      const data = await authApi.getCaptcha();
       setCaptchaImage(data.captchaImage);
       setCaptchaKey(data.captchaKey);
     } catch {

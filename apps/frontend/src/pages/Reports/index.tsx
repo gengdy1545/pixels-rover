@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DatePicker, Button, Card, Row, Col, message } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { chatApi } from '../../services/chatApi';
+import { chatApi } from '../../api';
 import type { QueryResult } from '../../types/query';
 import dayjs from 'dayjs';
 import './index.css';
@@ -20,8 +20,8 @@ const Reports: React.FC = () => {
   const loadAllResults = async () => {
     setLoading(true);
     try {
-      const response = await chatApi.getQueryResults();
-      setQueryResults(response.data.data || []);
+      const results = await chatApi.getQueryResults();
+      setQueryResults(results || []);
     } catch {
       message.error('Failed to load query results');
     } finally {
@@ -36,11 +36,11 @@ const Reports: React.FC = () => {
     }
     setLoading(true);
     try {
-      const response = await chatApi.getQueryResultsBetween(
+      const results = await chatApi.getQueryResultsBetween(
         dateRange[0].toISOString(),
         dateRange[1].toISOString()
       );
-      setQueryResults(response.data.data || []);
+      setQueryResults(results || []);
     } catch {
       message.error('Failed to load filtered results');
     } finally {

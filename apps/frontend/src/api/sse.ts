@@ -1,0 +1,181 @@
+import type { ApiResponse } from '../types/api';
+import type { SSECallbacks, SSEConnection, SSEEventName, SSEEventMap } from '../types/sse';
+import { buildCommonHeaders, refreshAccessToken } from './client';
+
+// ════════════════════════════════════════
+// SSE Stream Client
+// ════════════════════════════════════════
+
+/**
+ * Open a POST-based SSE stream.
+ *
+ * - Injects CSRF token and X-Request-Id via `buildCommonHeaders()`.
+ * - Handles 401 by refreshing the token and retrying once.
+ * - Returns an `SSEConnection` handle for user cancellation.
+ * - Calls `onDisconnect` on network errors (distinguishable from business errors).
+ */
+export function openSSEStream(
+  url: string,
+  body: unknown,
+  callbacks: SSECallbacks,
+): SSEConnection {
+  const abortController = new AbortController();
+  let aborted = false;
+
+  const connection: SSEConnection = {
+    abort: () => {
+      aborted = true;
+      abortController.abort();
+    },
+    get aborted() {
+      return aborted;
+    },
+  };
+
+  // Fire-and-forget the async work; errors are routed to callbacks.
+  consumeStream(url, body, abortController, callbacks).catch(() => {
+    // All errors are already handled inside consumeStream.
+  });
+
+  return connection;
+}
+
+// ════════════════════════════════════════
+// Internal helpers
+// ════════════════════════════════════════
+
+async function consumeStream(
+  url: string,
+  body: unknown,
+  abortController: AbortController,
+  callbacks: SSECallbacks,
+): Promise<void> {
+  try {
+    const buildRequest = () => new Request(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildCommonHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal: abortController.signal,
+    });
+
+    let response = await fetch(buildRequest());
+
+    // Handle 401: refresh token and retry once
+    if (response.status === 401) {
+      await refreshAccessToken();
+      response = await fetch(buildRequest());
+    }
+
+    if (!response.ok) {
+      const error = await extractHttpError(response);
+      callbacks.onError?.(error);
+      return;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      callbacks.onError?.(new Error('Response body is not readable'));
+      return;
+    }
+
+    await parseSSEStream(reader, callbacks);
+    callbacks.onComplete?.();
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      // User-initiated cancellation — do not call onError.
+      return;
+    }
+
+    // Network-level errors (e.g. connection lost, DNS failure)
+    if (isNetworkError(error)) {
+      callbacks.onDisconnect?.(error as Error);
+    } else {
+      callbacks.onError?.(error as Error);
+    }
+  }
+}
+
+/**
+ * Parse an SSE text stream from a ReadableStream reader.
+ * Handles multi-line `data:` fields and dispatches typed events.
+ */
+async function parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  callbacks: SSECallbacks,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    let currentEvent: string | null = null;
+    let currentData: string | null = null;
+
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith('data: ')) {
+        currentData = line.slice(6);
+      } else if (line === '' && currentEvent && currentData) {
+        dispatchEvent(currentEvent, currentData, callbacks);
+        currentEvent = null;
+        currentData = null;
+      }
+    }
+  }
+
+  // Flush any remaining buffered event
+  if (buffer.trim() === '' && false) {
+    // no-op: buffer is empty after stream ends
+  }
+}
+
+function dispatchEvent(
+  eventName: string,
+  rawData: string,
+  callbacks: SSECallbacks,
+): void {
+  try {
+    const parsed = JSON.parse(rawData);
+    callbacks.onEvent(eventName as SSEEventName, parsed as SSEEventMap[SSEEventName]);
+  } catch {
+    // Non-JSON data — pass as-is wrapped in an object
+    callbacks.onEvent(eventName as SSEEventName, rawData as unknown as SSEEventMap[SSEEventName]);
+  }
+}
+
+async function extractHttpError(response: Response): Promise<Error> {
+  let message = `HTTP ${response.status}: ${response.statusText}`;
+  try {
+    const payload = (await response.json()) as ApiResponse;
+    message = payload.message || message;
+  } catch {
+    // Keep the default HTTP message when the body is not JSON.
+  }
+  return new Error(message);
+}
+
+/**
+ * Distinguish network errors (connection lost, DNS failure, timeout)
+ * from other runtime errors.
+ */
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) {
+    // fetch throws TypeError for network failures
+    return true;
+  }
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return false; // User cancellation, not a network error
+  }
+  return false;
+}

@@ -65,3 +65,6 @@ docker-compose.override.yml
 ### OS ###
 .DS_Store
 Thumbs.db
+
+### Personal Notes (temporary design docs, not for version control) ###
+.notes/

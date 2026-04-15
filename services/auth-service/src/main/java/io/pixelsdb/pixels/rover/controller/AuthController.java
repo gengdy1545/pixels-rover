@@ -22,7 +22,6 @@ import io.pixelsdb.pixels.rover.rest.request.LoginRequest;
 import io.pixelsdb.pixels.rover.rest.request.RefreshTokenRequest;
 import io.pixelsdb.pixels.rover.rest.request.RegisterRequest;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import io.pixelsdb.pixels.rover.service.SysLoginService;
 import io.pixelsdb.pixels.rover.service.UserService;
 import jakarta.validation.Valid;
@@ -55,17 +54,14 @@ public class AuthController
 
     /**
      * Login endpoint. Validates credentials and captcha, returns JWT tokens
-     * both in the response body (backward compat) and as HttpOnly cookies.
+     * in the response body. Cookie injection is handled by the API gateway.
      */
     @PostMapping("/login")
     public ApiResponse<?> login(@Valid @RequestBody LoginRequest request,
-                                HttpServletRequest httpRequest,
-                                HttpServletResponse httpResponse)
+                                HttpServletRequest httpRequest)
     {
         var tokenResponse = sysLoginService.login(request,
                 resolveUserAgent(httpRequest), resolveClientIp(httpRequest));
-        cookieHelper.writeTokenCookies(httpResponse,
-                tokenResponse.getAccessToken(), tokenResponse.getRefreshToken());
         return ApiResponse.success("Login success", tokenResponse);
     }
 
@@ -91,12 +87,11 @@ public class AuthController
 
     /**
      * Refresh token endpoint. Reads refresh token from Cookie first, then falls back to request body.
-     * Writes new tokens as HttpOnly cookies.
+     * Cookie injection for new tokens is handled by the API gateway.
      */
     @PostMapping("/refresh")
     public ApiResponse<?> refreshToken(@RequestBody(required = false) RefreshTokenRequest request,
-                                       HttpServletRequest httpRequest,
-                                       HttpServletResponse httpResponse)
+                                       HttpServletRequest httpRequest)
     {
         // Prefer refresh_token from Cookie; fall back to request body
         String refreshToken = cookieHelper.resolveRefreshToken(httpRequest);
@@ -113,8 +108,6 @@ public class AuthController
 
         var tokenResponse = sysLoginService.refreshToken(refreshToken,
                 resolveUserAgent(httpRequest), resolveClientIp(httpRequest));
-        cookieHelper.writeTokenCookies(httpResponse,
-                tokenResponse.getAccessToken(), tokenResponse.getRefreshToken());
         return ApiResponse.success("Token refreshed", tokenResponse);
     }
 
@@ -168,20 +161,18 @@ public class AuthController
     }
 
     @PostMapping("/logout")
-    public ApiResponse<?> logout(HttpServletRequest request, HttpServletResponse response)
+    public ApiResponse<?> logout(HttpServletRequest request)
     {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         sysLoginService.revokeSession(authentication.getName(), resolveCurrentSessionId(request));
-        cookieHelper.clearTokenCookies(response);
         return ApiResponse.success("Logged out");
     }
 
     @PostMapping("/logout-all")
-    public ApiResponse<?> logoutAll(HttpServletRequest request, HttpServletResponse response)
+    public ApiResponse<?> logoutAll(HttpServletRequest request)
     {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         sysLoginService.revokeOtherSessions(authentication.getName(), resolveCurrentSessionId(request));
-        cookieHelper.clearTokenCookies(response);
         return ApiResponse.success("Logged out from other sessions");
     }
 

@@ -10,15 +10,15 @@ vi.mock('../../services/cookie', () => ({
   isLoggedInCookie: vi.fn(() => false),
 }));
 
-// Mock the authApi module
-vi.mock('../../services/authApi', () => ({
+// Mock the authApi module (new unified API layer)
+vi.mock('../../api', () => ({
   authApi: {
     me: vi.fn(),
     logout: vi.fn(),
   },
 }));
 
-import { authApi } from '../../services/authApi';
+import { authApi } from '../../api';
 
 describe('useAuthStore', () => {
   beforeEach(() => {
@@ -50,9 +50,8 @@ describe('useAuthStore', () => {
 
   it('checkAuth should set user when /me succeeds', async () => {
     const mockUser = { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' };
-    vi.mocked(authApi.me).mockResolvedValue({
-      data: { code: 200, message: 'success', data: mockUser },
-    } as never);
+    // New API layer auto-unwraps ApiResponse — me() resolves directly to UserInfo
+    vi.mocked(authApi.me).mockResolvedValue(mockUser);
 
     await useAuthStore.getState().checkAuth();
 
@@ -80,7 +79,7 @@ describe('useAuthStore', () => {
   });
 
   it('logout should clear state and call authApi.logout', async () => {
-    vi.mocked(authApi.logout).mockResolvedValue({} as never);
+    vi.mocked(authApi.logout).mockResolvedValue(undefined as never);
 
     useAuthStore.setState({
       user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },

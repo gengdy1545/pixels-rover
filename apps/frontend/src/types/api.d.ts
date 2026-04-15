@@ -5,6 +5,7 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   errorCode?: string;
   requestId?: string;
+  apiVersion?: string;
 }
 
 // Stable cross-service error codes
