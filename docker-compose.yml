@@ -11,11 +11,14 @@
 #   1. Copy .env.example to .env and fill in required values
 #   2. Run: docker compose up
 #
-# Ports:
-#   - 3000  Frontend (nginx)
-#   - 8081  Auth Service (Java/Spring Boot)
-#   - 8090  Analysis Service (Python/FastAPI)
-#   - 3306  MySQL
+# Architecture:
+#   All traffic enters through the API Gateway (port 80/443).
+#   The gateway handles routing, JWT auth passthrough, rate limiting,
+#   CORS, and audit logging. Backend services are not directly exposed.
+#
+# Ports (external):
+#   - 80    API Gateway (unified entry point)
+#   - 3306  MySQL (optional, for direct DB access)
 
 services:
   # ---------- MySQL ----------
@@ -75,8 +78,9 @@ services:
       JWT_PUBLIC_KEYS_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public-keys.json
       # Server
       SERVER_PORT: 8081
-    ports:
-      - "${AUTH_PORT:-8081}:8081"
+    # No external port exposure — only reachable via gateway
+    expose:
+      - "8081"
     volumes:
       - jwt-keys:/jwt-keys:ro
     healthcheck:
@@ -116,8 +120,9 @@ services:
       ROVER_JWT_ISSUER: pixels-rover-auth-service
       # Debug
       ROVER_DEBUG: ${DEBUG:-false}
-    ports:
-      - "${ANALYSIS_PORT:-8090}:8090"
+    # No external port exposure — only reachable via gateway
+    expose:
+      - "8090"
     volumes:
       - jwt-keys:/jwt-keys:ro
     healthcheck:
@@ -127,23 +132,52 @@ services:
       start_period: 30s
       retries: 3
 
-  # ---------- Frontend (nginx) ----------
+  # ---------- Frontend (nginx — static assets only) ----------
   frontend:
     build:
       context: ./apps/frontend
       dockerfile: Dockerfile
     container_name: pixels-rover-frontend
     restart: unless-stopped
+    # No external port exposure — served via gateway
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ---------- API Gateway (nginx — unified entry point) ----------
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: pixels-rover-gateway
+    restart: unless-stopped
     depends_on:
       auth-service:
         condition: service_healthy
       analysis-service:
         condition: service_healthy
+      frontend:
+        condition: service_healthy
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "${GATEWAY_PORT:-80}:80"
+    volumes:
+      - gateway-logs:/var/log/nginx
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/gateway/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 volumes:
   mysql-data:
     driver: local
   jwt-keys:
+    driver: local
+  gateway-logs:
     driver: local
