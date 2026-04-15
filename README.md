@@ -56,6 +56,8 @@ Watch the demonstration video:
 
 Press `Ctrl+C` to gracefully stop all services.
 
+默认情况下，`./start.sh` 启动 Java 或 Python 服务时会自动在 `.tmp/jwt-keys/` 下生成开发用 RSA 密钥，并让本地联调默认跑在 `RS256 + kid` 模式。如果你已经通过环境变量提供了 JWT 密钥配置，启动脚本会优先使用外部配置。
+
 ## Step-by-Step Setup
 
 ### 1. Database Setup
@@ -73,7 +75,7 @@ Use `db/pixels_rover.sql` to create tables in `pixels_rover`.
 
 ### 2. Java Backend Configuration
 
-Adjust `src/main/resources/application.properties`:
+Adjust `services/auth-service/src/main/resources/application.properties`:
 
 ```properties
 spring.datasource.username=pixels
@@ -84,20 +86,23 @@ pixels.server.port=18890
 jwt.secret=cGl4ZWxzZGItcm92ZXItand0LXNlY3JldC1rZXktMjAyNC1taW5pbXVtLTI1Ni1iaXRz
 ```
 
+如果你要手动切到 RSA，可参考 [docs/jwt-rs256-cutover.md](docs/jwt-rs256-cutover.md) 和 `scripts/generate-jwt-rsa-keys.sh`。
+
 Start:
 
 ```bash
+cd services/auth-service
 mvn spring-boot:run
 ```
 
 ### 3. Python Backend Configuration
 
 ```bash
-cd backend
+cd services/analysis-service
 cp .env.example .env
 ```
 
-Edit `backend/.env` with your LLM API key and other settings:
+Edit `services/analysis-service/.env` with your LLM API key and other settings:
 
 ```env
 ROVER_LLM_MODEL=gpt-4o-mini
@@ -109,7 +114,7 @@ ROVER_DUCKDB_PATH=:memory:
 Start:
 
 ```bash
-cd backend
+cd services/analysis-service
 ./run.sh
 ```
 
@@ -118,7 +123,7 @@ The Python backend will be available at `http://localhost:8090`.
 ### 4. Frontend
 
 ```bash
-cd frontend
+cd apps/frontend
 npm install
 npm run dev
 ```
@@ -130,11 +135,11 @@ The frontend dev server runs at `http://localhost:3000`:
 ### 5. Production Build
 
 ```bash
-cd frontend
+cd apps/frontend
 npm run build
 ```
 
-Output: `frontend/dist/`
+Output: `apps/frontend/dist/`
 
 ## API Overview
 
@@ -165,26 +170,30 @@ Output: `frontend/dist/`
 
 ```
 pixels-rover/
-├── src/main/java/          # Java backend (Spring Boot — auth only)
-├── backend/                # Python backend (FastAPI — analysis engine)
-│   ├── app/
-│   │   ├── api/            #   API routes (analysis, backends, semantic)
-│   │   ├── core/           #   Core modules (harness, interpreter, planner, executor, ...)
-│   │   ├── models/         #   SQLAlchemy ORM models
-│   │   ├── schemas/        #   Pydantic data contracts
-│   │   ├── services/       #   Orchestration service
-│   │   └── storage/        #   Storage backend abstraction (DuckDB, Pixels)
-│   ├── .env.example
-│   ├── pyproject.toml
-│   └── run.sh
-├── frontend/               # React frontend
-│   └── src/
-│       ├── pages/          #   Analysis, Reports, Login, Register
-│       ├── components/     #   AnalysisInput, TaskCard, PlanTimeline, StepDetail, SummaryCard, ...
-│       ├── stores/         #   Zustand stores (analysis, schema, auth)
-│       ├── services/       #   API clients (analysisApi, metadataApi, authApi)
-│       └── types/          #   TypeScript type definitions
+├── apps/
+│   └── frontend/           # React frontend
+│       └── src/
+│           ├── pages/      #   Analysis, Reports, Login, Register
+│           ├── components/ #   AnalysisInput, TaskCard, PlanTimeline, StepDetail, SummaryCard, ...
+│           ├── stores/     #   Zustand stores (analysis, schema, auth)
+│           ├── services/   #   API clients (analysisApi, metadataApi, authApi)
+│           └── types/      #   TypeScript type definitions
+├── services/
+│   ├── auth-service/       # Java backend (Spring Boot — auth only)
+│   │   ├── pom.xml
+│   │   └── src/main/java/
+│   └── analysis-service/   # Python backend (FastAPI — analysis engine)
+│       ├── app/
+│       │   ├── api/        #   API routes (analysis, backends, semantic)
+│       │   ├── core/       #   Core modules (harness, interpreter, planner, executor, ...)
+│       │   ├── models/     #   SQLAlchemy ORM models
+│       │   ├── schemas/    #   Pydantic data contracts
+│       │   ├── services/   #   Orchestration service
+│       │   └── storage/    #   Storage backend abstraction (DuckDB, Pixels)
+│       ├── .env.example
+│       ├── pyproject.toml
+│       └── run.sh
 ├── docs/                   # Design documents
 ├── start.sh                # Unified startup script
-└── pom.xml                 # Maven config (Java backend)
+└── db/                     # Database initialization scripts
 ```

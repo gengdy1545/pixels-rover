@@ -13,9 +13,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JAVA_DIR="$SCRIPT_DIR"
-PYTHON_DIR="$SCRIPT_DIR/backend"
-FRONTEND_DIR="$SCRIPT_DIR/frontend"
+JAVA_DIR="$SCRIPT_DIR/services/auth-service"
+PYTHON_DIR="$SCRIPT_DIR/services/analysis-service"
+FRONTEND_DIR="$SCRIPT_DIR/apps/frontend"
+JWT_KEYS_DIR="$SCRIPT_DIR/.tmp/jwt-keys"
+JWT_DEFAULT_KID="${JWT_DEFAULT_KID:-dev-rsa-1}"
+JWT_DEFAULT_PRIVATE_KEY_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-private.pem"
+JWT_DEFAULT_PUBLIC_KEY_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-public.pem"
+JWT_DEFAULT_PUBLIC_KEYS_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-public-keys.json"
 
 JAVA_PID=""
 PYTHON_PID=""
@@ -83,8 +88,34 @@ check_node() {
     return 0
 }
 
+ensure_dev_jwt_keys() {
+    if [[ -n "${JWT_PRIVATE_KEY_PATH:-}" || -n "${ROVER_JWT_PUBLIC_KEYS_PATH:-}" ]]; then
+        log_info "Using externally provided JWT key configuration."
+        return 0
+    fi
+
+    if [[ ! -f "$JWT_DEFAULT_PRIVATE_KEY_PATH" || ! -f "$JWT_DEFAULT_PUBLIC_KEY_PATH" || ! -f "$JWT_DEFAULT_PUBLIC_KEYS_PATH" ]]; then
+        log_step "Generating local RS256 JWT keys for development..."
+        bash "$SCRIPT_DIR/scripts/generate-jwt-rsa-keys.sh" "$JWT_KEYS_DIR" "$JWT_DEFAULT_KID" >/dev/null
+    fi
+
+    export JWT_ALGORITHM=RS256
+    export JWT_ACTIVE_KID="$JWT_DEFAULT_KID"
+    export JWT_PRIVATE_KEY_PATH="$JWT_DEFAULT_PRIVATE_KEY_PATH"
+    export JWT_PUBLIC_KEY_PATH="$JWT_DEFAULT_PUBLIC_KEY_PATH"
+    export JWT_PUBLIC_KEYS_PATH="$JWT_DEFAULT_PUBLIC_KEYS_PATH"
+
+    export ROVER_JWT_ALGORITHM=RS256
+    export ROVER_JWT_ACTIVE_KID="$JWT_DEFAULT_KID"
+    export ROVER_JWT_PUBLIC_KEY_PATH="$JWT_DEFAULT_PUBLIC_KEY_PATH"
+    export ROVER_JWT_PUBLIC_KEYS_PATH="$JWT_DEFAULT_PUBLIC_KEYS_PATH"
+
+    log_info "Development JWT mode: RS256 (kid=$JWT_DEFAULT_KID)."
+}
+
 start_java() {
     check_java || exit 1
+    ensure_dev_jwt_keys
     log_step "Starting Java backend (auth) on port 8081..."
     cd "$JAVA_DIR"
     mvn spring-boot:run -q &
@@ -94,6 +125,7 @@ start_java() {
 
 start_python() {
     check_python || exit 1
+    ensure_dev_jwt_keys
     log_step "Starting Python backend (analysis) on port 8090..."
     cd "$PYTHON_DIR"
 
@@ -107,7 +139,7 @@ start_python() {
     fi
 
     if [[ ! -f ".env" ]] && [[ -f ".env.example" ]]; then
-        log_warn "No .env file found. Copying from .env.example — please edit backend/.env with your LLM API key."
+        log_warn "No .env file found. Copying from .env.example — please edit services/analysis-service/.env with your LLM API key."
         cp .env.example .env
     fi
 
@@ -143,7 +175,7 @@ build_frontend_prod() {
     fi
 
     npm run build
-    log_info "Frontend production build completed → frontend/dist/"
+    log_info "Frontend production build completed → apps/frontend/dist/"
 }
 
 print_banner() {
@@ -181,6 +213,7 @@ case "$MODE" in
         log_info "========================================="
         log_info "  Java Backend (Auth) running at:"
         log_info "    ${CYAN}http://localhost:8081${NC}"
+        log_info "  JWT mode: ${CYAN}${JWT_ALGORITHM:-HS256}${NC}"
         log_info "========================================="
         log_info "Press Ctrl+C to stop."
         wait "$JAVA_PID"
@@ -191,6 +224,7 @@ case "$MODE" in
         log_info "========================================="
         log_info "  Python Backend (Analysis) running at:"
         log_info "    ${CYAN}http://localhost:8090${NC}"
+        log_info "  JWT mode: ${CYAN}${ROVER_JWT_ALGORITHM:-HS256}${NC}"
         log_info "========================================="
         log_info "Press Ctrl+C to stop."
         wait "$PYTHON_PID"
@@ -218,7 +252,7 @@ case "$MODE" in
         log_info ""
         log_info "  Java Backend (Auth)     → ${CYAN}http://localhost:8081${NC}"
         log_info "  Python Backend (Analysis)→ ${CYAN}http://localhost:8090${NC}"
-        log_info "  Frontend static files   → frontend/dist/"
+        log_info "  Frontend static files   → apps/frontend/dist/"
         log_info "=========================================="
         log_info "Press Ctrl+C to stop."
         wait
@@ -234,6 +268,7 @@ case "$MODE" in
         log_info "  Java Backend (Auth)      → ${CYAN}http://localhost:8081${NC}"
         log_info "  Python Backend (Analysis) → ${CYAN}http://localhost:8090${NC}"
         log_info "  Frontend UI              → ${CYAN}http://localhost:3000${NC}"
+        log_info "  JWT mode                 → ${CYAN}${JWT_ALGORITHM:-HS256}${NC}"
         log_info ""
         log_info "  Open: ${CYAN}http://localhost:3000${NC}"
         log_info "=========================================="

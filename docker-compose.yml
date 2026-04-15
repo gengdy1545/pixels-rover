@@ -1,0 +1,149 @@
+# Pixels Rover — Docker Compose
+#
+# Usage:
+#   docker compose up              Start all services
+#   docker compose up -d           Start in background
+#   docker compose up mysql        Start MySQL only
+#   docker compose down            Stop all services
+#   docker compose logs -f         Follow logs
+#
+# Prerequisites:
+#   1. Copy .env.example to .env and fill in required values
+#   2. Run: docker compose up
+#
+# Ports:
+#   - 3000  Frontend (nginx)
+#   - 8081  Auth Service (Java/Spring Boot)
+#   - 8090  Analysis Service (Python/FastAPI)
+#   - 3306  MySQL
+
+services:
+  # ---------- MySQL ----------
+  mysql:
+    image: mysql:8.0
+    container_name: pixels-rover-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: pixels_rover
+      MYSQL_USER: pixels
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./db/pixels_rover.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  # ---------- JWT Key Generator (init container) ----------
+  jwt-keygen:
+    image: alpine:3.20
+    container_name: pixels-rover-jwt-keygen
+    volumes:
+      - jwt-keys:/keys
+      - ./scripts/generate-jwt-rsa-keys.sh:/generate.sh:ro
+    entrypoint: ["/bin/sh", "/generate.sh", "/keys", "${JWT_KID:-dev-rsa-1}"]
+    restart: "no"
+
+  # ---------- Auth Service (Java / Spring Boot) ----------
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: pixels-rover-auth
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      jwt-keygen:
+        condition: service_completed_successfully
+    environment:
+      # Database
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pixels_rover
+      SPRING_DATASOURCE_USERNAME: pixels
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-password}
+      # JWT (RS256)
+      JWT_ALGORITHM: RS256
+      JWT_ACTIVE_KID: ${JWT_KID:-dev-rsa-1}
+      JWT_PRIVATE_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-private.pem
+      JWT_PUBLIC_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem
+      JWT_PUBLIC_KEYS_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public-keys.json
+      # Server
+      SERVER_PORT: 8081
+    ports:
+      - "${AUTH_PORT:-8081}:8081"
+    volumes:
+      - jwt-keys:/jwt-keys:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  # ---------- Analysis Service (Python / FastAPI) ----------
+  analysis-service:
+    build:
+      context: ./services/analysis-service
+      dockerfile: Dockerfile
+    container_name: pixels-rover-analysis
+    restart: unless-stopped
+    depends_on:
+      jwt-keygen:
+        condition: service_completed_successfully
+    environment:
+      # LLM
+      ROVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      ROVER_LLM_API_KEY: ${LLM_API_KEY:-}
+      ROVER_LLM_API_BASE: ${LLM_API_BASE:-}
+      # Database
+      ROVER_DATABASE_URL: sqlite+aiosqlite:///./rover.db
+      # DuckDB
+      ROVER_DUCKDB_PATH: ":memory:"
+      # Pixels Server
+      ROVER_PIXELS_HOST: ${PIXELS_HOST:-host.docker.internal}
+      ROVER_PIXELS_PORT: ${PIXELS_PORT:-18890}
+      # JWT (RS256)
+      ROVER_JWT_ALGORITHM: RS256
+      ROVER_JWT_ACTIVE_KID: ${JWT_KID:-dev-rsa-1}
+      ROVER_JWT_PUBLIC_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem
+      ROVER_JWT_PUBLIC_KEYS_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public-keys.json
+      ROVER_JWT_ISSUER: pixels-rover-auth-service
+      # Debug
+      ROVER_DEBUG: ${DEBUG:-false}
+    ports:
+      - "${ANALYSIS_PORT:-8090}:8090"
+    volumes:
+      - jwt-keys:/jwt-keys:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # ---------- Frontend (nginx) ----------
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: pixels-rover-frontend
+    restart: unless-stopped
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      analysis-service:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  mysql-data:
+    driver: local
+  jwt-keys:
+    driver: local

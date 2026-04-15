@@ -75,6 +75,36 @@ CREATE TABLE IF NOT EXISTS `pixels_rover`.`query_results` (
     DEFAULT CHARACTER SET = utf8
     COLLATE = utf8_bin;
 
+-- -----------------------------------------------------
+-- Table `pixels_rover`.`auth_session`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `pixels_rover`.`auth_session` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `session_id` VARCHAR(36) NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `user_email` VARCHAR(128) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_bin' NOT NULL,
+    `refresh_token_hash` VARCHAR(64) NOT NULL,
+    `current_refresh_token_id` VARCHAR(36) NOT NULL,
+    `refresh_token_expires_at` TIMESTAMP NOT NULL,
+    `last_activity_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `user_agent` VARCHAR(255) NULL,
+    `client_ip` VARCHAR(64) NULL,
+    `revoked_at` TIMESTAMP NULL,
+    `revoked_reason` VARCHAR(128) NULL,
+    `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_auth_session_session_id` (`session_id` ASC) VISIBLE,
+    INDEX `idx_auth_session_user_id` (`user_id` ASC) VISIBLE,
+    CONSTRAINT `fk_auth_session_user`
+        FOREIGN KEY (`user_id`)
+        REFERENCES `pixels_rover`.`user` (`id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE)
+    ENGINE = InnoDB
+    DEFAULT CHARACTER SET = utf8
+    COLLATE = utf8_bin;
+
 SET SQL_MODE=@OLD_SQL_MODE;
 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;
 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS;

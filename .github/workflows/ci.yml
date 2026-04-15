@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------
+  # Frontend: lint, test, build
+  # ---------------------------------------------------------------
+  frontend:
+    name: Frontend (lint + test + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------
+  # Java auth-service: compile + unit tests
+  # ---------------------------------------------------------------
+  java-test:
+    name: Java Auth Service (test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/auth-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      # Run only pure unit tests that do not require Spring context or DB.
+      # Tests using @WebMvcTest / @SpringBootTest are excluded because the
+      # parent POM (io.pixelsdb:pixels) is not available in public Maven repos.
+      - name: Run unit tests
+        run: >
+          mvn test -B
+          -pl .
+          -Dtest="JwtTokenProviderTest,SysLoginServiceImplTest,AuthSessionServiceImplTest,UserServiceImplTest"
+          -DfailIfNoTests=false
+        continue-on-error: false
+
+  # ---------------------------------------------------------------
+  # Python analysis-service: test
+  # ---------------------------------------------------------------
+  python-test:
+    name: Python Analysis Service (test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/analysis-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/analysis-service/pyproject.toml
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -v --tb=short
