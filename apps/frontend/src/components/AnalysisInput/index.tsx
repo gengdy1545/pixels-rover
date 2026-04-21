@@ -8,9 +8,10 @@ interface AnalysisInputProps {
   onSubmit: (question: string) => void;
   loading: boolean;
   availableMetrics: SemanticMetric[];
+  disabled?: boolean;
 }
 
-const AnalysisInput: React.FC<AnalysisInputProps> = ({ onSubmit, loading, availableMetrics }) => {
+const AnalysisInput: React.FC<AnalysisInputProps> = ({ onSubmit, loading, availableMetrics, disabled = false }) => {
   const [question, setQuestion] = useState('');
 
   const handleSubmit = () => {
@@ -43,7 +44,7 @@ const AnalysisInput: React.FC<AnalysisInputProps> = ({ onSubmit, loading, availa
           }}
           placeholder="请输入您的分析问题，例如：本月北美 GMV 是多少？"
           autoSize={{ minRows: 1, maxRows: 4 }}
-          disabled={loading}
+          disabled={loading || disabled}
           className="analysis-textarea"
         />
         <Button
@@ -51,6 +52,7 @@ const AnalysisInput: React.FC<AnalysisInputProps> = ({ onSubmit, loading, availa
           icon={<ThunderboltOutlined />}
           onClick={handleSubmit}
           loading={loading}
+          disabled={disabled}
           size="large"
           className="analysis-submit-btn"
         >

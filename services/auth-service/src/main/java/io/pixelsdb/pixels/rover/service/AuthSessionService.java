@@ -18,5 +18,7 @@ public interface AuthSessionService
 
     void revokeOtherSessions(Long userId, String currentSessionId, String reason);
 
+    void revokeAllSessions(Long userId, String reason);
+
     boolean isSessionActive(String sessionId);
 }

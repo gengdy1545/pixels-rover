@@ -31,6 +31,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -74,7 +75,7 @@ class AuthControllerTest
     // ---------------------------------------------------------------
 
     @Test
-    void loginShouldReturnTokensOnSuccess() throws Exception
+    void loginShouldWriteCookiesOnSuccess() throws Exception
     {
         LoginRequest request = new LoginRequest();
         request.setUsername("alice@example.com");
@@ -88,9 +89,8 @@ class AuthControllerTest
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.accessToken").value("access-token"))
-                .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
-                .andExpect(jsonPath("$.data.sessionId").value("session-1"));
+                .andExpect(jsonPath("$.message").value("Login success"))
+                .andExpect(jsonPath("$.data").doesNotExist());
 
         verify(cookieHelper).writeTokenCookies(any(), eq("access-token"), eq("refresh-token"));
     }
@@ -204,27 +204,27 @@ class AuthControllerTest
     // ---------------------------------------------------------------
 
     @Test
-    void refreshShouldReturnNewTokensFromBody() throws Exception
+    void refreshShouldWriteNewCookiesFromCookie() throws Exception
     {
         AccessTokenResponse accessTokenResponse =
                 new AccessTokenResponse("new-access", "new-refresh", "session-1");
-        when(sysLoginService.refreshToken(eq("old-refresh"), any(), any()))
+        when(sysLoginService.refreshToken(eq("cookie-refresh-token"), any(), any()))
                 .thenReturn(accessTokenResponse);
-        when(cookieHelper.resolveRefreshToken(any())).thenReturn(null);
-
-        String body = objectMapper.writeValueAsString(Map.of("refreshToken", "old-refresh"));
+        when(cookieHelper.resolveRefreshToken(any())).thenReturn("cookie-refresh-token");
 
         mockMvc.perform(post("/api/v1/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
+                        .content("{}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.accessToken").value("new-access"))
-                .andExpect(jsonPath("$.data.refreshToken").value("new-refresh"));
+                .andExpect(jsonPath("$.message").value("Token refreshed"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(cookieHelper).writeTokenCookies(any(), eq("new-access"), eq("new-refresh"));
     }
 
     @Test
-    void refreshShouldPreferCookieOverBody() throws Exception
+    void refreshShouldIgnoreRequestBodyWhenCookieExists() throws Exception
     {
         AccessTokenResponse accessTokenResponse =
                 new AccessTokenResponse("cookie-access", "cookie-refresh", "session-1");
@@ -234,9 +234,12 @@ class AuthControllerTest
 
         mockMvc.perform(post("/api/v1/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        .content(objectMapper.writeValueAsString(Map.of("refreshToken", "stale-body-token"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.accessToken").value("cookie-access"));
+                .andExpect(jsonPath("$.message").value("Token refreshed"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(cookieHelper).writeTokenCookies(any(), eq("cookie-access"), eq("cookie-refresh"));
     }
 
     @Test
@@ -246,7 +249,7 @@ class AuthControllerTest
 
         mockMvc.perform(post("/api/v1/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        .content(objectMapper.writeValueAsString(Map.of("refreshToken", "body-token-is-ignored"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000))
                 .andExpect(jsonPath("$.message").value("Refresh token is required"));
@@ -327,6 +330,36 @@ class AuthControllerTest
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.message").value("Logged out"));
+
+        verify(cookieHelper).clearTokenCookies(any());
+    }
+
+    @Test
+    @WithMockUser(username = "alice@example.com")
+    void logoutAllShouldRevokeAllSessionsAndClearCookies() throws Exception
+    {
+        doNothing().when(sysLoginService).revokeAllSessions("alice@example.com");
+
+        mockMvc.perform(post("/api/v1/auth/logout-all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.message").value("Logged out from all sessions"));
+
+        verify(sysLoginService).revokeAllSessions("alice@example.com");
+        verify(cookieHelper).clearTokenCookies(any());
+    }
+
+    @Test
+    @WithMockUser(username = "alice@example.com")
+    void revokeCurrentSessionShouldClearCookies() throws Exception
+    {
+        when(cookieHelper.resolveAccessToken(any())).thenReturn("access-token");
+        when(jwtTokenProvider.getSessionIdFromToken("access-token")).thenReturn("session-1");
+        doNothing().when(sysLoginService).revokeSession("alice@example.com", "session-1");
+
+        mockMvc.perform(delete("/api/v1/auth/sessions/session-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Current session revoked"));
 
         verify(cookieHelper).clearTokenCookies(any());
     }

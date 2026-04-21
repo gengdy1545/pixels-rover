@@ -37,5 +37,7 @@ public interface SysLoginService
 
     void revokeOtherSessions(String username, String currentSessionId);
 
+    void revokeAllSessions(String username);
+
     void verifyCaptcha(String captchaKey, String captcha);
 }

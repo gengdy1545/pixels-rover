@@ -13,14 +13,35 @@
 #
 # Architecture:
 #   All traffic enters through the API Gateway (port 80/443).
-#   The gateway handles routing, JWT auth passthrough, rate limiting,
-#   CORS, and audit logging. Backend services are not directly exposed.
+#   APISIX handles routing, auth introspection, CSRF enforcement,
+#   identity header injection, and audit-friendly request IDs.
+#   Backend services are not directly exposed.
 #
 # Ports (external):
 #   - 80    API Gateway (unified entry point)
 #   - 3306  MySQL (optional, for direct DB access)
 
 services:
+  # ---------- APISIX Control Plane ----------
+  etcd:
+    image: bitnami/etcd:3.5
+    container_name: pixels-rover-etcd
+    restart: unless-stopped
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+    expose:
+      - "2379"
+    volumes:
+      - etcd-data:/bitnami/etcd
+    healthcheck:
+      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl endpoint health --endpoints=http://127.0.0.1:2379"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+
   # ---------- MySQL ----------
   mysql:
     image: mysql:8.0
@@ -28,7 +49,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: pixels_rover
+      MYSQL_DATABASE: pixels_auth
       MYSQL_USER: pixels
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
     ports:
@@ -67,7 +88,7 @@ services:
         condition: service_completed_successfully
     environment:
       # Database
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pixels_rover
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pixels_auth
       SPRING_DATASOURCE_USERNAME: pixels
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-password}
       # JWT (RS256)
@@ -78,6 +99,12 @@ services:
       JWT_PUBLIC_KEYS_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public-keys.json
       # Server
       SERVER_PORT: 8081
+      # Gateway -> auth-service internal auth
+      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
+      # Cookie policy
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
     # No external port exposure — only reachable via gateway
     expose:
       - "8081"
@@ -90,41 +117,33 @@ services:
       start_period: 60s
       retries: 3
 
-  # ---------- Analysis Service (Python / FastAPI) ----------
-  analysis-service:
+  # ---------- Assistant Service (Python / FastAPI) ----------
+  assistant-service:
     build:
-      context: ./services/analysis-service
+      context: ./services/assistant-service
       dockerfile: Dockerfile
-    container_name: pixels-rover-analysis
+    container_name: pixels-rover-assistant
     restart: unless-stopped
     depends_on:
-      jwt-keygen:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
     environment:
       # LLM
       ROVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       ROVER_LLM_API_KEY: ${LLM_API_KEY:-}
       ROVER_LLM_API_BASE: ${LLM_API_BASE:-}
       # Database
-      ROVER_DATABASE_URL: sqlite+aiosqlite:///./rover.db
+      ROVER_DATABASE_URL: mysql+aiomysql://pixels:${MYSQL_PASSWORD:-password}@mysql:3306/pixels_analysis
       # DuckDB
       ROVER_DUCKDB_PATH: ":memory:"
       # Pixels Server
       ROVER_PIXELS_HOST: ${PIXELS_HOST:-host.docker.internal}
       ROVER_PIXELS_PORT: ${PIXELS_PORT:-18890}
-      # JWT (RS256)
-      ROVER_JWT_ALGORITHM: RS256
-      ROVER_JWT_ACTIVE_KID: ${JWT_KID:-dev-rsa-1}
-      ROVER_JWT_PUBLIC_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem
-      ROVER_JWT_PUBLIC_KEYS_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public-keys.json
-      ROVER_JWT_ISSUER: pixels-rover-auth-service
       # Debug
       ROVER_DEBUG: ${DEBUG:-false}
     # No external port exposure — only reachable via gateway
     expose:
       - "8090"
-    volumes:
-      - jwt-keys:/jwt-keys:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
@@ -149,7 +168,7 @@ services:
       start_period: 10s
       retries: 3
 
-  # ---------- API Gateway (nginx — unified entry point) ----------
+  # ---------- API Gateway (APISIX — unified entry point) ----------
   gateway:
     build:
       context: ./gateway
@@ -157,40 +176,45 @@ services:
     container_name: pixels-rover-gateway
     restart: unless-stopped
     depends_on:
+      etcd:
+        condition: service_healthy
       auth-service:
         condition: service_healthy
-      analysis-service:
+      assistant-service:
         condition: service_healthy
       frontend:
         condition: service_healthy
     ports:
-      - "${GATEWAY_PORT:-80}:80"
+      - "${GATEWAY_PORT:-80}:9080"
     environment:
-      # Cookie configuration (injected into nginx via env)
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
-      ACCESS_TOKEN_MAX_AGE: ${ACCESS_TOKEN_MAX_AGE:-3600}
-      REFRESH_TOKEN_MAX_AGE: ${REFRESH_TOKEN_MAX_AGE:-604800}
-      # CORS allowed origins (comma-separated, '*' for dev)
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
-      # Pixels Server upstream (for metadata/query proxy)
-      PIXELS_SERVER_UPSTREAM: http://${PIXELS_HOST:-host.docker.internal}:${PIXELS_PORT:-18890}
-      # Text2SQL service upstream
-      TEXT2SQL_UPSTREAM: ${TEXT2SQL_URL:-http://host.docker.internal/text2sql}
-    volumes:
-      - gateway-logs:/var/log/nginx
+      APISIX_ADMIN_API_KEY: ${APISIX_ADMIN_API_KEY:-change-me-admin-key}
+      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
+    expose:
+      - "9180"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/gateway/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9080/gateway/health"]
       interval: 15s
       timeout: 5s
       start_period: 10s
-      retries: 3
+      retries: 10
+
+  gateway-bootstrap:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: pixels-rover-gateway-bootstrap
+    restart: "no"
+    depends_on:
+      gateway:
+        condition: service_started
+    entrypoint: ["/bootstrap.sh"]
+    environment:
+      APISIX_ADMIN_API_KEY: ${APISIX_ADMIN_API_KEY:-change-me-admin-key}
 
 volumes:
+  etcd-data:
+    driver: local
   mysql-data:
     driver: local
   jwt-keys:
-    driver: local
-  gateway-logs:
     driver: local

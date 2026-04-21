@@ -81,6 +81,7 @@ export type AnalysisStatus =
 
 export interface AnalysisResponse {
   session_id: string;
+  thread_id?: string | null;
   status: AnalysisStatus;
   task: AnalysisTask;
   plan?: AnalysisPlan | null;
@@ -111,6 +112,8 @@ export type SSEEventType =
 export interface SSEStatusChangeData {
   status: string;
   session_id?: string;
+  thread_id?: string;
+  threadId?: string;
 }
 
 export interface SSEStepStartedData {
@@ -192,9 +195,23 @@ export interface SemanticDimension {
 
 export interface AnalysisRequest {
   question: string;
-  user_id: number;
+  threadId: string;
   max_steps?: number;
   max_llm_calls?: number;
   max_wall_time_sec?: number;
   max_sql_executions?: number;
 }
+
+export type SessionStatus =
+  | 'idle'
+  | 'received'
+  | 'understanding'
+  | 'resolving'
+  | 'planning'
+  | 'executing'
+  | 'summarizing'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+  | 'clarification_needed';

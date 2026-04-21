@@ -61,3 +61,48 @@
 .schema-tree .ant-tree-node-content-wrapper:hover {
   background-color: rgba(255, 255, 255, 0.1);
 }
+
+.conversation-list {
+  padding: 10px 15px 16px;
+}
+
+.conversation-create-btn {
+  margin-bottom: 12px;
+}
+
+.conversation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  text-align: left;
+}
+
+.conversation-item:hover,
+.conversation-item.is-active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.conversation-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-empty {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}

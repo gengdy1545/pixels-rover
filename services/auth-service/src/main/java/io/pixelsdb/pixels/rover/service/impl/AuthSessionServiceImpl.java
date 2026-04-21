@@ -165,12 +165,22 @@ public class AuthSessionServiceImpl implements AuthSessionService
     }
 
     @Override
+    @Transactional
+    public void revokeAllSessions(Long userId, String reason)
+    {
+        for (AuthSession session : authSessionRepository.findAllByUserIdOrderByLastActivityAtDesc(userId))
+        {
+            revokeSessionInternal(session, reason == null ? REASON_LOGOUT : reason);
+        }
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public boolean isSessionActive(String sessionId)
     {
         if (sessionId == null || sessionId.isBlank())
         {
-            return true;
+            return false;
         }
         return authSessionRepository.findBySessionId(sessionId)
                 .map(session -> session.getRevokedAt() == null && session.getRefreshTokenExpiresAt().after(now()))

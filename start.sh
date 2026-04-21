@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 #
-# Unified startup script for Pixels Rover.
+# Unified startup script for Pixels Rover component development.
 #
 # Usage:
-#   ./start.sh              Start all services (Java + Python + Frontend)
-#   ./start.sh java         Start Java backend only (auth, :8081)
-#   ./start.sh python       Start Python backend only (analysis, :8090)
+#   ./start.sh              Start auth-service + assistant-service + frontend dev server
+#   ./start.sh java         Start auth-service only (:8081)
+#   ./start.sh python       Start assistant-service only (:8090)
 #   ./start.sh frontend     Start frontend dev server only (:3000)
-#   ./start.sh --prod       Build frontend for production and start both backends
+#   ./start.sh --prod       Build frontend and start both backend services
+#
+# For the canonical end-to-end topology, prefer:
+#   docker compose up --build
+#
+# The frontend dev server proxies /api to http://localhost:80, so it expects the
+# APISIX gateway to be running separately.
 #
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JAVA_DIR="$SCRIPT_DIR/services/auth-service"
-PYTHON_DIR="$SCRIPT_DIR/services/analysis-service"
+PYTHON_DIR="$SCRIPT_DIR/services/assistant-service"
 FRONTEND_DIR="$SCRIPT_DIR/apps/frontend"
 JWT_KEYS_DIR="$SCRIPT_DIR/.tmp/jwt-keys"
 JWT_DEFAULT_KID="${JWT_DEFAULT_KID:-dev-rsa-1}"
@@ -36,6 +42,18 @@ log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 log_step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
+
+warn_if_gateway_missing() {
+    if ! command -v curl &>/dev/null; then
+        return 0
+    fi
+
+    if ! curl -fsS "http://localhost:80/gateway/health" >/dev/null 2>&1; then
+        log_warn "Gateway is not reachable at http://localhost:80."
+        log_warn "Frontend /api requests will fail until APISIX is running."
+        log_warn "Use 'docker compose up --build' for the full topology."
+    fi
+}
 
 cleanup() {
     echo ""
@@ -126,7 +144,7 @@ start_java() {
 start_python() {
     check_python || exit 1
     ensure_dev_jwt_keys
-    log_step "Starting Python backend (analysis) on port 8090..."
+    log_step "Starting Python backend (assistant) on port 8090..."
     cd "$PYTHON_DIR"
 
     if [[ ! -d ".venv" ]]; then
@@ -139,7 +157,7 @@ start_python() {
     fi
 
     if [[ ! -f ".env" ]] && [[ -f ".env.example" ]]; then
-        log_warn "No .env file found. Copying from .env.example — please edit services/analysis-service/.env with your LLM API key."
+        log_warn "No .env file found. Copying from .env.example — please edit services/assistant-service/.env with your LLM API key."
         cp .env.example .env
     fi
 
@@ -192,11 +210,13 @@ print_banner() {
 print_usage() {
     echo "Usage: $0 [java|python|frontend|--prod|-h]"
     echo ""
-    echo "  (no args)    Start all services (Java + Python + Frontend)"
-    echo "  java         Start Java backend only (auth, :8081)"
-    echo "  python       Start Python backend only (analysis, :8090)"
+    echo "  (no args)    Start auth-service + assistant-service + frontend dev server"
+    echo "  java         Start auth-service only (:8081)"
+    echo "  python       Start assistant-service only (:8090)"
     echo "  frontend     Start frontend dev server only (:3000)"
-    echo "  --prod       Build frontend and start both backends"
+    echo "  --prod       Build frontend and start both backend services"
+    echo ""
+    echo "  Full gateway topology: docker compose up --build"
     echo ""
 }
 
@@ -231,13 +251,13 @@ case "$MODE" in
         ;;
     frontend)
         start_frontend
+        warn_if_gateway_missing
         echo ""
         log_info "========================================="
         log_info "  Frontend dev server is ready!"
         log_info "    ${CYAN}http://localhost:3000${NC}"
         log_info ""
-        log_info "  Proxy: /api/v1/auth/* → :8081 (Java)"
-        log_info "  Proxy: /api/*        → :8090 (Python)"
+        log_info "  Proxy: /api/* → ${CYAN}http://localhost:80${NC} (APISIX Gateway)"
         log_info "========================================="
         log_info "Press Ctrl+C to stop."
         wait "$FRONTEND_PID"
@@ -261,16 +281,21 @@ case "$MODE" in
         start_java
         start_python
         start_frontend
+        warn_if_gateway_missing
         echo ""
         log_info "=========================================="
-        log_info "  All services are running!"
+        log_info "  Component development mode is running!"
         log_info ""
         log_info "  Java Backend (Auth)      → ${CYAN}http://localhost:8081${NC}"
         log_info "  Python Backend (Analysis) → ${CYAN}http://localhost:8090${NC}"
         log_info "  Frontend UI              → ${CYAN}http://localhost:3000${NC}"
+        log_info "  Frontend API entry       → ${CYAN}http://localhost:80${NC} (Gateway)"
         log_info "  JWT mode                 → ${CYAN}${JWT_ALGORITHM:-HS256}${NC}"
         log_info ""
-        log_info "  Open: ${CYAN}http://localhost:3000${NC}"
+        log_info "  For full end-to-end auth flow, start APISIX with:"
+        log_info "    ${CYAN}docker compose up --build${NC}"
+        log_info ""
+        log_info "  Open UI: ${CYAN}http://localhost:3000${NC}"
         log_info "=========================================="
         log_info "Press Ctrl+C to stop all services."
         wait

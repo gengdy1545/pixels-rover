@@ -1,10 +1,31 @@
+# =============================================================================
+# Pixels Rover - .gitignore
+# Covers: Java/Maven, Python (FastAPI), Node/Vite + React, APISIX gateway,
+#         Docker, tests/coverage, secrets, and common IDE/OS artifacts.
+# =============================================================================
+
+# ----- Maven / Java ----------------------------------------------------------
 HELP.md
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+dependency-reduced-pom.xml
 
-### STS ###
+# ----- Gradle (just in case) -------------------------------------------------
+.gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ----- Spring Tools (STS) ----------------------------------------------------
 .apt_generated
 .classpath
 .factorypath
@@ -13,58 +34,174 @@ target/
 .springBeans
 .sts4-cache
 
-### IntelliJ IDEA ###
-.idea
+# ----- IntelliJ IDEA ---------------------------------------------------------
+.idea/
 *.iws
 *.iml
 *.ipr
+out/
 
-### NetBeans ###
+# ----- Eclipse / NetBeans ----------------------------------------------------
 /nbproject/private/
 /nbbuild/
 /dist/
 /nbdist/
 /.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
 
-### VS Code ###
+# ----- VS Code ---------------------------------------------------------------
 .vscode/
+*.code-workspace
 
-### AI / IDE Tools ###
+# ----- AI / IDE assistants ---------------------------------------------------
 .codebuddy/
 .cursor/
-.codex
+.codex/
+.claude/
+.aider*
+.continue/
+.windsurf/
 
-### Node.js / Frontend ###
+# =============================================================================
+# Node.js / Frontend (Vite + React + TypeScript)
+# =============================================================================
 apps/frontend/node_modules/
 apps/frontend/dist/
+apps/frontend/dist-ssr/
+apps/frontend/coverage/
+apps/frontend/.vite/
+apps/frontend/.vitest-cache/
+apps/frontend/playwright-report/
+apps/frontend/test-results/
 apps/frontend/.env.local
 apps/frontend/.env.*.local
-*.log
+
+# Vite/TS build artifacts that should not be committed
+apps/frontend/vite.config.js
+apps/frontend/vite.config.d.ts
+apps/frontend/vite.config.*.timestamp-*
+apps/frontend/**/*.tsbuildinfo
+
+# Package manager noise
+.npm/
+.yarn/
+.pnpm-store/
+.pnp.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-### Python Backend ###
-services/analysis-service/.venv/
-services/analysis-service/__pycache__/
-services/analysis-service/**/__pycache__/
-services/analysis-service/*.db
-services/analysis-service/.env
-.tmp/
+# =============================================================================
+# Python backends (analysis-service, assistant-service)
+# =============================================================================
+# Virtual envs
+services/*/.venv/
+services/*/venv/
+services/*/env/
+
+# Bytecode & caches
+__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.egg
+*.egg-info/
+.eggs/
 
-### Docker ###
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.tox/
+.nox/
+.ipynb_checkpoints/
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.cache/
+
+# Local service artifacts (databases, dotenv, pip installer logs, etc.)
+services/*/*.db
+services/*/*.sqlite
+services/*/*.sqlite3
+services/*/.env
+services/*/pip-log.txt
+services/*/pip-selfcheck.json
+
+# =============================================================================
+# Gateway (APISIX + Lua + njs)
+# =============================================================================
+gateway/config.yaml
+gateway/logs/
+gateway/apisix.pid
+gateway/*.pid
+gateway/nginx.pid
+gateway/conf/
+gateway/*.log
+
+# Lua / LuaRocks
+*.luac
+.luarocks/
+lua_modules/
+
+# =============================================================================
+# Docker / Compose
+# =============================================================================
 .env
+.env.*
+!.env.example
+!**/.env.example
 docker-compose.override.yml
+docker-compose.*.local.yml
 
-### OS ###
+# =============================================================================
+# Secrets, keys, certificates (NEVER commit)
+# =============================================================================
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets/
+keys/
+**/jwt-keys/
+**/rsa-keys/
+**/private/
+
+# =============================================================================
+# Logs, tmp, backups
+# =============================================================================
+*.log
+logs/
+.tmp/
+tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# =============================================================================
+# OS
+# =============================================================================
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-### Personal Notes (temporary design docs, not for version control) ###
+# =============================================================================
+# Project-local notes (temporary design docs, not for version control)
+# =============================================================================
 .notes/
+scratch/
+TODO.local.md

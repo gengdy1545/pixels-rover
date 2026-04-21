@@ -1,54 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { DatePicker, Button, Card, Row, Col, message } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { chatApi } from '../../api';
-import type { QueryResult } from '../../types/query';
 import dayjs from 'dayjs';
+import { conversationApi } from '../../api';
+import type { ConversationHistoryItem, ConversationThread } from '../../types/conversation';
 import './index.css';
 
 const { RangePicker } = DatePicker;
 
+interface ReportRun {
+  sessionId: string;
+  threadId: string;
+  threadTitle: string;
+  question: string;
+  status: string;
+  createdAt: string | null;
+  sqlExecutions: number;
+  totalRows: number;
+}
+
 const Reports: React.FC = () => {
-  const [queryResults, setQueryResults] = useState<QueryResult[]>([]);
+  const [runs, setRuns] = useState<ReportRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 
   useEffect(() => {
-    loadAllResults();
+    void loadRuns();
   }, []);
 
-  const loadAllResults = async () => {
+  const loadRuns = async () => {
     setLoading(true);
     try {
-      const results = await chatApi.getQueryResults();
-      setQueryResults(results || []);
-    } catch {
-      message.error('Failed to load query results');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadFilteredResults = async () => {
-    if (!dateRange) {
-      loadAllResults();
-      return;
-    }
-    setLoading(true);
-    try {
-      const results = await chatApi.getQueryResultsBetween(
-        dateRange[0].toISOString(),
-        dateRange[1].toISOString()
+      const threads = await conversationApi.listConversations();
+      const details = await Promise.all(
+        threads.map((thread) => conversationApi.getConversation(thread.threadId)),
       );
-      setQueryResults(results || []);
+
+      const nextRuns = flattenRuns(
+        threads,
+        details.map((detail) => detail.history),
+      );
+      setRuns(nextRuns);
     } catch {
-      message.error('Failed to load filtered results');
+      message.error('Failed to load reports');
     } finally {
       setLoading(false);
     }
   };
 
-  // Overall Chart: query count distribution
+  const filteredRuns = useMemo(() => {
+    if (!dateRange) {
+      return runs;
+    }
+    return runs.filter((run) => {
+      if (!run.createdAt) {
+        return false;
+      }
+      const createdAt = dayjs(run.createdAt);
+      return (
+        (createdAt.isAfter(dateRange[0]) || createdAt.isSame(dateRange[0])) &&
+        (createdAt.isBefore(dateRange[1]) || createdAt.isSame(dateRange[1]))
+      );
+    });
+  }, [dateRange, runs]);
+
   const overallChartOption = {
     title: { text: 'Overall Chart', left: 'center' },
     tooltip: { trigger: 'item' as const },
@@ -57,20 +72,22 @@ const Reports: React.FC = () => {
         type: 'pie',
         radius: '60%',
         data: [
-          { value: queryResults.length, name: 'Total Queries' },
-          { value: queryResults.filter((r) => r.resultLimit > 0).length, name: 'With Results' },
+          { value: filteredRuns.length, name: 'Total Runs' },
+          {
+            value: filteredRuns.filter((run) => run.status === 'completed' || run.status === 'partial').length,
+            name: 'Completed Runs',
+          },
         ],
       },
     ],
   };
 
-  // Time Chart: queries over time
-  const timeLabels = queryResults.map((r) =>
-    new Date(r.createTime).toLocaleDateString()
+  const timeLabels = filteredRuns.map((run) =>
+    run.createdAt ? new Date(run.createdAt).toLocaleDateString() : 'Unknown',
   );
   const uniqueDates = [...new Set(timeLabels)];
   const queryCounts = uniqueDates.map(
-    (date) => timeLabels.filter((l) => l === date).length
+    (date) => timeLabels.filter((label) => label === date).length,
   );
 
   const timeChartOption = {
@@ -88,19 +105,18 @@ const Reports: React.FC = () => {
     ],
   };
 
-  // Cost Chart: result sizes
   const costChartOption = {
-    title: { text: 'Cost Chart', left: 'center' },
+    title: { text: 'Rows Chart', left: 'center' },
     tooltip: { trigger: 'axis' as const },
     xAxis: {
       type: 'category' as const,
-      data: queryResults.map((_, i) => `Query ${i + 1}`),
+      data: filteredRuns.map((_, index) => `Run ${index + 1}`),
     },
-    yAxis: { type: 'value' as const, name: 'Result Limit' },
+    yAxis: { type: 'value' as const, name: 'Rows Returned' },
     series: [
       {
         type: 'bar',
-        data: queryResults.map((r) => r.resultLimit),
+        data: filteredRuns.map((run) => run.totalRows),
         itemStyle: { color: '#1890ff' },
       },
     ],
@@ -110,6 +126,7 @@ const Reports: React.FC = () => {
     <div className="reports-layout">
       <div className="reports-filter">
         <RangePicker
+          value={dateRange}
           onChange={(dates) => {
             if (dates && dates[0] && dates[1]) {
               setDateRange([dates[0], dates[1]]);
@@ -118,10 +135,10 @@ const Reports: React.FC = () => {
             }
           }}
         />
-        <Button type="primary" onClick={loadFilteredResults} loading={loading}>
-          Filter
+        <Button type="primary" onClick={loadRuns} loading={loading}>
+          Refresh
         </Button>
-        <Button onClick={loadAllResults} loading={loading}>
+        <Button onClick={() => setDateRange(null)} disabled={!dateRange}>
           Reset
         </Button>
       </div>
@@ -145,21 +162,21 @@ const Reports: React.FC = () => {
       </Row>
 
       <div className="query-info-section">
-        <Card title="Query Details">
+        <Card title="Run Details">
           <div className="query-info-list">
-            {queryResults.map((result, index) => (
-              <div key={result.id || index} className="query-info-item">
-                <span className="query-info-label">Query {index + 1}</span>
+            {filteredRuns.map((run) => (
+              <div key={run.sessionId} className="query-info-item">
+                <span className="query-info-label">{run.threadTitle}</span>
                 <span className="query-info-time">
-                  {new Date(result.createTime).toLocaleString()}
+                  {run.createdAt ? new Date(run.createdAt).toLocaleString() : 'Unknown time'}
                 </span>
                 <span className="query-info-limit">
-                  Limit: {result.resultLimit}
+                  {run.status} · SQL {run.sqlExecutions} · Rows {run.totalRows}
                 </span>
               </div>
             ))}
-            {queryResults.length === 0 && (
-              <div className="no-data">No query results available</div>
+            {filteredRuns.length === 0 && (
+              <div className="no-data">No analysis runs available</div>
             )}
           </div>
         </Card>
@@ -167,5 +184,28 @@ const Reports: React.FC = () => {
     </div>
   );
 };
+
+function flattenRuns(
+  threads: ConversationThread[],
+  histories: ConversationHistoryItem[][],
+): ReportRun[] {
+  return threads.flatMap((thread, index) =>
+    histories[index].map((item) => {
+      const sqlSteps = item.stepResults.filter((step) => step.action === 'generate_and_execute_sql');
+      const totalRows = sqlSteps.reduce((sum, step) => sum + (step.result?.row_count || 0), 0);
+
+      return {
+        sessionId: item.sessionId,
+        threadId: item.threadId,
+        threadTitle: thread.title,
+        question: item.question,
+        status: item.status,
+        createdAt: item.createdAt || null,
+        sqlExecutions: item.stats.sqlExecutions || sqlSteps.length,
+        totalRows,
+      };
+    }),
+  );
+}
 
 export default Reports;

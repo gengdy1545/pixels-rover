@@ -19,9 +19,9 @@ import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.config.security.CookieHelper;
 import io.pixelsdb.pixels.rover.config.security.JwtTokenProvider;
 import io.pixelsdb.pixels.rover.rest.request.LoginRequest;
-import io.pixelsdb.pixels.rover.rest.request.RefreshTokenRequest;
 import io.pixelsdb.pixels.rover.rest.request.RegisterRequest;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import io.pixelsdb.pixels.rover.service.SysLoginService;
 import io.pixelsdb.pixels.rover.service.UserService;
 import jakarta.validation.Valid;
@@ -53,16 +53,17 @@ public class AuthController
     }
 
     /**
-     * Login endpoint. Validates credentials and captcha, returns JWT tokens
-     * in the response body. Cookie injection is handled by the API gateway.
+     * Login endpoint. Validates credentials and captcha, then writes cookies directly.
      */
     @PostMapping("/login")
     public ApiResponse<?> login(@Valid @RequestBody LoginRequest request,
-                                HttpServletRequest httpRequest)
+                                HttpServletRequest httpRequest,
+                                HttpServletResponse httpResponse)
     {
         var tokenResponse = sysLoginService.login(request,
                 resolveUserAgent(httpRequest), resolveClientIp(httpRequest));
-        return ApiResponse.success("Login success", tokenResponse);
+        cookieHelper.writeTokenCookies(httpResponse, tokenResponse.getAccessToken(), tokenResponse.getRefreshToken());
+        return ApiResponse.success("Login success", null);
     }
 
     /**
@@ -86,19 +87,13 @@ public class AuthController
     }
 
     /**
-     * Refresh token endpoint. Reads refresh token from Cookie first, then falls back to request body.
-     * Cookie injection for new tokens is handled by the API gateway.
+     * Refresh token endpoint. Reads refresh token from HttpOnly cookie only.
      */
     @PostMapping("/refresh")
-    public ApiResponse<?> refreshToken(@RequestBody(required = false) RefreshTokenRequest request,
-                                       HttpServletRequest httpRequest)
+    public ApiResponse<?> refreshToken(HttpServletRequest httpRequest,
+                                       HttpServletResponse httpResponse)
     {
-        // Prefer refresh_token from Cookie; fall back to request body
         String refreshToken = cookieHelper.resolveRefreshToken(httpRequest);
-        if (refreshToken == null && request != null)
-        {
-            refreshToken = request.getRefreshToken();
-        }
         if (refreshToken == null || refreshToken.isBlank())
         {
             return ApiResponse.error(
@@ -108,7 +103,8 @@ public class AuthController
 
         var tokenResponse = sysLoginService.refreshToken(refreshToken,
                 resolveUserAgent(httpRequest), resolveClientIp(httpRequest));
-        return ApiResponse.success("Token refreshed", tokenResponse);
+        cookieHelper.writeTokenCookies(httpResponse, tokenResponse.getAccessToken(), tokenResponse.getRefreshToken());
+        return ApiResponse.success("Token refreshed", null);
     }
 
     /**
@@ -127,9 +123,24 @@ public class AuthController
         return ApiResponse.success(userService.getUserInfo(authentication.getName()));
     }
 
-    /**
-     * Get current user info endpoint.
-     */
+    @PostMapping("/logout")
+    public ApiResponse<?> logout(HttpServletRequest request, HttpServletResponse response)
+    {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        sysLoginService.revokeSession(authentication.getName(), resolveCurrentSessionId(request));
+        cookieHelper.clearTokenCookies(response);
+        return ApiResponse.success("Logged out");
+    }
+
+    @PostMapping("/logout-all")
+    public ApiResponse<?> logoutAll(HttpServletRequest request, HttpServletResponse response)
+    {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        sysLoginService.revokeAllSessions(authentication.getName());
+        cookieHelper.clearTokenCookies(response);
+        return ApiResponse.success("Logged out from all sessions");
+    }
+
     @GetMapping("/user-info")
     public ApiResponse<?> getUserInfo()
     {
@@ -160,32 +171,12 @@ public class AuthController
         );
     }
 
-    @PostMapping("/logout")
-    public ApiResponse<?> logout(HttpServletRequest request)
-    {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        sysLoginService.revokeSession(authentication.getName(), resolveCurrentSessionId(request));
-        return ApiResponse.success("Logged out");
-    }
-
-    @PostMapping("/logout-all")
-    public ApiResponse<?> logoutAll(HttpServletRequest request)
-    {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        sysLoginService.revokeOtherSessions(authentication.getName(), resolveCurrentSessionId(request));
-        return ApiResponse.success("Logged out from other sessions");
-    }
-
     @DeleteMapping("/sessions/{sessionId}")
-    public ApiResponse<?> revokeSession(@PathVariable String sessionId, HttpServletRequest request)
+    public ApiResponse<?> revokeSession(@PathVariable String sessionId,
+                                        HttpServletRequest request,
+                                        HttpServletResponse response)
     {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        sysLoginService.revokeSession(authentication.getName(), sessionId);
-        String currentSessionId = resolveCurrentSessionId(request);
-        String message = currentSessionId != null && sessionId.equals(currentSessionId)
-                ? "Current session revoked"
-                : "Session revoked";
-        return ApiResponse.success(message);
+        return revokeSessionInternal(sessionId, request, response);
     }
 
     private String resolveCurrentSessionId(HttpServletRequest request)
@@ -227,5 +218,21 @@ public class AuthController
             return forwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private ApiResponse<?> revokeSessionInternal(String sessionId,
+                                                 HttpServletRequest request,
+                                                 HttpServletResponse response)
+    {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        sysLoginService.revokeSession(authentication.getName(), sessionId);
+        String currentSessionId = resolveCurrentSessionId(request);
+        boolean revokedCurrentSession = currentSessionId != null && sessionId.equals(currentSessionId);
+        if (revokedCurrentSession)
+        {
+            cookieHelper.clearTokenCookies(response);
+        }
+        String message = revokedCurrentSession ? "Current session revoked" : "Session revoked";
+        return ApiResponse.success(message);
     }
 }

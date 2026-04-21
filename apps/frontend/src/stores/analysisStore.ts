@@ -4,6 +4,7 @@ import type {
   AnalysisPlan,
   PlanStep,
   AnalysisResponse,
+  SessionStatus,
   SSEStatusChangeData,
   SSEStepStartedData,
   SSEStepSqlData,
@@ -13,23 +14,11 @@ import type {
   SemanticMetric,
 } from '../types/analysis';
 import type { SSEEventName, SSEConnection } from '../types/sse';
+import type { ConversationHistoryItem } from '../types/conversation';
 import { submitAnalysis, getSemanticMetrics } from '../api';
-import { useAuthStore } from './authStore';
-
-export type SessionStatus =
-  | 'idle'
-  | 'received'
-  | 'understanding'
-  | 'resolving'
-  | 'planning'
-  | 'executing'
-  | 'summarizing'
-  | 'completed'
-  | 'partial'
-  | 'failed'
-  | 'clarification_needed';
 
 interface AnalysisState {
+  threadId: string | null;
   sessionId: string | null;
   status: SessionStatus;
   task: AnalysisTask | null;
@@ -43,14 +32,17 @@ interface AnalysisState {
   /** Active SSE connection handle for user cancellation. */
   _connection: SSEConnection | null;
 
-  startAnalysis: (question: string) => void;
+  startAnalysis: (question: string, threadId: string) => void;
   cancelAnalysis: () => void;
   handleSSEEvent: (eventType: SSEEventName, data: unknown) => void;
+  prepareThread: (threadId: string | null) => void;
+  restoreSession: (session: ConversationHistoryItem | null, threadId: string | null) => void;
   reset: () => void;
   loadMetrics: () => Promise<void>;
 }
 
 const initialState = {
+  threadId: null,
   sessionId: null,
   status: 'idle' as SessionStatus,
   task: null,
@@ -67,17 +59,20 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   ...initialState,
   availableMetrics: [],
 
-  startAnalysis: (question: string) => {
+  startAnalysis: (question: string, threadId: string) => {
     // Cancel any existing connection
     get()._connection?.abort();
 
-    set({ ...initialState, isLoading: true, status: 'received', availableMetrics: get().availableMetrics });
-
-    const user = useAuthStore.getState().user;
-    const userId = user?.id || 1;
+    set({
+      ...initialState,
+      threadId,
+      isLoading: true,
+      status: 'received',
+      availableMetrics: get().availableMetrics,
+    });
 
     const connection = submitAnalysis(
-      { question, user_id: userId },
+      { question, threadId },
       {
         onEvent: (eventType, data) => {
           get().handleSSEEvent(eventType, data as unknown);
@@ -115,6 +110,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
         const payload = d as unknown as SSEStatusChangeData;
         set({
           status: payload.status as SessionStatus,
+          threadId: payload.threadId || payload.thread_id || get().threadId,
           sessionId: payload.session_id || get().sessionId,
         });
         break;
@@ -183,6 +179,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
         const resp = d as unknown as AnalysisResponse;
         set({
           status: resp.status === 'completed' ? 'completed' : resp.status === 'partial' ? 'partial' : 'failed',
+          threadId: resp.thread_id || get().threadId,
           summary: resp.summary || get().summary,
           warnings: resp.warnings || get().warnings,
           steps: resp.step_results || get().steps,
@@ -201,8 +198,37 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     }
   },
 
+  prepareThread: (threadId: string | null) => {
+    set({
+      ...initialState,
+      threadId,
+      availableMetrics: get().availableMetrics,
+    });
+  },
+
+  restoreSession: (session: ConversationHistoryItem | null, threadId: string | null) => {
+    if (!session) {
+      get().prepareThread(threadId);
+      return;
+    }
+
+    set({
+      ...initialState,
+      threadId: session.threadId,
+      sessionId: session.sessionId,
+      status: session.status,
+      task: session.task || null,
+      plan: session.plan || null,
+      steps: session.stepResults || [],
+      summary: session.summary || null,
+      warnings: session.warnings || [],
+      error: session.error || null,
+      availableMetrics: get().availableMetrics,
+    });
+  },
+
   reset: () => {
-    set({ ...initialState, availableMetrics: get().availableMetrics });
+    set({ ...initialState, threadId: get().threadId, availableMetrics: get().availableMetrics });
   },
 
   loadMetrics: async () => {

@@ -1,0 +1,539 @@
+# Gateway 开发指南
+
+本文档固定 Pixels Rover **API 网关** 的技术选型、部署形态、职责边界与开发纪律。
+
+- 适用范围：仓库中 `gateway/` 目录（APISIX 网关）。
+- 设计前提：
+  - 产品长期只保留**单 Web 前端**；
+  - gateway 是**所有流量的唯一入口**，同时承担 **API 路由 + Web 静态分发** 双职责；
+  - 后端服务均走"插件式"接入，对外暴露 REST/SSE API 即可，不直接被浏览器访问。
+- 文档目的：让任何新同学在不读历史对话的情况下，也能按一致的方式改网关、接新服务、配策略；同时把已经做过的设计决策锁死，避免回归到"etcd + Admin API + shell bootstrap"这种重装形态。
+- 该文档与 [`.notes/engineering-design.md`](../../.notes/engineering-design.md)、[`.notes/todolist.md`](../../.notes/todolist.md) 长期保持一致。以代码事实为准，若代码与本文档出现漂移，优先修正代码或及时更新本文档。
+
+---
+
+## 1. 技术选型与部署形态
+
+### 1.1 选型结论
+
+- **网关实现：Apache APISIX 3.9.1（Debian 镜像）**
+- **部署形态：Standalone YAML 模式**（`deployment.role: data_plane` + `config_provider: yaml`）
+  - 不使用 etcd
+  - 不使用 Admin API 热更新
+  - 不使用 APISIX Dashboard
+  - 所有 routes / upstreams / plugins 通过单一 `apisix.yaml` 文件声明，随代码一起进 git
+- **自研插件：`gateway-auth`**（`gateway/custom/apisix/plugins/gateway-auth.lua`），承担认证、CSRF、身份头注入、request-id 三合一
+
+### 1.2 为什么是 Standalone YAML 而不是 Traditional + etcd
+
+| 维度 | Traditional + etcd | Standalone YAML（采用） |
+|---|---|---|
+| 多实例集群同步 | 需要 | 不需要 |
+| 运行时热改路由 | 需要 | 不需要（所有变更走 PR） |
+| 依赖组件 | etcd + bootstrap 容器 | 无 |
+| 配置 review | JSON + shell `curl PUT` | 一份 YAML，PR diff |
+| 失败模式 | bootstrap 容器挂 → 路由表空 | YAML 解析失败 → 启动即拒绝 |
+
+本项目**没有任何需要 Traditional 模式的场景**：网关单实例、路由表变更频率低、没有"运行时灰度改路由"的需求。Standalone YAML 在本项目是严格优势。
+
+**触发重新评估的信号**（出现任一条再回来重开选型讨论，不要"为了未来"提前引入 etcd）：
+
+- **多实例**：gateway 需要横向扩展到 ≥ 2 实例，且各实例的 `gateway-auth` introspect 缓存必须跨实例失效；
+- **运行时灰度**：产品形态变成"需要 A/B 测试级别的实时路由切换"；
+- **跨团队发路由**：多个团队需要独立发自己的路由变更，走 PR 合并成为事实上的瓶颈；
+- **配置体积**：`apisix.yaml` 超过 ~2000 行、单次 PR 难以 review。
+
+### 1.3 目录结构
+
+```text
+gateway/
+├── Dockerfile
+├── entrypoint.sh             读取环境变量，渲染 config.yaml 与 apisix.yaml
+├── config.yaml.template      APISIX 启动配置模板（data_plane + yaml）
+├── apisix.yaml               路由/upstream/插件的唯一声明文件（随代码版本化）
+└── custom/
+    └── apisix/
+        └── plugins/
+            └── gateway-auth.lua    自研插件
+```
+
+**显式约束**：`gateway/` 下不允许再出现 `gateway/njs/`、`gateway/snippets/` 等空目录；不允许再出现 `bootstrap.sh` + etcd + Admin API 这一套重装组件。
+
+---
+
+## 2. Gateway 的长期职责边界
+
+### 2.1 Gateway 应该做的事
+
+- **统一入口**：所有浏览器流量都打到网关，后端服务不对外暴露端口。
+- **Web 静态分发**：`/*` 兜底到 `frontend` upstream，长期形态，不规划独立 CDN。
+- **API 路由**：按领域前缀（`/api/v1/auth/*`、`/api/v1/analysis*`、`/api/v1/conversations*`、`/api/v1/semantic*`、`/api/v1/analysis/backends*`）分发到后端。
+- **认证（AuthN）**：通过 `gateway-auth` 插件调 auth-service 的 `/api/internal/auth/introspect` 校验 token。
+- **CSRF 保护**：在需要保护的路由上执行 double-submit 校验。
+- **身份头注入**：`X-Auth-User-Id` / `X-Auth-User-Email` / `X-Auth-Session-Id`，作为下游服务唯一的身份事实。
+- **Request-Id 生成与透传**：所有请求补齐 `X-Request-Id`，贯穿日志链路。
+- **路由级粗粒度授权**：`require_auth` 布尔；未来若引入角色，新增 `require_role`。
+- **跨域（CORS）**：**唯一的** CORS 处理点；后端服务不再自行处理跨域。
+- **限流 / 熔断 / 超时**：针对 upstream 配置通用策略，SSE / LLM 长连接单独豁免。
+
+### 2.2 Gateway 不应该做的事
+
+以下内容属于"业务知识"，网关不懂也不该懂：
+
+- **资源级授权**（例如"user X 能不能读 thread #789"） → 业务服务
+- **业务数据校验**（字段合法性、业务规则） → 业务服务
+- **用户身份真源**（user 表的所有权） → auth-service
+- **角色/组的真源**（role 表、分组关系） → auth-service
+- **token 签发与吊销** → auth-service
+- **SQL 或 DSL 解析** → 业务服务
+
+### 2.3 一条粗粒度判断规则
+
+> **"能不能只看 HTTP 语义、身份头、路由配置就判断的问题，放在网关；必须看数据库里的业务字段才能回答的问题，放在业务服务。"**
+
+### 2.4 Web 静态分发的分层
+
+"Web 静态分发属于 gateway 职责"在本项目的**落地形态**是：**gateway 作为反向代理层把 `/*` 转发给 frontend upstream**，而 frontend upstream 是一个独立的前端容器（内部跑轻量 nginx serve 构建产物）。职责分层：
+
+| 层 | 归属 | 做什么 |
+|---|---|---|
+| **接入层**（gateway） | `gateway/` | 域名接入、TLS、CORS、**安全响应头（§6.6）**、路由分发、`/*` 兜底到 frontend upstream |
+| **静态分发层**（frontend container） | `frontend/` | 托管 Vite 构建产物、gzip/brotli 压缩、`index.html` 的 `Cache-Control: no-store`、静态资源的长缓存 |
+
+**为什么保留两层而不合并到 gateway 一层**：
+
+- 前端镜像可独立版本化、独立升级，不触发网关重启；
+- 网关层是平台工程资产，前端层是产品研发资产，生命周期不同；
+- 压缩/缓存/`index.html` 的处理对产品侧改动频繁，不应污染网关配置。
+
+**落地硬规则**：
+
+- frontend 容器在 `docker-compose.yml` 里**只 `expose`、不 `ports`**（与业务服务同一原则），浏览器永不直连。
+- `index.html` 的 `Cache-Control: no-store` 配在前端容器的 `nginx.conf`，不配在 gateway。
+- 安全响应头（CSP/HSTS 等，见 §6.6）由 gateway **一层下发**，前端容器**不重复**。
+
+---
+
+## 3. 权限分层归属（硬规则）
+
+把"权限检查"拆成四层，归属固定。
+
+| 层 | 问题 | gateway | auth-service | 业务服务 |
+|---|---|:-:|:-:|:-:|
+| A. 认证（token 签名/过期/撤销） | 你是谁？ | ✅ 执行 | ✅ 真源 | ❌ |
+| B. 身份上下文 | 你是哪个用户 | ✅ 注入 | ✅ 真源 | ✅ 消费 |
+| C1. 路由级"是否要登录" | 这个接口需不需要登录 | ✅ | ❌ | ❌ |
+| C2. 路由级"需要哪个角色" | 这个接口需不需要 admin | ✅ 执行 | ✅ 真源 | ❌ |
+| D. 资源级"你能不能操作这个资源" | user 42 能不能改 thread #789 | ❌ | ❌ | ✅ |
+
+### 3.1 业务服务侧的硬规则
+
+- ✅ **必须**：从 `X-Auth-User-Id` 头取用户身份，在所有业务查询里强制 `WHERE owner_user_id = :userId`（或等价的 service 层判断）。
+- ❌ **禁止**：重新校验 JWT、直接读 `pixels_auth.user` 表、自己调 `introspect`、返回 AuthN 级错误（401 这种判断根本打不到业务服务）。
+- ❌ **禁止**：依赖客户端传来的 `userId` 字段——只认 `X-Auth-User-Id` 头。
+
+### 3.2 Gateway 侧的硬规则
+
+- ✅ **必须**：在身份注入前清空请求里所有 `X-Auth-*` 头（防止客户端伪造），然后只填 introspect 结果里的字段。
+- ❌ **禁止**：在网关插件里写任何业务规则（例如"assistant-service 的 thread ownership 检查"）——一旦出现，网关就和业务 schema 耦合了。
+- ❌ **禁止**：Gateway 拿着 `X-Auth-*` 头查业务库——违反职责边界。
+
+### 3.3 auth-service 侧的硬规则
+
+- ✅ **必须**：`introspect` 响应稳定包含 `active` / `userId` / `email` / `sessionId`；未来扩展 `roles` / `tenantId` 等字段要做向后兼容。
+- ❌ **禁止**：import 任何业务领域概念（conversation / analysis / backend / schema）。
+- ❌ **禁止**：为业务服务提供"用户是否有权限 X"这类语义检查——auth-service 只管身份，不管业务。
+
+---
+
+## 4. 健康检查规范
+
+### 4.1 两条健康路由，语义分开
+
+- **`/gateway/live`（Liveness）**
+  - **纯本地**，不过任何 upstream。
+  - 直接返回静态 200 / 轻量 JSON。
+  - **用途**：Docker healthcheck、K8s livenessProbe。
+  - 语义："网关进程自己还在响应"。
+
+- **`/gateway/ready`（Readiness，系统级聚合信号）**
+  - 由这个路由主动去探每个已注册业务服务的 `/health`。
+  - **用途**：负载均衡摘流、K8s readinessProbe、`docker compose up` 冒烟判据（见 `todolist.md §15`）。
+  - 语义："上游就绪 = 可以对外服务"。
+  - **绝对不能作为容器重启判据**。
+
+  **实现形态（独立插件 + 声明式 probe 清单）**：聚合逻辑落成独立 APISIX 自定义插件 [`gateway-ready`](../../gateway/custom/apisix/plugins/gateway-ready.lua)，挂在 `/gateway/ready` 这一条路由上。插件在 `access` 阶段用 `ngx.location.capture_multi` 并行 sub-request 到每条内部 location（每条 internal location `proxy_pass` 到一个 upstream 的 `/health`），汇总后直接写响应体并短路 upstream。
+
+  probe 清单作为**插件实例配置**声明在路由上，不是硬编码到插件里：
+
+  ```yaml
+  # apisix.yaml 片段（Standalone YAML 模式，见 todolist §6）
+  routes:
+    - uri: /gateway/ready
+      methods: [GET]
+      plugins:
+        gateway-ready:
+          probes:
+            - { name: "auth-service",      uri: "/__ready_probe/auth",      timeout_ms: 1000 }
+            - { name: "assistant-service", uri: "/__ready_probe/assistant", timeout_ms: 1000 }
+          total_timeout_ms: 2000
+      upstream:
+        # 占位 upstream，插件在 access 阶段已 ngx.exit，绝不会被触达
+        nodes: { "127.0.0.1:65535": 1 }
+        type: roundrobin
+  ```
+
+  聚合规则：任一 probe 非 200 → 整体 503；全部 200 → 200。响应体遵循 [`./backend.md §6.0`](./backend.md) 信封，`details.components[]`（失败）或 `data.components[]`（成功）列出每条上游的 `name / uri / httpCode / status`；失败时 `details.errorCode = "GATEWAY_NOT_READY"`。
+
+  `/__ready_probe/*` 是 gateway **内部 location**（`internal;` 指令），外部不可访问。新增业务服务时**两处同改**（见 §7）：（a）在 `config.yaml.template` 的 nginx http 段追加 `/__ready_probe/<service>` internal location 并配 `proxy_connect_timeout` / `proxy_read_timeout` 与 plugin schema 里的 `timeout_ms` 对齐；（b）在 `apisix.yaml` 的 `gateway-ready` plugin 配置 `probes[]` 里追加一条。不做"自动服务发现"；不存在"不聚合"选项。
+
+  **超时契约与实际强制**：`timeout_ms` / `total_timeout_ms` 在 plugin schema 里只是**声明式契约**，Lua 层不直接强制（`ngx.location.capture_multi` 未开放 per-subrequest 超时参数）；真正的超时必须在对应内部 location 的 `proxy_connect_timeout` / `proxy_read_timeout` 上落地。两处数值保持一致是接入硬要求。
+
+  **不做的事**：不并联探数据库、不并联探第三方、不做分级健康（degraded/warning），只做"每个上游 `/health` 是否 200"的布尔 AND。数据库/第三方的降级由各业务服务自己的 `/health` 决定。
+
+  **聚合语义的局限性（刻意选择）**：由于 [`./backend.md §7.1`](./backend.md) 硬规则要求 `/health` **不级联**探 DB/缓存/LLM/第三方，`/gateway/ready` 也就**不**反映"数据库连通性 / schema 已初始化 / LLM provider 可达"等更深层的就绪状态；它只表达**"各上游进程存活且 `/health` 返 200"**这一层。冷启动阶段的 "`pixels_auth` / `pixels_analysis` schema 是否已创建"、"必填环境变量是否注入" 等一次性校验由 [`../../.notes/todolist.md §15`](../../.notes/todolist.md) 的 `scripts/smoke.sh` 直接连 MySQL / 直接读配置完成，**不**塞进本路由。任何"把 DB 可达性/配置检查塞进 `/gateway/ready`"的提案都应先检查是否属于"冷启动一次性验证"而非"持续就绪度"，前者永远应走 smoke / 运维脚本。
+
+### 4.2 Docker 容器健康检查必须用 `/gateway/live`
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-fsS", "http://localhost:9080/gateway/live"]
+```
+
+**反例（当前代码的问题）**：把 `/gateway/health` 通过 `proxy-rewrite` 转给 auth-service。这会让"auth-service 抖动"误判为"gateway 不健康"，触发不必要的 gateway 重启，并把故障放大到"两个服务同时看起来都挂了"。
+
+### 4.3 upstream 健康检查与此分开
+
+APISIX 对 upstream 节点的健康检查（`checks.active`）是网关内部的事，与本文 §4.1 的两条路由无关；需要时可以在 upstream 声明里单独配。
+
+---
+
+## 5. `gateway-auth` 插件契约
+
+### 5.1 插件职责
+
+- 读取身份凭据：**仅 Cookie**（`access_token`）。**不支持 `Authorization: Bearer`**。
+- 补齐 / 透传 `X-Request-Id`。
+- 补齐 `X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host`。
+- 在受保护路由上执行 CSRF double-submit 校验（cookie `XSRF-TOKEN` vs header `X-XSRF-TOKEN`）。
+- 调 auth-service `POST /api/internal/auth/introspect`，带 `X-Internal-Auth: ${INTERNAL_INTROSPECTION_SECRET}`。
+- 在校验成功后清空并重新注入身份头：
+  - `X-Auth-User-Id`
+  - `X-Auth-User-Email`
+  - `X-Auth-Session-Id`（可选）
+- 错误响应统一 schema：`{ code, message, requestId, details? }`，与业务服务 `backend.md §6.3` 完全对齐。`code` 等于 HTTP 状态码，`details.errorCode` 使用下表的固定串：
+
+  | HTTP 状态 | 场景 | `details.errorCode` | `message` |
+  |---|---|---|---|
+  | `401` | 未登录 / token 无效 / session 已撤销 | `GATEWAY_AUTH_REQUIRED` | `"Authentication required"` |
+  | `403` | CSRF 校验失败 | `GATEWAY_CSRF_INVALID` | `"CSRF validation failed"` |
+  | `503` | introspect 调用失败或返回不完整 | `GATEWAY_INTROSPECT_UNAVAILABLE` | `"Authentication service unavailable"` |
+
+  这三个 errorCode 与 `GATEWAY_IDENTITY_MISSING`（backend.md §3.3）同族，统一使用基础设施前缀 **`GATEWAY_*`**——它表达的是"接入面基础设施故障/判定"，不属于任何业务领域。与之对应，`INTERNAL_AUTH_FAILED`（backend.md §8.6）使用 `INTERNAL_*` 前缀，表达的是"跨服务内部通信基础设施故障"。业务领域前缀（`AUTH_*` / `ANALYSIS_*` 等）与基础设施前缀在命名空间上严格互不重叠（见 backend.md §6.3）。
+
+### 5.2 路由配置参数
+
+| 参数 | 默认 | 含义 |
+|---|---|---|
+| `introspection_url` | 必填 | auth-service 的 introspect 地址 |
+| `require_auth` | `true` | 是否要求身份存在；`false` 用于登录/注册等公开路由 |
+| `csrf_protect` | `true` | 是否做 CSRF double-submit（安全方法会自动豁免） |
+| `positive_cache_ttl` | `30` | 校验通过结果的缓存秒数；与 §5.3 主动失效接口绑定落地，不再保留"落地前降到 10s"的过渡值 |
+| `negative_cache_ttl` | `5` | 校验失败结果的缓存秒数 |
+
+**四类路由的标准 plugin 配置组合**（避免新同学反复猜）：
+
+| 路由类别 | 示例 | `require_auth` | `csrf_protect` | 理由 |
+|---|---|:-:|:-:|---|
+| 受保护业务路由 | `/api/v1/conversations*` 等 | `true` | `true` | 默认形态 |
+| 公开无凭据 POST | `/api/v1/auth/login`、`/api/v1/auth/register`、`/api/v1/auth/forgot-password` | `false` | `false` | 未登录用户没有 `XSRF-TOKEN` cookie；这类路由不携带任何已认证 cookie，不构成 CSRF 攻击面 |
+| 公开但携带 cookie 的 POST | `/api/v1/auth/refresh`、`/api/v1/auth/logout` | `false` | **`true`** | 这类路由**依赖** `refresh_token` / `access_token` cookie；若不开 CSRF，攻击者可凭 victim 的 cookie 悄悄续/撤销 session。**强制开 CSRF double-submit**，前端调用前必须先保证有 `XSRF-TOKEN`（登录后 auth-service 会 set-cookie） |
+| 安全方法 | `GET /*` | 随业务 | — | `gateway-auth` 对安全方法（GET/HEAD/OPTIONS）自动豁免 CSRF |
+
+**CSRF 校验语义硬规则**：`csrf_protect: true` 的路由，**除安全方法**（GET/HEAD/OPTIONS）**外一律执行** double-submit 校验，**不**以"请求是否携带 auth cookie"作为跳过判据。缺 `XSRF-TOKEN` cookie 或 header-cookie 不匹配，一律判 `GATEWAY_CSRF_INVALID`。
+
+- **反例（必须删除）**：当前 `gateway-auth.lua:should_skip_csrf` 的逻辑大致是 `if not access_cookie and not refresh_cookie then return true`——即"未携带任何 auth cookie 时跳过 CSRF"。这对 `/api/v1/auth/refresh` 与 `/api/v1/auth/logout` 这类"公开但携带 cookie 的 POST" 形成攻击面：攻击者可以用未登录状态下触发的无 cookie POST 绕过校验。
+- **正确形态**：Lua 侧只看 `csrf_protect` 配置项 + 请求方法；有无 cookie 与是否校验 CSRF **完全解耦**。该修正与 Stage 1 切 Standalone YAML 同 PR 落地（见 [`../../.notes/todolist.md §7`](../../.notes/todolist.md)）。
+
+**注意**：当前代码的默认值是 `positive_cache_ttl=2` / `negative_cache_ttl=1`，会严重放大 auth-service 压力。切换到 Standalone YAML 时，`apisix.yaml` 的每条 route **必须显式写死** `positive_cache_ttl: 30` / `negative_cache_ttl: 5`，并与 §5.3 的主动失效接口一同落地，不依赖插件默认值。
+
+### 5.3 Session 主动失效接口（契约）
+
+当用户 logout 或会话被撤销时，`auth-service` 主动调 gateway 的"吹缓存"接口让 gateway 提前清除该 token 的 positive cache。该接口与 `positive_cache_ttl = 30s` 的假设**绑定落地**：有它，30s TTL 才安全；没它，TTL 必须压到近乎 0。因此**不设"过渡期"**——把接口与 standalone YAML 迁移放到同一个 PR 落地。
+
+#### 5.3.1 对外契约
+
+- **URL**：`POST /gateway/internal/invalidate_session`
+- **调用方**：仅 `auth-service`（短期），未来可扩展到其他可信服务。
+- **路由保护**：
+  - 在 `apisix.yaml` 里声明为 **internal 路由**：匹配 `/gateway/internal/*`，**禁止对外 route**（例：为 `/gateway/internal/*` 单独开一条 route，upstream 指向网关自身实现的 lua handler，或挂一个 `serverless-pre-function` 插件承载逻辑）。
+  - 校验 header `X-Internal-Auth: ${INTERNAL_GATEWAY_ADMIN_SECRET}`（与 introspect secret 是**不同** secret，避免权限扩散）。
+  - **可选加固**：在 route 上加 `ip-restriction`，白名单通过 `INTERNAL_NETWORK_CIDR` 环境变量注入（compose 部署可传 `172.16.0.0/12, 10.0.0.0/8, 127.0.0.0/8` 之类的超集）。**不依赖此条作为主防护**——compose 网段可能每次重建变化，secret 是硬边界、ip-restriction 是软边界。
+- **请求体**：
+  ```json
+  {
+    "sessionId":       "optional, invalidate one session by sessionId",
+    "userId":          "optional, invalidate ALL sessions of this user",
+    "accessTokenHash": "optional, invalidate one token by its sha256 hex"
+  }
+  ```
+  三者至少传一个；多字段同时传时按"或"语义累加清除。
+- **响应**：`200 { "code": 200, "message": "success", "data": { "invalidated": <count> }, "requestId": "..." }`（与 `backend.md §6.1` 成功 schema 对齐）。
+- **失败响应**：凭据错返 `500 + details.errorCode="INTERNAL_AUTH_FAILED"`，与 `backend.md §8.6` 完全一致。**不使用 401/403/503。**
+- **幂等**：同一请求重复调用结果一致（清空已空的 cache 不报错，`invalidated` 返回实际命中次数）。
+- **失败降级**：`auth-service` 调用超时/失败时**不影响** logout 主流程；gateway cache 会在 `positive_cache_ttl` 到期时自然失效。auth-service 侧可记录 WARN 日志，但**不重试**（重试会把"用户已 logout"的窗口拉长，不是缩短）。
+
+#### 5.3.2 Gateway 内部实现：cache key 与反向索引
+
+为了让三个清除维度（`sessionId` / `userId` / `accessTokenHash`）都 O(1) 命中，gateway 侧维护三张 `lua_shared_dict`：
+
+| Shared Dict | Key | Value | 用途 |
+|---|---|---|---|
+| `gateway_auth_cache`（主缓存） | `introspect:<sha256(token)>` | 序列化的 introspect 响应 | `gateway-auth` 查询身份的热路径 |
+| `gateway_auth_session_index` | `sess:<sessionId>` | `<sha256(token)>`（单值） | sessionId → tokenHash 反查 |
+| `gateway_auth_user_index` | `user:<userId>:<sha256(token)>` | `1`（标记值；存在即表示该用户持有此 tokenHash） | userId → tokenHash 反查；**每个 tokenHash 独立成 key**，不对"一个数组 value"做 read-modify-write |
+
+**写入时机**：`gateway-auth` 每次 introspect 成功后，除了写主缓存，**同步更新**两个反向索引（`sessionId` 与 `userId` 取自 introspect 响应）。索引的 TTL 与主缓存同步（`positive_cache_ttl`），过期后反向索引条目一起被动失效，不用额外 GC。
+
+- 具体写入调用使用 `gateway_auth_user_index:set(key, "1", ttl)`（或 `add`，让并发重复写入幂等）；**禁止**使用 "`get → decode → push → encode → set`" 这种 read-modify-write 序列。
+
+**清除逻辑**：
+
+- 按 `accessTokenHash` 清：直接 `gateway_auth_cache:delete("introspect:" .. hash)`；同时调用 `gateway_auth_user_index:delete("user:" .. userId .. ":" .. hash)`（userId 可从主缓存删除前取到），以及 `gateway_auth_session_index:delete("sess:" .. sessionId)`（sessionId 同上）。
+- 按 `sessionId` 清：`gateway_auth_session_index:get("sess:" .. sessionId)` 拿到 tokenHash，然后走按 `accessTokenHash` 清的逻辑。
+- 按 `userId` 清：`gateway_auth_user_index:get_keys(0)` 遍历 dict 内所有 key，以前缀 `user:<userId>:` 过滤出该用户持有的所有 tokenHash，对每个执行按 `accessTokenHash` 清的逻辑。invalidate 接口是低频操作，线性扫描可接受；若未来用户量/token 量使扫描成为瓶颈，再评估拆 per-user dict 或引入 `resty.lock` 聚合 value，不在当前阶段做。
+
+**硬规则**：
+
+- 反向索引**只是为 invalidate 接口服务的加速结构**，不作为其他业务路径的数据源；不允许在身份注入链路上读这两个 dict。
+- **禁止对任何 `lua_shared_dict` 的 value 做 read-modify-write**（如"取出 JSON 数组、push 新元素、再写回"）——`lua_shared_dict` 无事务语义，这种访问模式在并发下必然丢写。所有"一对多"反向索引都用 key-per-member 展开（如上 `user:<userId>:<tokenHash>`），依赖 `set` / `add` / `delete` 的原子性。该硬规则对未来新增的任何 gateway 侧内存结构都适用。
+
+**`config.yaml` 必须同步声明三张 shared_dict**（切到 Standalone YAML 时一并落地，不保留"先主缓存、后反向索引"的中间态）：
+
+```yaml
+nginx_config:
+  http_configuration_snippet: |
+    lua_shared_dict gateway_auth_cache          10m;
+    lua_shared_dict gateway_auth_session_index  5m;
+    lua_shared_dict gateway_auth_user_index     5m;
+```
+
+容量基线：主缓存 10m（约 5 万 introspect 条目）、session 反向索引 5m（单值条目小，容量够用 ~10 万）、user 反向索引 5m（值是数组，按用户平均 2 个活跃 token 估算容量相当）。**真实容量按生产 token 发放量调整**，但三张的声明本身必须随 Standalone YAML 同一次改动进入，不允许漏声明。
+
+### 5.4 禁止事项
+
+- ❌ 不允许新增"从 `Authorization: Bearer` 读 token"的分支（Web 单端场景下无用户）。
+- ❌ 不允许在插件里直接访问 `document` / `window`（Lua 层无此问题，但等价是"不要直接读 nginx 全局状态"）。
+- ❌ 不允许让插件去查业务库。
+- ❌ 不允许把 `INTERNAL_INTROSPECTION_SECRET` 以任何形式写进日志或 debug 响应。
+
+---
+
+## 6. 路由规范
+
+### 6.1 URI 前缀按领域
+
+- `/api/v1/auth/*` → auth-service
+- `/api/v1/analysis*` / `/api/v1/conversations*` / `/api/v1/semantic*` / `/api/v1/analysis/backends*` → assistant-service（未来可按领域拆服务）。**注意**：`/api/v1/analysis/backends*` 是 `/api/v1/analysis*` 的更深子资源前缀，`priority` 必须显式声明高于父前缀，见 §6.2
+- `/api/v1/<service>/openapi.json` → 对应服务的 `/openapi.json`（见 §6.7）
+- `/api/internal/*` → 仅网关内部或可信服务调用，**绝不对外 route**（见 `backend.md §8.6`）
+- `/gateway/live` / `/gateway/ready` → 网关内部健康检查
+- `/gateway/internal/*` → 网关内部管理接口（如 `/gateway/internal/invalidate_session`，见 §5.3），**绝不对外 route**
+- `/*` → frontend upstream（长期形态）
+
+**新增领域时**：必须按领域前缀申请，不按实现细节拆（反例：不允许出现 `/api/v1/mysql-thing/*` 这种以实现暴露的前缀）。
+
+**历史纠偏**：原 `/api/v1/backends*` 前缀（"后端实现类型"查询）**违反**按领域命名原则——"backend 实现"本身是一种实现细节而非领域。已归入 analysis 域作为其子资源 `/api/v1/analysis/backends*`。新代码与 apisix.yaml 配置必须使用新前缀。
+
+### 6.2 路由优先级
+
+- 高具体度优先：`priority` 数值越大越先匹配。
+- 兜底 `/*` → `frontend` 必须保持 `priority: 1`，**永远不要提高**。
+- `/api/v1/auth/login` 等具体路径 `priority ≥ 900`。
+- `/api/v1/xxx/*` 前缀匹配 `priority ≥ 800`。
+- **深前缀压浅前缀（硬规则）**：若两条 route 的 URI 存在前缀包含关系（如 `/api/v1/analysis/backends*` ⊂ `/api/v1/analysis*`），深前缀的 `priority` 必须显式声明**比浅前缀高 ≥ 10**。相等时匹配顺序由 APISIX 实现细节决定，**不构成稳定契约**，PR 必须拒绝合并。
+
+### 6.3 超时
+
+- 默认业务 upstream 超时：connect ≤ 2s、send ≤ 5s、read ≤ 30s。
+- **SSE / 长轮询路由必须单独声明**：read 超时至少 10 分钟，或设置为 0 (无限)；同时在 upstream 层禁用响应缓冲。
+- LLM 相关路由读超时可以更长，但必须**显式写出**，禁止依赖默认值。
+
+### 6.4 CORS
+
+- **唯一入口**：CORS 只在网关的 `cors` 插件里配置，使用 `CORS_ALLOWED_ORIGINS` 环境变量注入。
+- 所有后端服务的 CORS（例如 `assistant-service` 的 `allow_origins=["*"]`）**必须关闭**。
+
+### 6.5 限流
+
+- 所有已认证业务路由应有基础 `limit-count` 或 `limit-req`，按用户 id 维度（以 `X-Auth-User-Id` 为 key）。
+- 未认证路由（login / register / captcha）按客户端 IP 限流，防暴力。
+- SSE 路由独立限制"并发订阅数"，不要和普通 REST 路由混在一起。
+
+### 6.6 安全响应头（由 gateway 一层下发）
+
+所有 HTTP 响应由 gateway 统一补齐下列响应头。**业务服务与前端容器不再下发同名响应头**，避免重复与漂移。实现方式：APISIX 的 `response-rewrite` 插件在全局或全路由开启。
+
+| 响应头 | 策略（初始值） | 语义 |
+|---|---|---|
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | 强制 HTTPS 一年；仅在生产开启（本地开发可通过环境变量关闭） |
+| `X-Frame-Options` | `DENY` | 禁止被任何站点 iframe 嵌入，防点击劫持 |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | 跨域仅发 origin，不发 path/query |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` | 全部关闭；产品若用到某能力再显式打开 |
+| `X-Content-Type-Options` | `nosniff` | 禁用 MIME 嗅探 |
+| `Content-Security-Policy` | `default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` | 基线策略：仅允许同源；`style-src 'unsafe-inline'` 是 AntD 需要（后续可通过 nonce 收紧） |
+
+**运维约束**：
+
+- CSP 每次收紧前必须先在生产开 `Content-Security-Policy-Report-Only` 至少一周观察告警。
+- HSTS 一旦上线不可回退（浏览器缓存 `max-age` 内必须保持 HTTPS 可用）；生产启用前确认 TLS 证书自动续期已就绪。
+- `script-src` 未来引入外部 CDN / 第三方脚本时，必须走 PR 白名单，不得随手 `'unsafe-inline'`。
+- **TODO — `style-src 'unsafe-inline'` 去除路径**：当前值为 AntD 5 运行时样式注入所需。升级到支持 CSS nonce 的 AntD 版本（或改用 static CSS 提取方案）后，应改为 `style-src 'self' 'nonce-<per-request>'`，并在 gateway 层为每个响应注入 nonce 到 HTML 模板；在该升级完成之前不得在 `script-src` 上复用同样的"临时放宽"理由。
+
+**开发/本地环境 CSP 放宽条款**：生产基线的 `script-src 'self'` 会直接打断 Vite dev server 的 HMR（需要 `ws:` / `wss:` + 运行时求值），本地 `docker compose up` 若命中生产基线将出现"登录后前端白屏、控制台一堆 CSP violation"。落地形态：
+
+- `apisix.yaml` 为"生产 CSP"与"开发 CSP"各准备一条**互斥的** route 级 `response-rewrite`（或 `global_rules`）声明，挂载哪一条由环境变量 `GATEWAY_CSP_PROFILE` 决定（允许值：`production` / `development`）；**不在运行时拼接字符串**。
+- **开发 CSP** 形态（仅当 `GATEWAY_CSP_PROFILE=development`）：
+  - `default-src 'self'`
+  - `script-src 'self' 'unsafe-eval' 'unsafe-inline'`
+  - `connect-src 'self' ws: wss:`
+  - `img-src 'self' data:`；`style-src 'self' 'unsafe-inline'`；其余头（HSTS / XFO / Referrer-Policy / Permissions-Policy / `X-Content-Type-Options`）与生产基线一致。
+- `.env.example` 必须显式声明 `GATEWAY_CSP_PROFILE`，默认值留空（即两条都不挂 → gateway 启动失败），强制每个部署显式选择 profile。**禁止**把 `development` 设为默认值。
+
+### 6.7 OpenAPI 文档的对外暴露
+
+每个业务服务内部都有 `/openapi.json`（FastAPI 默认）或等价产物。暴露策略：
+
+- **对外路径按服务命名空间重写**：
+  - `assistant-service` 的 `/openapi.json` → gateway 暴露为 `/api/v1/analysis/openapi.json`
+  - `auth-service` 的 `/openapi.json`（springdoc 需显式配置 `springdoc.api-docs.path=/openapi.json`，见 [`./backend.md §9`](./backend.md)）→ gateway 暴露为 `/api/v1/auth/openapi.json`
+  - **所有服务内部路径硬性统一为 `/openapi.json`**（见 `backend.md §9`）；gateway 侧的 `proxy-rewrite` 只做命名空间前缀剥离，不按服务分别写死 `/v3/api-docs` 等框架默认路径。
+  - **禁止** 在 gateway 上直接暴露 `/openapi.json` 这种裸路径——它会在浏览器地址栏看起来像"全站 openapi"，实际只是某一个服务的。
+- **访问控制**：
+  - 生产：`gateway-auth` 配 `require_auth: true`、`csrf_protect: false`（GET 请求），仅登录用户可见。
+  - 开发：在 compose 里通过环境变量 `GATEWAY_OPENAPI_PUBLIC=true` 开放给匿名访问，配合 `apisix.yaml` 里两条**互斥**的 route 定义（按 env 选一条挂载）。
+- **不聚合**：不做"统一的 `/api/openapi.json` 把所有服务合并"这类事。每个服务各自拥有自己的 schema，合并由前端工具或 CI 做离线产物，不在 gateway 实时处理。
+
+---
+
+## 7. 新增业务服务接入 Gateway 的标准动作
+
+当需要引入一个新的业务服务（例如 `notification-service`），严格按下面 8 步：
+
+1. **在 `docker-compose.yml` 声明服务**：`expose` 内部端口，**不 `ports`**（不对外暴露）。
+2. **在 `apisix.yaml` 声明 upstream**：
+   ```yaml
+   upstreams:
+     - id: notification
+       nodes:
+         "notification-service:8095": 1
+       type: roundrobin
+   ```
+3. **规划前缀**：按领域选 `/api/v1/notifications*`，在本文档 §6.1 补记录。
+4. **声明 route**：
+   ```yaml
+   routes:
+     - id: notifications-root
+       uri: /api/v1/notifications
+       methods: [GET, POST, OPTIONS]
+       plugins:
+         gateway-auth:
+           require_auth: true
+           csrf_protect: true
+           introspection_url: http://auth-service:8081/api/internal/auth/introspect
+           positive_cache_ttl: 30
+           negative_cache_ttl: 5
+         limit-count:
+           count: 600
+           time_window: 60
+           key: "http_x_auth_user_id"
+           key_type: "var"
+       upstream_id: notification
+   ```
+5. **在服务实现里消费身份头**：读 `X-Auth-User-Id` / `X-Auth-User-Email`，**禁止重新验 JWT**。
+6. **补 request-id 透传**：日志里带 `X-Request-Id`，让跨服务链路能对齐。
+7. **补健康检查与系统就绪聚合**：服务实现 `/health`（只探自身，不级联，见 [`./backend.md §7.1`](./backend.md)）。**同时必须**在 gateway 侧两处各追加一条 probe：（a）`config.yaml.template` 的 nginx http 段里新增一个 `/__ready_probe/<service>` 的 **internal location**（`internal;` 指令 + `proxy_pass` 到该服务的 `/health`，且 `proxy_connect_timeout` / `proxy_read_timeout` 与下一步的 `timeout_ms` 对齐）；（b）`apisix.yaml` 中 `/gateway/ready` 路由上 `gateway-ready` 插件的 `probes[]` 数组追加一条 `{ name, uri: "/__ready_probe/<service>", timeout_ms }`（见 §4.1）。**不存在"不聚合"选项**——任何新业务服务都纳入系统就绪聚合，否则 `/gateway/ready` 的"全部 200"语义在新服务上线后立刻失真。
+8. **在 `.notes/engineering-design.md` 记录**：新服务的拥有关系、数据边界、对外 API 面。
+
+---
+
+## 8. 观测与审计
+
+### 8.1 请求链路
+
+- Gateway 保证每个入站请求有 `X-Request-Id`（缺失则生成 128-bit 随机值）。
+- 该 id 透传给所有 upstream；所有后端服务在日志、trace、异步任务中都必须携带。
+- 错误响应体中必须包含 `requestId`，方便用户反馈定位。
+
+### 8.2 结构化日志字段（与后端服务对齐）
+
+下列字段名与 `backend.md §10.1` 保持**完全一致**，便于跨服务聚合。
+
+| 字段 | 来源 | 语义 |
+|---|---|---|
+| `requestId` | gateway 补齐 | 链路 id |
+| `method` / `uri` / `status` | access log | 基础 HTTP |
+| `upstream` | route | 目标 upstream id |
+| `userId` | `X-Auth-User-Id` | 已认证用户；未认证为空 |
+| `sessionId` | `X-Auth-Session-Id` | 已认证会话；未认证为空 |
+| `authResult` | gateway-auth | `ok` / `missing_token` / `introspect_failed` / `csrf_failed` |
+| `elapsedMs` | access log | 处理耗时，毫秒（与业务服务字段名一致） |
+| `service` | 固定值 | `"gateway"`（与业务服务字段名一致） |
+
+### 8.3 核心告警指标
+
+- `gateway_auth_introspect_failure_total`（introspect 调用失败）
+- `gateway_auth_csrf_failure_total`（CSRF 校验失败）
+- `gateway_5xx_total`（所有 5xx）
+- `gateway_upstream_timeout_total{upstream=...}`（按 upstream 维度）
+- SSE 路由：`active_sse_connections{route=...}`
+
+---
+
+## 9. 显式约束：什么**不要做**
+
+为了守住网关的职责与最小依赖，以下事项在可预见未来都不做；出现在 PR 里需要 justify：
+
+- **不引入 etcd / Admin API / APISIX Dashboard**。
+- **不引入 `gateway-bootstrap` 之类的一次性配置注入容器**。
+- **不在 `apisix.yaml` 之外写路由**（禁止运行时通过任何渠道动态加路由）。
+- **不在 `gateway-auth` 里新增 Bearer 分支或其他身份形态**。
+- **不让网关查业务库、执行业务规则、理解业务 schema**。
+- **不让后端服务各自实现 CORS、JWT 解析、CSRF 校验**——这三件事网关已做。
+- **不让 `/gateway/live` 依赖任何 upstream**。
+- **不把 `INTERNAL_INTROSPECTION_SECRET`、`APISIX_ADMIN_API_KEY` 的默认占位值带进非开发环境**（详见 `.notes/todolist.md §19`）。
+- **不引入 OPA / 外部策略引擎**（在出现真实复杂策略需求之前）。
+
+---
+
+## 10. 常见问题的判定
+
+### 10.1 "某个业务判断到底应该放网关还是服务？"
+
+按 §3 的四层表。如果仍不确定，自问：
+- "这个判断需不需要看业务数据库的业务字段？" → 需要 = 业务服务；不需要 = 网关可以做。
+- "这个判断的规则会不会随业务版本变？" → 会 = 业务服务（避免每次都发网关版）；不会 = 网关可以做。
+
+### 10.2 "要不要把新路由做成运行时可改？"
+
+不要。如果产品明确需要运行时灰度，回来升级本文档再说，不要用"为了未来"的理由提前引入 etcd。
+
+### 10.3 "SSE 路由怎么配？"
+
+- `read` 超时设极长或 0。
+- 在 route 上禁用 `proxy-buffering`（或通过 `response-rewrite` 插件的相关选项）。
+- 独立 `limit-count`，按 `X-Auth-User-Id` 限每人并发连接数。
+- 不要把 SSE 路由和普通 REST 路由共享 `limit-req` 计数。
+
+### 10.4 "CORS 要不要加在服务上以防万一？"
+
+不要。双份 CORS 是下一次事故的源头。服务只对局域网内部开放（由网络策略/compose expose 保证），浏览器永远不直连服务。
+
+---
+
+## 11. 参考
+
+- 前端开发指南：[`./frontend.md`](./frontend.md)
+- 后端接入契约：[`./backend.md`](./backend.md)
+- 设计决策沿革：[`.notes/engineering-design.md`](../../.notes/engineering-design.md)（冲突时以本文档为准）
+- 当前可执行 backlog：[`.notes/todolist.md`](../../.notes/todolist.md)

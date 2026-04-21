@@ -172,6 +172,17 @@ public class SysLoginServiceImpl implements SysLoginService
     }
 
     @Override
+    public void revokeAllSessions(String username)
+    {
+        User user = userRepository.findByEmail(username);
+        if (user == null)
+        {
+            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        authSessionService.revokeAllSessions(user.getId(), "user_logout_all");
+    }
+
+    @Override
     public void verifyCaptcha(String captchaKey, String captcha)
     {
         if (captchaKey == null || captcha == null)

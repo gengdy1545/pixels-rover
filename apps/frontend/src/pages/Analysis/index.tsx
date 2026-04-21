@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Spin, Space, Typography } from 'antd';
+import { Button, Empty, Spin, Space, Typography } from 'antd';
 import {
   RocketOutlined,
   CheckCircleFilled,
@@ -12,9 +12,15 @@ import PlanTimeline from '../../components/PlanTimeline';
 import StepDetail from '../../components/StepDetail';
 import SummaryCard from '../../components/SummaryCard';
 import { useAnalysisStore, type SessionStatus } from '../../stores/analysisStore';
+import type { ConversationThread } from '../../types/conversation';
 import './index.css';
 
 const { Text, Title } = Typography;
+
+interface AnalysisProps {
+  currentThread: ConversationThread | null;
+  onCreateConversation: () => void;
+}
 
 const statusLabels: Record<SessionStatus, { label: string; icon: React.ReactNode; color: string }> = {
   idle: { label: '', icon: null, color: '' },
@@ -27,11 +33,13 @@ const statusLabels: Record<SessionStatus, { label: string; icon: React.ReactNode
   completed: { label: '分析完成', icon: <CheckCircleFilled />, color: '#52c41a' },
   partial: { label: '部分完成', icon: <ExclamationCircleFilled />, color: '#faad14' },
   failed: { label: '分析失败', icon: <ExclamationCircleFilled />, color: '#ff4d4f' },
+  cancelled: { label: '分析已取消', icon: <ExclamationCircleFilled />, color: '#8c8c8c' },
   clarification_needed: { label: '需要补充信息', icon: <InfoCircleFilled />, color: '#1890ff' },
 };
 
-const Analysis: React.FC = () => {
+const Analysis: React.FC<AnalysisProps> = ({ currentThread, onCreateConversation }) => {
   const {
+    threadId,
     status,
     task,
     plan,
@@ -59,8 +67,11 @@ const Analysis: React.FC = () => {
   }, [status]);
 
   const handleSubmit = (question: string) => {
+    if (!currentThread) {
+      return;
+    }
     reset();
-    startAnalysis(question);
+    startAnalysis(question, currentThread.threadId);
   };
 
   const statusInfo = statusLabels[status];
@@ -75,10 +86,27 @@ const Analysis: React.FC = () => {
         </Title>
       </div>
 
+      {currentThread ? (
+        <div className="analysis-context">
+          <Text strong>{currentThread.title}</Text>
+          <Text type="secondary">
+            Backend `{currentThread.backendId}`
+            {currentThread.schemaName ? ` / Schema \`${currentThread.schemaName}\`` : ''}
+          </Text>
+        </div>
+      ) : (
+        <Empty description="先创建一个对话线程，再开始新的分析。">
+          <Button type="primary" onClick={onCreateConversation}>
+            新建对话
+          </Button>
+        </Empty>
+      )}
+
       <AnalysisInput
         onSubmit={handleSubmit}
         loading={isLoading}
         availableMetrics={availableMetrics}
+        disabled={!threadId}
       />
 
       {showResults && (

@@ -36,10 +36,7 @@ function resolvePendingRequests(success: boolean) {
 export async function refreshAccessToken(): Promise<void> {
   await axios.post('/api/v1/auth/refresh', {}, {
     withCredentials: true,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Request-Id': createRequestId(),
-    },
+    headers: buildCommonHeaders(),
   });
   // New tokens are set as HttpOnly cookies by the server — nothing to store locally.
 }
@@ -168,6 +165,14 @@ export async function post<T>(url: string, data?: unknown, config?: AxiosRequest
  */
 export async function put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
   const response = await httpClient.put<ApiResponse<T>>(url, data, config);
+  return requireData(response.data, 'Response payload is empty');
+}
+
+/**
+ * Typed PATCH request that auto-unwraps `ApiResponse<T>.data`.
+ */
+export async function patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  const response = await httpClient.patch<ApiResponse<T>>(url, data, config);
   return requireData(response.data, 'Response payload is empty');
 }
 

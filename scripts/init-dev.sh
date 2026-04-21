@@ -81,7 +81,7 @@ check_prerequisites() {
 
 setup_python_env() {
     log_step "Setting up Python virtual environment..."
-    local py_dir="$PROJECT_ROOT/services/analysis-service"
+    local py_dir="$PROJECT_ROOT/services/assistant-service"
 
     if [[ ! -d "$py_dir/.venv" ]]; then
         python3 -m venv "$py_dir/.venv"
@@ -96,10 +96,10 @@ setup_python_env() {
 }
 
 setup_python_dotenv() {
-    local py_dir="$PROJECT_ROOT/services/analysis-service"
+    local py_dir="$PROJECT_ROOT/services/assistant-service"
     if [[ ! -f "$py_dir/.env" ]] && [[ -f "$py_dir/.env.example" ]]; then
         cp "$py_dir/.env.example" "$py_dir/.env"
-        log_warn "Created services/analysis-service/.env from .env.example."
+        log_warn "Created services/assistant-service/.env from .env.example."
         log_warn "  → Please edit it and set your LLM API key (ROVER_LLM_API_KEY)."
     else
         log_info "Python .env file already exists."
@@ -179,7 +179,7 @@ print_summary() {
     echo ""
     echo "  Individual services:"
     echo "    ./start.sh java       Auth Service     → http://localhost:8081"
-    echo "    ./start.sh python     Analysis Service → http://localhost:8090"
+    echo "    ./start.sh python     Assistant Service → http://localhost:8090"
     echo "    ./start.sh frontend   Frontend         → http://localhost:3000"
     echo ""
     echo "  Health checks:"

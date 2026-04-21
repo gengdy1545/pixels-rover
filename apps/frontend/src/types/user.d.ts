@@ -21,18 +21,6 @@ export interface RegisterRequest {
   captchaKey: string;
 }
 
-export interface TokenResponse {
-  accessToken: string;
-  refreshToken: string;
-  sessionId?: string;
-}
-
-export interface AccessTokenResponse {
-  accessToken: string;
-  refreshToken?: string;
-  sessionId?: string;
-}
-
 export interface CaptchaResponse {
   captchaKey: string;
   captchaImage: string;

@@ -1,30 +1,94 @@
 # Pixels Rover
 
-Pixels Rover — 基于 LLM 的智能数据分析系统，自动将自然语言问题转化为多步查询计划并生成分析结论。
+Pixels Rover 是一个面向数据分析场景、但可继续扩展为更通用智能编排能力的 assistant 系统。当前仓库已经按最终态完成服务边界收口：
 
-Watch the demonstration video:
-[![IMAGE](video/pixels-rover-720p-cover.png)](https://www.bilibili.com/video/BV1awDQYcEsN/?vd_source=da6f80d8fe2bab1291999a9535251c78)
-[Download the Video](video/pixels-rover-720p.mp4)
+- `auth-service` 只负责认证、会话、JWT/JWKS 和内部 introspection
+- `assistant-service` 是唯一业务后端，当前负责分析、会话历史、语义层和后端元数据
+- `gateway` 只保留显式资源前缀路由，不再承载 legacy Translator 代理
+- 前端只保留 `authApi`、`conversationApi + analysis SSE`、`metadataApi(/api/v1/analysis/backends/*)` 三类调用面
 
 ## Architecture
 
-```
-┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│   Frontend   │─────▶│  Java Backend    │      │  Python Backend  │
-│  React 18    │      │  Spring Boot 3   │      │  FastAPI         │
-│  :3000       │─────▶│  :8081 (auth)    │      │  :8090 (analysis)│
-└──────────────┘      └──────────────────┘      └──────────────────┘
-                              │                         │
-                              ▼                         ▼
-                         ┌─────────┐             ┌────────────┐
-                         │  MySQL  │             │  DuckDB /  │
-                         │  (auth) │             │  Pixels DB │
-                         └─────────┘             └────────────┘
+```text
+┌──────────────┐      ┌──────────────────────────────┐
+│   Frontend   │─────▶│ APISIX Gateway               │
+│ React + Vite │      │ :80                          │
+└──────────────┘      │                              │
+                      │ /api/v1/auth/*              -> auth-service
+                      │ /api/v1/analysis*           -> assistant-service
+                      │ /api/v1/analysis/backends*  -> assistant-service
+                      │ /api/v1/conversations*      -> assistant-service
+                      │ /api/v1/semantic*           -> assistant-service
+                      │ /                           -> frontend
+                      └──────────┬───────────┬───────────┘
+                                 │           │
+                                 ▼           ▼
+                         ┌──────────────┐ ┌──────────────┐
+                         │ auth-service │ │assistant-serv│
+                         │ Spring Boot  │ │ FastAPI      │
+                         │ :8081        │ │ :8090        │
+                         └──────┬───────┘ └──────┬───────┘
+                                │                │
+                                ▼                ▼
+                         ┌──────────────┐  ┌──────────────┐
+                         │ pixels_auth  │  │pixels_analysis│
+                         │ MySQL        │  │ MySQL        │
+                         └──────────────┘  └──────────────┘
 ```
 
-- **Java Backend** (Spring Boot 3): 认证服务 — JWT 登录、注册、验证码、Token 刷新
-- **Python Backend** (FastAPI): 智能分析引擎 — 任务理解、语义解析、查询规划、SQL 执行、结论生成
-- **Frontend** (React 18 + TypeScript + Vite + Ant Design 5): 智能分析交互界面，实时 SSE 流式展示分析进度
+## Service Responsibilities
+
+| Service | Responsibility |
+|---------|----------------|
+| `auth-service` | login/register/captcha/refresh/logout/session management/JWKS/internal introspection |
+| `assistant-service` | analysis SSE, conversation history, semantic CRUD, backend metadata browsing |
+| `gateway` | explicit route dispatch, auth introspection, identity header injection, CSRF enforcement |
+| `frontend` | SPA UI for login, conversation management, analysis execution, reports, schema browsing |
+
+## Public APIs
+
+### Auth Service
+
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/register`
+- `GET /api/v1/auth/captcha`
+- `POST /api/v1/auth/refresh`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/auth/user-info`
+- `GET /api/v1/auth/jwks`
+- `GET /api/v1/auth/sessions`
+- `POST /api/v1/auth/logout`
+- `POST /api/v1/auth/logout-all`
+- `DELETE /api/v1/auth/sessions/{sessionId}`
+- `POST /api/internal/auth/introspect` only for gateway/internal callers
+
+### Assistant Service
+
+- `POST /api/v1/analysis`
+- `GET /api/v1/analysis/{sessionId}`
+- `POST /api/v1/conversations`
+- `GET /api/v1/conversations`
+- `GET /api/v1/conversations/{threadId}`
+- `PATCH /api/v1/conversations/{threadId}`
+- `GET /api/v1/semantic/metrics`
+- `POST /api/v1/semantic/metrics`
+- `GET /api/v1/semantic/dimensions`
+- `POST /api/v1/semantic/dimensions`
+- `GET /api/v1/semantic/synonyms`
+- `POST /api/v1/semantic/synonyms`
+- `GET /api/v1/analysis/backends`
+- `GET /api/v1/analysis/backends/{backendId}/schemas`
+- `GET /api/v1/analysis/backends/{backendId}/schemas/{schema}/tables`
+- `GET /api/v1/analysis/backends/{backendId}/schemas/{schema}/tables/{table}/columns`
+
+### Removed Legacy APIs
+
+These routes are intentionally removed and must not be used again:
+
+- `/api/v1/chat/*`
+- `/api/v1/query/*`
+- `/api/v1/metadata/*`
+- `POST /api/v1/analysis/text-to-sql`
 
 ## Quick Start
 
@@ -32,168 +96,111 @@ Watch the demonstration video:
 
 | Component | Requirement |
 |-----------|-------------|
-| Java      | JDK 17+    |
-| Maven     | 3.8+       |
-| Python    | 3.10+      |
-| Node.js   | 18+        |
-| npm       | 9+         |
-| MySQL     | 8.0+       |
+| Docker | 24+ |
+| Docker Compose | v2 |
 
-### One-command startup
+### Recommended Full-Stack Startup
+
+The canonical local topology is the same as production: all traffic enters through the gateway.
 
 ```bash
-# Start all three services (Java + Python + Frontend)
-./start.sh
-
-# Start individual services
-./start.sh java        # Java backend only (auth, :8081)
-./start.sh python      # Python backend only (analysis, :8090)
-./start.sh frontend    # Frontend dev server only (:3000)
-
-# Production build
-./start.sh --prod
-```
-
-Press `Ctrl+C` to gracefully stop all services.
-
-默认情况下，`./start.sh` 启动 Java 或 Python 服务时会自动在 `.tmp/jwt-keys/` 下生成开发用 RSA 密钥，并让本地联调默认跑在 `RS256 + kid` 模式。如果你已经通过环境变量提供了 JWT 密钥配置，启动脚本会优先使用外部配置。
-
-## Step-by-Step Setup
-
-### 1. Database Setup
-
-Login MySQL and create the `pixels_rover` database:
-
-```sql
-CREATE USER 'pixels'@'%' IDENTIFIED BY 'password';
-CREATE DATABASE pixels_rover;
-GRANT ALL PRIVILEGES ON pixels_rover.* TO 'pixels'@'%';
-FLUSH PRIVILEGES;
-```
-
-Use `db/pixels_rover.sql` to create tables in `pixels_rover`.
-
-### 2. Java Backend Configuration
-
-Adjust `services/auth-service/src/main/resources/application.properties`:
-
-```properties
-spring.datasource.username=pixels
-spring.datasource.password=password
-server.port=8081
-text2sql.url=http://localhost/text2sql
-pixels.server.port=18890
-jwt.secret=cGl4ZWxzZGItcm92ZXItand0LXNlY3JldC1rZXktMjAyNC1taW5pbXVtLTI1Ni1iaXRz
-```
-
-如果你要手动切到 RSA，可参考 [docs/jwt-rs256-cutover.md](docs/jwt-rs256-cutover.md) 和 `scripts/generate-jwt-rsa-keys.sh`。
-
-Start:
-
-```bash
-cd services/auth-service
-mvn spring-boot:run
-```
-
-### 3. Python Backend Configuration
-
-```bash
-cd services/analysis-service
 cp .env.example .env
+docker compose up --build
 ```
 
-Edit `services/analysis-service/.env` with your LLM API key and other settings:
+Then open:
+
+- App: `http://localhost`
+- Gateway liveness: `http://localhost/gateway/live`
+- Gateway readiness: `http://localhost/gateway/ready`
+- MySQL: `localhost:3306`
+
+### Database Layout
+
+`db/pixels_rover.sql` initializes the final-state MySQL layout:
+
+- `pixels_auth`: `user`, `auth_session`
+- `pixels_analysis`: schema only, application tables are auto-created by `assistant-service` on startup
+
+### Environment
+
+Root `.env` drives Docker Compose:
 
 ```env
-ROVER_LLM_MODEL=gpt-4o-mini
-ROVER_LLM_API_KEY=sk-your-api-key-here
-ROVER_DATABASE_URL=sqlite+aiosqlite:///./rover.db
-ROVER_DUCKDB_PATH=:memory:
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=sk-your-api-key-here
+MYSQL_ROOT_PASSWORD=rootpassword
+MYSQL_PASSWORD=password
+APISIX_ADMIN_API_KEY=change-me-admin-key
+INTERNAL_INTROSPECTION_SECRET=change-me
 ```
 
-Start:
+`services/assistant-service/.env.example` already defaults to MySQL:
+
+```env
+ROVER_DATABASE_URL=mysql+aiomysql://pixels:password@localhost:3306/pixels_analysis
+```
+
+## Local Component Development
+
+`start.sh` is useful for isolated service development, but it is not the canonical full-stack path.
 
 ```bash
-cd services/analysis-service
-./run.sh
+./start.sh java
+./start.sh python
+./start.sh frontend
 ```
 
-The Python backend will be available at `http://localhost:8090`.
+Notes:
 
-### 4. Frontend
+- `frontend` dev server still proxies `/api` to `http://localhost:80`, so it expects the gateway to be running.
+- `assistant-service` protected APIs trust gateway identity headers and are not meant to be called directly from the browser.
+- For end-to-end auth, conversation, and analysis verification, use `docker compose up`.
 
-```bash
-cd apps/frontend
-npm install
-npm run dev
-```
+## Data Ownership
 
-The frontend dev server runs at `http://localhost:3000`:
-- `/api/v1/auth/*` requests are proxied to the Java backend (:8081)
-- All other `/api/*` requests are proxied to the Python backend (:8090)
+### `pixels_auth`
 
-### 5. Production Build
+- `user`
+- `auth_session`
 
-```bash
-cd apps/frontend
-npm run build
-```
+### `pixels_analysis`
 
-Output: `apps/frontend/dist/`
+- `conversation_threads`
+- `analysis_sessions`
+- `analysis_steps`
+- semantic tables created by SQLAlchemy
 
-## API Overview
-
-### Java Backend (:8081) — Authentication
-
-| Endpoint              | Description               |
-|-----------------------|---------------------------|
-| `POST /api/v1/auth/login`    | Login with captcha  |
-| `POST /api/v1/auth/register` | Register new user   |
-| `GET  /api/v1/auth/captcha`  | Get captcha image   |
-| `POST /api/v1/auth/refresh`  | Refresh JWT tokens  |
-| `GET  /api/v1/auth/user`     | Get current user    |
-
-### Python Backend (:8090) — Intelligent Analysis
-
-| Endpoint                           | Description                         |
-|------------------------------------|-------------------------------------|
-| `POST /api/v1/analysis`           | Submit question (SSE stream response) |
-| `GET  /api/v1/analysis/{id}`      | Get completed analysis result        |
-| `GET  /api/v1/backends`           | List registered storage backends     |
-| `GET  /api/v1/backends/{id}/schemas` | List schemas in a backend         |
-| `GET  /api/v1/backends/{id}/schemas/{s}/tables` | List tables         |
-| `GET  /api/v1/backends/{id}/schemas/{s}/tables/{t}/columns` | List columns |
-| `GET  /api/v1/semantic/metrics`   | List semantic metrics                |
-| `GET  /api/v1/semantic/dimensions`| List semantic dimensions             |
+Historical chat/query tables are removed and are not migrated.
 
 ## Project Structure
 
-```
+```text
 pixels-rover/
-├── apps/
-│   └── frontend/           # React frontend
-│       └── src/
-│           ├── pages/      #   Analysis, Reports, Login, Register
-│           ├── components/ #   AnalysisInput, TaskCard, PlanTimeline, StepDetail, SummaryCard, ...
-│           ├── stores/     #   Zustand stores (analysis, schema, auth)
-│           ├── services/   #   API clients (analysisApi, metadataApi, authApi)
-│           └── types/      #   TypeScript type definitions
-├── services/
-│   ├── auth-service/       # Java backend (Spring Boot — auth only)
-│   │   ├── pom.xml
-│   │   └── src/main/java/
-│   └── analysis-service/   # Python backend (FastAPI — analysis engine)
-│       ├── app/
-│       │   ├── api/        #   API routes (analysis, backends, semantic)
-│       │   ├── core/       #   Core modules (harness, interpreter, planner, executor, ...)
-│       │   ├── models/     #   SQLAlchemy ORM models
-│       │   ├── schemas/    #   Pydantic data contracts
-│       │   ├── services/   #   Orchestration service
-│       │   └── storage/    #   Storage backend abstraction (DuckDB, Pixels)
-│       ├── .env.example
-│       ├── pyproject.toml
-│       └── run.sh
-├── docs/                   # Design documents
-├── start.sh                # Unified startup script
-└── db/                     # Database initialization scripts
+├── apps/frontend/                # React SPA
+├── services/auth-service/        # Auth-only service
+├── services/assistant-service/   # Business backend
+├── gateway/                      # APISIX config and bootstrap
+├── db/                           # Final-state MySQL init script
+├── docs/development/             # Cross-repo specs (frontend/gateway/backend)
+├── docs/runbooks/                # Operational runbooks
+└── .notes/                       # Working design/todo notes (engineering-design / jwt-rotation-design / todolist / paper-outline)
 ```
+
+## Related Docs
+
+开发规范（权威）：
+
+- [前端开发指南](docs/development/frontend.md)
+- [网关开发指南](docs/development/gateway.md)
+- [后端接入契约](docs/development/backend.md)
+
+设计与待办：
+
+- [工程设计文档](.notes/engineering-design.md)（沿革；与 dev 文档冲突时以 dev 文档为准）
+- [待办事项](.notes/todolist.md)
+- [JWT 非对称签名与密钥轮换设计](.notes/jwt-rotation-design.md)（沿革；实施 Runbook 见下）
+
+运维 Runbook：
+
+- [JWT RS256 切换与密钥轮换 Runbook](docs/runbooks/jwt-rotation-drill.md)

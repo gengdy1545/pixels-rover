@@ -21,6 +21,7 @@ import io.pixelsdb.pixels.rover.constant.ErrorCode;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.mapper.UserRepository;
 import io.pixelsdb.pixels.rover.service.AuthSessionService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -52,10 +53,13 @@ import java.util.List;
 public class SecurityConfig
 {
     private final JwtTokenProvider jwtTokenProvider;
+    private final String internalIntrospectionSecret;
 
-    public SecurityConfig(JwtTokenProvider jwtTokenProvider)
+    public SecurityConfig(JwtTokenProvider jwtTokenProvider,
+                          @Value("${internal.introspection.secret:change-me}") String internalIntrospectionSecret)
     {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.internalIntrospectionSecret = internalIntrospectionSecret;
     }
 
     @Bean
@@ -68,8 +72,7 @@ public class SecurityConfig
         http
                 // Enable CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                // CSRF protection is handled at the API gateway layer (NJS).
-                // Java Auth Service is not directly exposed to browsers.
+                // CSRF protection is handled at the API gateway layer.
                 .csrf(csrf -> csrf.disable())
                 // Stateless session management
                 .sessionManagement(session ->
@@ -83,7 +86,8 @@ public class SecurityConfig
                                 "/api/v1/auth/captcha",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/jwks",
-                                "/api/v1/auth/me"
+                                "/api/v1/auth/me",
+                                "/api/internal/auth/introspect"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
@@ -109,6 +113,8 @@ public class SecurityConfig
                             response.getWriter().write(objectMapper.writeValueAsString(result));
                         })
                 )
+                .addFilterBefore(new InternalAuthFilter(internalIntrospectionSecret),
+                        JwtAuthenticationFilter.class)
                 // Add JWT filter before UsernamePasswordAuthenticationFilter
                 .addFilterBefore(
                         new JwtAuthenticationFilter(jwtTokenProvider, userDetailsService, authSessionService),

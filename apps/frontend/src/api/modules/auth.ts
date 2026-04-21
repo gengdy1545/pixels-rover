@@ -1,16 +1,14 @@
-import { get, post, postVoid } from '../client';
+import { get, postVoid } from '../client';
 import type {
   LoginRequest,
   RegisterRequest,
-  TokenResponse,
-  AccessTokenResponse,
   CaptchaResponse,
   UserInfo,
 } from '../../types/user';
 
 export const authApi = {
   login: (data: LoginRequest) =>
-    post<TokenResponse>('/api/v1/auth/login', data),
+    postVoid('/api/v1/auth/login', data),
 
   register: (data: RegisterRequest) =>
     postVoid('/api/v1/auth/register', data),
@@ -20,7 +18,7 @@ export const authApi = {
 
   /** Refresh token — the refresh_token is sent automatically via HttpOnly Cookie. */
   refreshToken: () =>
-    post<AccessTokenResponse>('/api/v1/auth/refresh', {}),
+    postVoid('/api/v1/auth/refresh', {}),
 
   getUserInfo: () =>
     get<UserInfo>('/api/v1/auth/user-info'),
