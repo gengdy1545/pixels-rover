@@ -21,12 +21,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JAVA_DIR="$SCRIPT_DIR/services/auth-service"
 PYTHON_DIR="$SCRIPT_DIR/services/assistant-service"
-FRONTEND_DIR="$SCRIPT_DIR/apps/frontend"
+FRONTEND_DIR="$SCRIPT_DIR/frontend"
 JWT_KEYS_DIR="$SCRIPT_DIR/.tmp/jwt-keys"
 JWT_DEFAULT_KID="${JWT_DEFAULT_KID:-dev-rsa-1}"
 JWT_DEFAULT_PRIVATE_KEY_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-private.pem"
 JWT_DEFAULT_PUBLIC_KEY_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-public.pem"
-JWT_DEFAULT_PUBLIC_KEYS_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-public-keys.json"
 
 JAVA_PID=""
 PYTHON_PID=""
@@ -107,12 +106,12 @@ check_node() {
 }
 
 ensure_dev_jwt_keys() {
-    if [[ -n "${JWT_PRIVATE_KEY_PATH:-}" || -n "${ROVER_JWT_PUBLIC_KEYS_PATH:-}" ]]; then
+    if [[ -n "${JWT_PRIVATE_KEY_PATH:-}" ]]; then
         log_info "Using externally provided JWT key configuration."
         return 0
     fi
 
-    if [[ ! -f "$JWT_DEFAULT_PRIVATE_KEY_PATH" || ! -f "$JWT_DEFAULT_PUBLIC_KEY_PATH" || ! -f "$JWT_DEFAULT_PUBLIC_KEYS_PATH" ]]; then
+    if [[ ! -f "$JWT_DEFAULT_PRIVATE_KEY_PATH" || ! -f "$JWT_DEFAULT_PUBLIC_KEY_PATH" ]]; then
         log_step "Generating local RS256 JWT keys for development..."
         bash "$SCRIPT_DIR/scripts/generate-jwt-rsa-keys.sh" "$JWT_KEYS_DIR" "$JWT_DEFAULT_KID" >/dev/null
     fi
@@ -121,12 +120,11 @@ ensure_dev_jwt_keys() {
     export JWT_ACTIVE_KID="$JWT_DEFAULT_KID"
     export JWT_PRIVATE_KEY_PATH="$JWT_DEFAULT_PRIVATE_KEY_PATH"
     export JWT_PUBLIC_KEY_PATH="$JWT_DEFAULT_PUBLIC_KEY_PATH"
-    export JWT_PUBLIC_KEYS_PATH="$JWT_DEFAULT_PUBLIC_KEYS_PATH"
-
-    export ROVER_JWT_ALGORITHM=RS256
-    export ROVER_JWT_ACTIVE_KID="$JWT_DEFAULT_KID"
-    export ROVER_JWT_PUBLIC_KEY_PATH="$JWT_DEFAULT_PUBLIC_KEY_PATH"
-    export ROVER_JWT_PUBLIC_KEYS_PATH="$JWT_DEFAULT_PUBLIC_KEYS_PATH"
+    # Multi-kid verification source during rotation: the local key directory is
+    # enumerated for every <kid>-public.pem. The former "<kid>-public-keys.json"
+    # merged-public-key artifact (and its companion /api/v1/auth/jwks surface)
+    # have been retired — see docs/design/jwt-rotation.md §1.2.
+    export JWT_PUBLIC_KEYS_DIRECTORY="$JWT_KEYS_DIR"
 
     log_info "Development JWT mode: RS256 (kid=$JWT_DEFAULT_KID)."
 }
@@ -193,7 +191,7 @@ build_frontend_prod() {
     fi
 
     npm run build
-    log_info "Frontend production build completed → apps/frontend/dist/"
+    log_info "Frontend production build completed → frontend/dist/"
 }
 
 print_banner() {
@@ -272,7 +270,7 @@ case "$MODE" in
         log_info ""
         log_info "  Java Backend (Auth)     → ${CYAN}http://localhost:8081${NC}"
         log_info "  Python Backend (Analysis)→ ${CYAN}http://localhost:8090${NC}"
-        log_info "  Frontend static files   → apps/frontend/dist/"
+        log_info "  Frontend static files   → frontend/dist/"
         log_info "=========================================="
         log_info "Press Ctrl+C to stop."
         wait

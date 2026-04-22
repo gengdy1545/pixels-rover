@@ -2,7 +2,7 @@
 
 Pixels Rover 是一个面向数据分析场景、但可继续扩展为更通用智能编排能力的 assistant 系统。当前仓库已经按最终态完成服务边界收口：
 
-- `auth-service` 只负责认证、会话、JWT/JWKS 和内部 introspection
+- `auth-service` 只负责认证、会话、JWT 签发/自校验和内部 introspection
 - `assistant-service` 是唯一业务后端，当前负责分析、会话历史、语义层和后端元数据
 - `gateway` 只保留显式资源前缀路由，不再承载 legacy Translator 代理
 - 前端只保留 `authApi`、`conversationApi + analysis SSE`、`metadataApi(/api/v1/analysis/backends/*)` 三类调用面
@@ -40,7 +40,7 @@ Pixels Rover 是一个面向数据分析场景、但可继续扩展为更通用�
 
 | Service | Responsibility |
 |---------|----------------|
-| `auth-service` | login/register/captcha/refresh/logout/session management/JWKS/internal introspection |
+| `auth-service` | login/register/captcha/refresh/logout/session management/internal introspection |
 | `assistant-service` | analysis SSE, conversation history, semantic CRUD, backend metadata browsing |
 | `gateway` | explicit route dispatch, auth introspection, identity header injection, CSRF enforcement |
 | `frontend` | SPA UI for login, conversation management, analysis execution, reports, schema browsing |
@@ -55,7 +55,6 @@ Pixels Rover 是一个面向数据分析场景、但可继续扩展为更通用�
 - `POST /api/v1/auth/refresh`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/auth/user-info`
-- `GET /api/v1/auth/jwks`
 - `GET /api/v1/auth/sessions`
 - `POST /api/v1/auth/logout`
 - `POST /api/v1/auth/logout-all`
@@ -177,14 +176,15 @@ Historical chat/query tables are removed and are not migrated.
 
 ```text
 pixels-rover/
-├── apps/frontend/                # React SPA
+├── frontend/                     # React SPA (单 Web 前端)
 ├── services/auth-service/        # Auth-only service
 ├── services/assistant-service/   # Business backend
 ├── gateway/                      # APISIX config and bootstrap
 ├── db/                           # Final-state MySQL init script
 ├── docs/development/             # Cross-repo specs (frontend/gateway/backend)
+├── docs/design/                  # Long-lived design archives (e.g. jwt-rotation)
 ├── docs/runbooks/                # Operational runbooks
-└── .notes/                       # Working design/todo notes (engineering-design / jwt-rotation-design / todolist / paper-outline)
+└── .notes/                       # Working todo / temporary plans (engineering-design / todolist / paper-outline); not for long-term reference
 ```
 
 ## Related Docs
@@ -195,11 +195,9 @@ pixels-rover/
 - [网关开发指南](docs/development/gateway.md)
 - [后端接入契约](docs/development/backend.md)
 
-设计与待办：
+长期设计沿革（对外公开，随仓库发布）：
 
-- [工程设计文档](.notes/engineering-design.md)（沿革；与 dev 文档冲突时以 dev 文档为准）
-- [待办事项](.notes/todolist.md)
-- [JWT 非对称签名与密钥轮换设计](.notes/jwt-rotation-design.md)（沿革；实施 Runbook 见下）
+- [JWT 非对称签名与密钥轮换设计](docs/design/jwt-rotation.md)（配套实施 Runbook 见下）
 
 运维 Runbook：
 

@@ -139,47 +139,37 @@ public class SysLoginServiceImpl implements SysLoginService
     }
 
     @Override
-    public List<UserSessionResponse> listSessions(String username, String currentSessionId)
+    public List<UserSessionResponse> listSessionsById(Long userId, String currentSessionId)
     {
-        User user = userRepository.findByEmail(username);
-        if (user == null)
-        {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
-        }
-        return authSessionService.listSessions(user.getId(), currentSessionId);
+        requireUser(userId);
+        return authSessionService.listSessions(userId, currentSessionId);
     }
 
     @Override
-    public void revokeSession(String username, String sessionId)
+    public void revokeSessionById(Long userId, String sessionId)
     {
-        User user = userRepository.findByEmail(username);
-        if (user == null)
-        {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
-        }
-        authSessionService.revokeSession(user.getId(), sessionId, "user_logout");
+        requireUser(userId);
+        authSessionService.revokeSession(userId, sessionId, "user_logout");
     }
 
     @Override
-    public void revokeOtherSessions(String username, String currentSessionId)
+    public void revokeAllSessionsById(Long userId)
     {
-        User user = userRepository.findByEmail(username);
-        if (user == null)
-        {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
-        }
-        authSessionService.revokeOtherSessions(user.getId(), currentSessionId, "user_logout_all");
+        requireUser(userId);
+        authSessionService.revokeAllSessions(userId, "user_logout_all");
     }
 
-    @Override
-    public void revokeAllSessions(String username)
+    private void requireUser(Long userId)
     {
-        User user = userRepository.findByEmail(username);
+        if (userId == null)
+        {
+            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        User user = userRepository.findById(userId.longValue());
         if (user == null)
         {
             throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
         }
-        authSessionService.revokeAllSessions(user.getId(), "user_logout_all");
     }
 
     @Override

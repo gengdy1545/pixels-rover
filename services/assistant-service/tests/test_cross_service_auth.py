@@ -16,7 +16,7 @@ pytestmark = pytest.mark.asyncio
 class TestGatewayIdentityContract:
     async def test_accepts_minimal_gateway_identity_headers(self, async_client):
         resp = await async_client.get(
-            "/api/v1/backends",
+            "/api/v1/analysis/backends",
             headers=gateway_identity_headers(user_id=42, email="alice@pixelsdb.io", session_id="sess-42"),
         )
         assert resp.status_code == 200
@@ -25,7 +25,7 @@ class TestGatewayIdentityContract:
 
     async def test_rejects_missing_gateway_email(self, async_client):
         resp = await async_client.get(
-            "/api/v1/backends",
+            "/api/v1/analysis/backends",
             headers={"X-Auth-User-Id": "42"},
         )
         assert resp.status_code == 401
@@ -35,7 +35,7 @@ class TestGatewayIdentityContract:
 
     async def test_rejects_non_numeric_gateway_user_id(self, async_client):
         resp = await async_client.get(
-            "/api/v1/backends",
+            "/api/v1/analysis/backends",
             headers={
                 "X-Auth-User-Id": "not-a-number",
                 "X-Auth-User-Email": "alice@pixelsdb.io",

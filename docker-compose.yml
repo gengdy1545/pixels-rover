@@ -96,7 +96,11 @@ services:
       JWT_ACTIVE_KID: ${JWT_KID:-dev-rsa-1}
       JWT_PRIVATE_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-private.pem
       JWT_PUBLIC_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem
-      JWT_PUBLIC_KEYS_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public-keys.json
+      # Multi-kid verification during rotation: enumerate auth-service's local
+      # key directory (every `<kid>-public.pem`). There is no merged JWKS artifact
+      # any more — the former external /api/v1/auth/jwks surface was retired
+      # (see docs/design/jwt-rotation.md §1.2).
+      JWT_PUBLIC_KEYS_DIRECTORY: /jwt-keys
       # Server
       SERVER_PORT: 8081
       # Gateway -> auth-service internal auth
@@ -154,7 +158,7 @@ services:
   # ---------- Frontend (nginx — static assets only) ----------
   frontend:
     build:
-      context: ./apps/frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: pixels-rover-frontend
     restart: unless-stopped

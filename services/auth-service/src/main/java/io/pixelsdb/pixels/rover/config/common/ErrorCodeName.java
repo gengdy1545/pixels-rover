@@ -35,6 +35,13 @@ public final class ErrorCodeName
     public static final String DEPENDENCY_ERROR = "DEPENDENCY_ERROR";
     public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
 
+    // Infrastructure-namespace errorCodes (see backend.md §6.3.1 registry).
+    // These are intentionally NOT mapped in fromCode(); they are written via
+    // ApiResponse.errorWithCode(...) at specific code paths (filters, internal
+    // auth) where the access-plane semantics are known.
+    public static final String GATEWAY_IDENTITY_MISSING = "GATEWAY_IDENTITY_MISSING";
+    public static final String INTERNAL_AUTH_FAILED = "INTERNAL_AUTH_FAILED";
+
     private ErrorCodeName()
     {
     }

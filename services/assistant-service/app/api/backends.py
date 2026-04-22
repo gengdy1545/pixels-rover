@@ -7,7 +7,11 @@ from app.auth import get_current_user
 from app.dependencies import get_backend_registry
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v1/backends", tags=["backends"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/api/v1/analysis/backends",
+    tags=["backends"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("")

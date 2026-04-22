@@ -5,11 +5,13 @@
 - 适用范围：仓库中 `frontend/` 目录（即 Web SPA）。
 - 设计前提：产品长期只保留一种客户端（网页），**不会**拆 `apps/mobile`、`apps/desktop`，**不会**引入 `packages/*` 共享层或 monorepo 工具链。
 - 文档目的：让任何新同学在不读历史对话的情况下，也能按一致的方式加代码；同时让结构本身在未来万一需要多端时可以低成本抽离，而不需要现在付出多端的工程税。
-- 该文档与 [`.notes/engineering-design.md`](../../.notes/engineering-design.md)、[`.notes/todolist.md`](../../.notes/todolist.md) 长期保持一致。以代码事实为准，若代码与本文档出现漂移，优先修正代码或及时更新本文档。
+- 以代码事实为准：若代码与本文档出现漂移，优先修正代码或及时更新本文档。
 
 ---
 
 ## 1. 目录结构（唯一正确形态）
+
+> 本节描述**唯一正确形态**。仓库已固定 `frontend/` 为根级单 Web 前端目录；本文件内所有路径引用（`frontend/src/...` / `@/features/...`）即为代码事实。`src/` 内部从 `pages + components + services + stores + ...` 向 `app + features + shared` 三层迁移的进度由 `.notes/todolist.md §10` 跟踪。
 
 ```text
 frontend/
@@ -52,14 +54,28 @@ frontend/
 ```text
 features/<domain>/
 ├── components/        React 组件；只能依赖本 feature 的 hooks/services/model
+│   ├── Foo.tsx
+│   └── Foo.test.tsx   (colocated) — 或同目录 __tests__/Foo.test.tsx
 ├── hooks/             React hook；调用 services 并绑定 model
+│   ├── useBar.ts
+│   └── useBar.test.ts (colocated)
 ├── services/          纯函数 / 类：API 调用封装、SSE 订阅、业务计算
+│   ├── bazApi.ts
+│   └── bazApi.test.ts (colocated)
 ├── model/
 │   ├── types.ts       feature 内部业务类型（与后端契约类型区分）
 │   ├── store.ts       Zustand slice 或 TanStack Query key 定义
+│   ├── store.test.ts  (colocated)
 │   └── selectors.ts   对 store 的派生计算
 └── index.ts           对外 barrel：只暴露 hooks / 组件 / 类型；不暴露内部文件
 ```
+
+### 1.1.1 测试文件 colocated 硬规则
+
+- **测试文件与被测源文件同目录**，命名为 `<name>.test.ts(x)` 或放进就近的 `__tests__/` 子目录。**禁止**集中在某个顶级 `src/__tests__/` 或 `src/tests/` 目录。
+- 搬代码 PR 必须同步搬对应测试文件；**禁止**出现"源文件在 `features/analysis/` 新位置、测试仍留在 `src/__tests__/` 旧位置"的中间态。该硬规则与纪律 3（跨 feature 只经由 barrel）同源——测试对 feature 内部的依赖如果跨目录存在，重构 feature 时测试会变成"看不见的外部引用者"而卡住重构。
+- 测试文件与源文件**共享 feature 边界**：`features/analysis/**/ *.test.ts(x)` 只能 import 本 feature 的内部符号 + `shared/*` + 其他 feature 的 `@/features/<name>` barrel（与 feature 生产代码的依赖规则完全一致）。
+- `features/*/model/**/*.test.ts(x)` 豁免纪律 1 对 React 的禁令——测试可以用 `@testing-library/react` 等工具渲染 hook/组件；但被测的 `model/` 源文件本身**仍然禁止** import React（见纪律 1）。
 
 ### 1.2 feature 目录命名规则
 
@@ -215,6 +231,16 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 
 这三条纪律都可以用 ESLint 的内置或社区规则强制，**不需要新工具**。建议在 `frontend/` 的 ESLint 配置里加下面几条。若短期未加，仍应写进 PR 模板作为 review checklist。
 
+### 3.0 Lint 规则的合规判据（适用于本节 3.1 / 3.3 / 3.4 / 3.5 的**所有**规则）
+
+本节配置的任一条 ESLint 规则，合规判据都是"**规则能实际触发**"，不是"**规则配上了**"：
+
+- 规则落地 PR **必须**在 PR 描述里附一次"故意构造违规代码 → 跑 lint → 规则报错"的验证记录（截图或复制命令输出），随后再删除违规代码。
+- 规则"配上了但一次都不触发"（通常由 ESLint 选择器写错、TypeScript 全局声明绕过、目录 glob 覆盖不到等原因导致）**与规则未配等价**，不算合规。
+- 合规验证后，应该**保留一个 `*.lint-assertion.ts.skip` 之类的示例文件**（或直接在 PR 描述里固化反例代码片段），便于未来 lint 升级时快速回归验证规则仍有效。
+
+该判据对所有目录级 overrides 规则（§3.3 纪律 1、§3.4 纪律 2、§3.5 协议头字面量）同样适用；§3.4 最末尾的"合规判定"段落是本节的特例引用，不是专属 lint-2 的放宽。
+
 ### 3.1 `no-restricted-imports` 落实纪律 3
 
 ```jsonc
@@ -287,6 +313,66 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 }
 ```
 
+**关于 `no-restricted-globals` 在 TypeScript 工程里的 caveat（必须阅读）**：
+
+`no-restricted-globals` 对 ESLint 自己识别为"全局变量"的 identifier 才会触发。在 TypeScript 项目下，`document` / `window` / `localStorage` / `sessionStorage` 都是由 `lib.dom.d.ts` 声明的全局类型——**ESLint 实测对这类"已在 DOM lib 里声明的全局"通常会放行**，最终表现为"规则配上了、但一次都不触发"。这条规则是否真的把 `shared/api` 的浏览器副作用拦住，**必须以"规则实际触发"为合格标准**，而不是"规则写进配置了"就算数。
+
+两种兜底落地路径，按推荐度排列：
+
+1. **推荐**：改用 `no-restricted-syntax` + AST 选择器，直接匹配 `MemberExpression` 上的对象名：
+
+    ```jsonc
+    {
+      "overrides": [
+        {
+          "files": ["src/shared/api/**/*.{ts,tsx}"],
+          "rules": {
+            "no-restricted-syntax": [
+              "error",
+              {
+                "selector": "MemberExpression[object.name=/^(document|window|localStorage|sessionStorage)$/]",
+                "message": "shared/api 不允许直接访问 document/window/localStorage/sessionStorage，请走 shared/storage"
+              }
+            ]
+          }
+        }
+      ]
+    }
+    ```
+
+2. 引入 `eslint-plugin-boundaries` 做"目录级硬墙"，把 `shared/api/` 整个隔离在"只能 import `shared/storage/` 暴露的工具"的维度上。
+
+**合规判定**：新增 PR 落地该规则后，必须在本地构造一个违规调用（例如在 `src/shared/api/client.ts` 临时写 `document.cookie = 'x=1'`），跑 `pnpm lint` / `npm run lint`，**确认规则报错**后再删除违规代码。规则"配上但不触发"不合规。
+
+### 3.5 用 `no-restricted-syntax` 禁止业务层手写协议头字面量
+
+纪律 2 的延伸：`X-XSRF-TOKEN` / `X-Request-Id` / `Authorization` 等协议头的字面量赋值**只允许出现在 `src/shared/api/**`** 内部（含 `shared/api/sse/**` 的 SSE 客户端——SSE 基于 `fetch` 手动构造 header 时复用 `shared/api` 暴露的 `buildCommonHeaders()`，仍属 shared 网络层内部）。在 `features/` / `entities/` / `services/` 等任何其他层里出现这些字面量赋值一律视为"业务代码手写请求头"——违反 `§4.6` 的跨层契约。
+
+机械化规则：
+
+```jsonc
+{
+  "overrides": [
+    {
+      "files": ["src/**/*.{ts,tsx}"],
+      "excludedFiles": ["src/shared/api/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "Literal[value=/^(X-XSRF-TOKEN|X-Request-Id|Authorization)$/i]",
+            "message": "协议头字面量只允许出现在 shared/api/**；业务层通过 shared/api 暴露的 client / buildCommonHeaders 间接使用"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+- **判据是目录路径，不是字符串子串全仓禁用**——`shared/api/**` 内部需要合法写这些字面量，全仓禁用会误伤 SSE 客户端。
+- 与 `§4.6` 的 SSE 豁免条款配合使用：feature 层通过 `shared/api` 暴露的封装间接消费 header，不感知字面量。
+
 ---
 
 ## 4. 常见边界情形的判定
@@ -305,12 +391,16 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 
 - **后端返回的原始契约** → `shared/types/`（纯 mirror，不要带 UI 字段）。
   - **唯一来源**：各后端服务的 `/openapi.json`（见 [`./backend.md §9`](./backend.md)）。任何**不来自 OpenAPI** 的类型不允许进入 `shared/types/`——它们要么是 feature 内部类型（放 `features/<name>/model/types.ts`），要么是纯工具类型（放 `shared/lib/`）。
-  - 短期允许手写镜像 OpenAPI，但每个文件顶部必须注明对应的 OpenAPI schema 名和所属服务；长期走代码生成（参见 `.notes/todolist.md §9`）。
+  - 短期允许手写镜像 OpenAPI，但每个文件顶部必须注明对应的 OpenAPI schema 名和所属服务；长期走代码生成。
   - **按服务命名空间组织**：`shared/types/auth/`、`shared/types/analysis/` 各自承载对应服务的 OpenAPI 镜像；每个服务的契约类型**独立成文件**（如 `shared/types/auth/User.ts`），避免跨服务混放一个 `types.d.ts` 造成"改一个服务的契约动另一个服务的文件"。
 - **跨 feature 复用的原始契约类型**（例如 `User` 被 `features/auth` / `features/conversation` / `features/report` 同时消费）：
   - **统一**从 `shared/types/<service>/` 导入：`import type { User } from '@/shared/types/auth'`。
   - **禁止** feature 内部为共享类型做本地拷贝（`features/conversation/model/types.ts` 里复制一份 `User`）——OpenAPI 演进时会漂。
   - **禁止**通过某个"主用 feature"的 `index.ts` 再导出给其他 feature（例如 `features/auth` barrel 转出 `User`），这会让 `features/conversation → features/auth` 形成跨 feature 依赖，违反纪律 3 的依赖方向。
+- **跨服务通用协议类型**（响应信封 `ApiResponse<T>`、接入面 `ErrorCode` 联合类型、`RequestId` 相关类型）：
+  - **统一放 `src/shared/types/common.ts`**（不按服务命名空间拆）——这些是跨前后端的**协议层常量**，不属于任何单一服务的 OpenAPI。按服务命名空间拆会迫使每个服务各写一份 `ApiResponse<T>`，彼此独立演化即违约。
+  - `ApiResponse<T>` 的字段形状以 [`./backend.md §6.0`](./backend.md) 为权威来源；`ErrorCode` 联合类型的基础设施前缀部分以 [`./backend.md §6.3.1`](./backend.md) 的错误码注册表为权威来源，业务领域前缀部分由各服务 `shared/types/<service>/` 下的 OpenAPI 镜像独立贡献并在 `common.ts` 里以 `type ErrorCode = InfraErrorCode | AuthErrorCode | AnalysisErrorCode | ...` 合并（合并硬规则与审计要求见 [`./backend.md §6.3.2`](./backend.md)；**新增业务前缀时必须三处同改**：对应服务 OpenAPI enum → `shared/types/<service>/ErrorCode.ts` → `common.ts` 的 `ErrorCode` union，任一漏改会让该错误码在前端分流时静默走通用 5xx 兜底）。
+  - 这类文件**不写后端 OpenAPI 镜像字段**（没有 `User` / `Conversation` 等领域类型），只写协议层抽象。判据：若未来新增的服务完全不需要这个类型，它就不属于 `common.ts`。
 - **feature 在原始契约类型之上加 UI 字段**时：用 `type ViewUser = User & { expanded: boolean }` 或 `Pick<User, 'id' | 'email'>` 在 `features/<name>/model/types.ts` 里**本地派生**；派生类型**不回写** `shared/types/`。
 - 禁止把 "API 契约 + UI 派生字段" 混在同一个 type 里，这是未来契约漂移最常见的温床。
 
@@ -354,10 +444,24 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
   - 浏览器永远只通过同域 gateway（`/`）访问 API，绝对 URL 会同时破坏开发代理、cookie 作用域与 CORS 零配置三件事。
   - 若本地联调需要指向另一套 compose，走 Vite `server.proxy` 或 gateway 端口映射，不改源码。
 - **所有需要鉴权的请求必须 `withCredentials: true`**；CSRF 头 `X-XSRF-TOKEN` 由 `shared/api/client.ts` 拦截器统一注入，业务代码不手写。
+  - **SSE / `fetch` 场景的豁免与责任分配**：浏览器原生 `EventSource` 无法携带自定义头，项目已改用"基于 `fetch(..., { credentials: 'include' })` 的流式客户端"（位于 `shared/api/sse/`）。该客户端**在 SSE 层内部**复用 `shared/api/client.ts` 暴露的"只读请求头构造函数"（`buildCommonHeaders()`）来拼 `X-XSRF-TOKEN` / `X-Request-Id`；**这不是"业务代码手写请求头"的反例**，而是"shared 网络层内部复用 shared 网络层工具"的合法形态。
+  - 判定规则：**拼 header 的调用点必须位于 `shared/api/**`**。feature / entities / services 层仍**严禁**出现 `X-XSRF-TOKEN` / `X-Request-Id` / `Authorization` 等字面量的手写赋值，由 ESLint `no-restricted-syntax` 规则兜底（见 §3.5）。
+  - **SSE 失败模式与 heartbeat 约定（硬规则）**：SSE 在浏览器端不是"连上就永远畅通"的理想通道。下列三类失败模式在生产必然出现，`shared/api/sse/` 的客户端实现**必须**显式处理：
+    1. **Chrome 后台 tab suspend**：浏览器在后台 tab 休眠时可能暂停 `fetch` 流式读取，表现为"30 秒内完全无数据"；
+    2. **Safari < 16.4 的 `fetch` 流不可用**：降级表现为一次性读完整 body 才回调，SSE 语义失效；客户端需 feature-detect，若不支持则明确降级到一次性请求或显示"浏览器不支持实时更新"；
+    3. **企业代理 chunked 超时断连**：部分企业代理对长连接做 60~120s 静默断连，表现为"流中段被 abort"。
+
+     针对这三类的统一兜底契约（与 [`./backend.md §6.6`](./backend.md) 服务端 SSE 契约对齐）：
+
+    - **服务端每 15 秒**发一条 SSE 注释帧 `: keep-alive\n\n`（见 `backend.md §6.6`）——这是跨服务硬数值。
+    - **前端按 30 秒无数据阈值判定断流**（即连续错过 2 次 heartbeat），此时通过 `ensureRequestId()` **复用同一 request-id** 触发一次自动重连（带 `Last-Event-Id` 头实现位点恢复）；
+    - **自动重连仍失败**时，降级为通用 5xx 兜底 UI，提示用户手动刷新；**不做**无限指数退避重连——它会把"服务端确实挂了"的事故掩盖成"前端 UI 看起来还在转圈"。
+    - 收到 `event: error` 帧（见 `backend.md §6.6`）时，按帧内 `data.details.errorCode` 走与普通 HTTP 错误一致的分流（`GATEWAY_AUTH_REQUIRED` → 跳登录等）；**不走** 自动重连路径。
 - **响应解析按 `backend.md §6.0` 信封**：成功读 `data.data`，失败读 `data.details`。
   - 错误子码以 **`data.details.errorCode`** 为准（SCREAMING_SNAKE_CASE 字符串），**不允许**从顶层 `code` 读业务码——顶层 `code` 等于 HTTP 状态码，不承载业务信息。
   - 无 `details.errorCode` 时按 HTTP 状态（`401` → 跳登录，`403` → CSRF 重取，`5xx` → 通用兜底）处理，不要猜测字段。
   - **禁止依赖 `apiVersion` 字段** —— 它已从响应信封中移除，URL 前缀 `/api/v1/` 是唯一的版本载体。
+  - **HTTP status 是分流的唯一依据（硬规则）**：`data.code`（响应信封顶层 `code`）与实际 HTTP status 理论上恒等（见 `backend.md §6.0`）。任何一方出现"HTTP 是 200 但 `data.code` 是 400"或反之的形态一律视为 **server bug**——前端**不**做"body 说错了就当错"的适配补丁，**一律按 HTTP status 方向处理**，同时 `console.error` 一次（带 requestId、路径、两边的 code 值），便于在 QA / 生产被捕获并修回服务端。**禁止**让业务层拿到两种不一致的分流结果，否则一次协议漂移会在 UI 层再漂移一层。
 - **接入面错误码按基础设施前缀匹配**（严禁按字符串子串匹配业务含义）：
   - `GATEWAY_AUTH_REQUIRED`（401）→ 跳登录或触发静默 refresh 流程。
   - `GATEWAY_CSRF_INVALID`（403）→ 重新拉 `XSRF-TOKEN` 后重试一次；仍失败则通用错误 UI。
@@ -365,6 +469,7 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
   - `GATEWAY_IDENTITY_MISSING`（500）→ 直接触发通用 5xx 兜底 UI，**不要**"静默重试"或"跳登录"——这是接入面事故，重试无意义、跳登录会掩盖故障。
   - `INTERNAL_AUTH_FAILED`（500）→ 对前端而言等同未知 5xx（该错误码只会出现在 internal 路径，前端理论上不该看到；看到即异常）。
 - **`X-Request-Id` 在 `shared/storage/requestId.ts` 生成并注入**；错误 toast 的角落里展示该 id（只读、可复制），便于用户复述给支持侧。
+  - **职责边界（硬规则）**：id 的**生成与本地缓存**职责属于 `shared/storage/requestId.ts`（纯浏览器副作用：`crypto.randomUUID()` / `localStorage` / 会话内单例缓存等）；把 id **绑定到 axios config 对象或 fetch 请求头**的职责属于 `shared/api/`（axios 拦截器 / SSE 客户端的 `buildCommonHeaders`）。**两层不重叠**：`shared/storage/` 不 import axios，也不感知 fetch / `Request` API；`shared/api/` 不直接用 `crypto.randomUUID()` 或读写 storage，只调用 `ensureRequestId()` 等纯函数入口。历史上把"生成 id"写到 axios 拦截器里是跨端复用和 SSR 兼容的最大障碍，也是 §3 纪律 2 的典型违例形态——任何混两层的 PR 一律打回。
 
 这些约束只会出现在 `shared/api/` 与 `shared/storage/` 两层；feature 代码应该感受不到协议细节，只拿到已解析好的业务 `data` 或已分类的错误对象。
 
@@ -380,6 +485,7 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 - **不把"feature A 调 feature B 的内部文件"合法化**：即使是一次性的 hotfix，也应通过在 B 的 `index.ts` 上补一条暴露。
 - **不让 frontend 容器在 `docker-compose.yml` 里 `ports` 对外暴露端口**：frontend 容器与业务服务同等，**只 `expose` 不 `ports`**，浏览器永远只通过 gateway 访问（见 [`./gateway.md §2.4`](./gateway.md)）。
 - **不在 frontend 容器的 `nginx.conf` 里下发 CSP / HSTS / XFO 等安全响应头**：这些头由 gateway 一层统一下发（见 [`./gateway.md §6.6`](./gateway.md)）。`index.html` 的 `Cache-Control: no-store` 仍配在前端 nginx（属于静态分发层职责）。
+- **SPA 深链接 fallback 必须配在 frontend 容器的 `nginx.conf`**（硬规则，见 [`./gateway.md §2.4`](./gateway.md)）：`try_files $uri $uri/ /index.html;` 或等价形态。HTML5 history routing 下，刷新 `/reports/abc` 这类深链接没有 fallback 会 404。**禁止**把 fallback 配在 gateway 层（用 `proxy-rewrite` 把 404 改写为 `/index.html`）——gateway 不理解 SPA 路由形态，未来引入 SSR / SSG 时会成为改造阻碍。
 
 ---
 
@@ -393,9 +499,10 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 6. `hooks/` 组装 `services/` 与 `model/`。
 7. `components/` 写业务组件，只依赖本 feature 的 `hooks/` / `model/` / `services/`。
 8. 在 `index.ts` 中**只暴露外部需要的符号**（通常是若干 hooks 和若干组件，以及一两个类型）。
-9. 在 `app/router/` 或 `app/pages/` 里装配成页面。
+9. **测试文件与源文件同目录 colocated**（见 §1.1.1），每个 `components/ hooks/ services/ model/` 下对应的 `*.test.ts(x)` 与源文件就近放置；**禁止**集中在顶级 `src/__tests__/` 目录。
+10. 在 `app/router/` 或 `app/pages/` 里装配成页面。
 
-完成后自检三条纪律全部成立，即可提交。
+完成后自检三条纪律全部成立 + 测试文件全部 colocated，即可提交。
 
 ---
 
@@ -403,6 +510,3 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 
 - 网关开发指南：[`./gateway.md`](./gateway.md)
 - 后端接入契约：[`./backend.md`](./backend.md)
-- 设计决策沿革：[`.notes/engineering-design.md`](../../.notes/engineering-design.md)（冲突时以本文档为准）
-- 当前可执行 backlog：[`.notes/todolist.md`](../../.notes/todolist.md)
-- 研究愿景（非工程事实）：[`.notes/paper-outline.md`](../../.notes/paper-outline.md)

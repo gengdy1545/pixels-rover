@@ -15,14 +15,15 @@
  */
 package io.pixelsdb.pixels.rover.config.security;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.IncorrectClaimException;
 import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtParserBuilder;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.MissingClaimException;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -36,12 +37,13 @@ import org.springframework.util.StringUtils;
 import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.PublicKey;
-import java.security.interfaces.RSAPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
@@ -89,8 +91,7 @@ public class JwtTokenProvider
             @Value("${jwt.private-key-path:}") String privateKeyPath,
             @Value("${jwt.public-key-pem:}") String publicKeyPem,
             @Value("${jwt.public-key-path:}") String publicKeyPath,
-            @Value("${jwt.public-keys-json:}") String publicKeysJson,
-            @Value("${jwt.public-keys-path:}") String publicKeysPath,
+            @Value("${jwt.public-keys-directory:}") String publicKeysDirectory,
             @Value("${jwt.access-token-expiration-ms:3600000}") long accessTokenExpirationMs,
             @Value("${jwt.refresh-token-expiration-ms:604800000}") long refreshTokenExpirationMs)
     {
@@ -102,9 +103,14 @@ public class JwtTokenProvider
         this.activeKid = StringUtils.hasText(activeKid) ? activeKid : "default-hmac";
         String resolvedPrivateKeyPem = readConfigValue(privateKeyPem, privateKeyPath);
         String resolvedPublicKeyPem = readConfigValue(publicKeyPem, publicKeyPath);
-        String resolvedPublicKeysJson = readConfigValue(publicKeysJson, publicKeysPath);
         this.privateKey = parsePrivateKey(resolvedPrivateKeyPem);
-        this.publicKeys = Collections.unmodifiableMap(parsePublicKeys(resolvedPublicKeyPem, resolvedPublicKeysJson, this.activeKid));
+        // Multi-key support now comes from enumerating `<kid>-public.pem` files under the
+        // auth-service-local directory (see docs/design/jwt-rotation.md §1.2 and the stage-C
+        // of docs/runbooks/jwt-rotation-drill.md). The legacy "merged JSON of public keys"
+        // artifact was consumed by the former /api/v1/auth/jwks endpoint, which has been
+        // retired; keeping any fallback here would re-invite external-distribution thinking.
+        this.publicKeys = Collections.unmodifiableMap(
+                loadPublicKeys(resolvedPublicKeyPem, publicKeysDirectory, this.activeKid));
         this.accessTokenExpirationMs = accessTokenExpirationMs;
         this.refreshTokenExpirationMs = refreshTokenExpirationMs;
     }
@@ -231,6 +237,12 @@ public class JwtTokenProvider
         {
             log.error("JWT token is unsupported: {}", e.getMessage());
         }
+        catch (IncorrectClaimException | MissingClaimException e)
+        {
+            // Issuer / required-claim mismatch: the signature may be valid, but the token
+            // was not issued by us, so treat it as invalid per backend.md §3.1.
+            log.error("JWT claim validation failed: {}", e.getMessage());
+        }
         catch (IllegalArgumentException e)
         {
             log.error("JWT claims string is empty: {}", e.getMessage());
@@ -248,22 +260,23 @@ public class JwtTokenProvider
         return activeKid;
     }
 
-    public Map<String, Object> getPublicJwks()
+    /**
+     * Returns the {@code kid} header value of the supplied JWT (without performing any
+     * signature verification). Intended for diagnostics and testing — production auth
+     * decisions must go through {@link #validateToken(String)}.
+     */
+    public String getKeyIdFromToken(String token)
     {
-        if (!RS256.equalsIgnoreCase(algorithm))
-        {
-            return Collections.singletonMap("keys", Collections.emptyList());
-        }
+        return parseTokenHeader(token).getKid();
+    }
 
-        java.util.List<Map<String, Object>> keys = new java.util.ArrayList<>();
-        for (Map.Entry<String, PublicKey> entry : publicKeys.entrySet())
-        {
-            if (entry.getValue() instanceof RSAPublicKey)
-            {
-                keys.add(toJwk(entry.getKey(), (RSAPublicKey) entry.getValue()));
-            }
-        }
-        return Collections.<String, Object>singletonMap("keys", keys);
+    /**
+     * Returns the {@code alg} header value of the supplied JWT (without verification).
+     * See caveats on {@link #getKeyIdFromToken(String)}.
+     */
+    public String getAlgorithmFromToken(String token)
+    {
+        return parseTokenHeader(token).getAlg();
     }
 
     private Claims parseClaims(String token)
@@ -344,27 +357,70 @@ public class JwtTokenProvider
         }
     }
 
-    private static Map<String, PublicKey> parsePublicKeys(String publicKeyPem, String publicKeysJson, String activeKid)
+    /**
+     * Load verification public keys from the auth-service-local directory and, optionally,
+     * the single active key PEM.
+     *
+     * <p>Directory enumeration rule: every file matching {@code <kid>-public.pem} contributes
+     * a verifier keyed by {@code <kid>}. This is deliberately an internal trust contract —
+     * see {@code docs/design/jwt-rotation.md §1.2}: JWKS distribution was retired and the
+     * auth-service validates tokens against the keys co-located with it (the same ones the
+     * jwt-keygen init container produces during rotation drills).</p>
+     *
+     * <p>The explicit {@code jwt.public-key-pem} / {@code jwt.public-key-path} inputs still
+     * win — they guarantee the active kid is always loadable even if the directory layout
+     * drifts.</p>
+     */
+    private static Map<String, PublicKey> loadPublicKeys(String activePublicKeyPem,
+                                                         String publicKeysDirectory,
+                                                         String activeKid)
     {
         Map<String, PublicKey> result = new HashMap<>();
-        if (StringUtils.hasText(publicKeysJson))
+        if (StringUtils.hasText(publicKeysDirectory))
         {
-            try
+            Path directory = Paths.get(publicKeysDirectory);
+            if (Files.isDirectory(directory))
             {
-                Map<String, String> pemValues = OBJECT_MAPPER.readValue(publicKeysJson, new TypeReference<Map<String, String>>() {});
-                for (Map.Entry<String, String> entry : pemValues.entrySet())
+                try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*-public.pem"))
                 {
-                    result.put(entry.getKey(), parsePublicKey(entry.getValue()));
+                    for (Path pemFile : stream)
+                    {
+                        String fileName = pemFile.getFileName().toString();
+                        String kid = fileName.substring(0, fileName.length() - "-public.pem".length());
+                        try
+                        {
+                            String pem = new String(Files.readAllBytes(pemFile), StandardCharsets.UTF_8);
+                            PublicKey key = parsePublicKey(pem);
+                            if (key != null)
+                            {
+                                result.put(kid, key);
+                            }
+                        }
+                        catch (IOException | IllegalArgumentException e)
+                        {
+                            log.warn("Skipping unreadable JWT public key {}: {}", pemFile, e.getMessage());
+                        }
+                    }
+                }
+                catch (IOException e)
+                {
+                    throw new IllegalArgumentException(
+                            "Failed to enumerate jwt.public-keys-directory: " + publicKeysDirectory, e);
                 }
             }
-            catch (Exception e)
+            else
             {
-                throw new IllegalArgumentException("Failed to parse jwt.public-keys-json", e);
+                log.warn("jwt.public-keys-directory does not exist or is not a directory: {}",
+                        publicKeysDirectory);
             }
         }
-        if (StringUtils.hasText(publicKeyPem))
+        if (StringUtils.hasText(activePublicKeyPem))
         {
-            result.put(activeKid, parsePublicKey(publicKeyPem));
+            PublicKey key = parsePublicKey(activePublicKeyPem);
+            if (key != null)
+            {
+                result.put(activeKid, key);
+            }
         }
         return result;
     }
@@ -430,18 +486,6 @@ public class JwtTokenProvider
         {
             throw new IllegalArgumentException("Failed to read JWT config file: " + pathValue, e);
         }
-    }
-
-    private static Map<String, Object> toJwk(String kid, RSAPublicKey publicKey)
-    {
-        Map<String, Object> jwk = new HashMap<>();
-        jwk.put("kty", "RSA");
-        jwk.put("use", "sig");
-        jwk.put("alg", RS256);
-        jwk.put("kid", kid);
-        jwk.put("n", Base64.getUrlEncoder().withoutPadding().encodeToString(publicKey.getModulus().toByteArray()).replaceFirst("^AA", ""));
-        jwk.put("e", Base64.getUrlEncoder().withoutPadding().encodeToString(publicKey.getPublicExponent().toByteArray()).replaceFirst("^AA", ""));
-        return jwk;
     }
 
     public static class TokenHeader

@@ -17,7 +17,7 @@ def make_request(headers: dict[str, str]) -> Request:
     scope = {
         "type": "http",
         "method": "GET",
-        "path": "/api/v1/backends",
+        "path": "/api/v1/analysis/backends",
         "headers": raw_headers,
     }
     return Request(scope)

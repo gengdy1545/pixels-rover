@@ -15,15 +15,11 @@
  */
 package io.pixelsdb.pixels.rover.config.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.pixelsdb.pixels.rover.config.common.ApiResponse;
-import io.pixelsdb.pixels.rover.constant.ErrorCode;
-import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.mapper.UserRepository;
-import io.pixelsdb.pixels.rover.service.AuthSessionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -36,107 +32,111 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
-import java.util.Arrays;
-import java.util.List;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 /**
- * Security configuration with JWT-based stateless authentication and CORS support.
+ * Security configuration split along auth-service's two-faceted identity ({@code backend.md §3.4}):
  *
- * @author pixels
+ * <ul>
+ *     <li>{@code internalApiChain} — guards {@code /api/internal/**} with the shared-secret
+ *         {@link InternalAuthFilter}. JWT decoding lives only here and in service-layer domain
+ *         logic (refresh / logout), never on the user-facing chain.</li>
+ *     <li>{@code publicAndUserChain} — handles public entry points
+ *         ({@code /api/v1/auth/login} / {@code /register} / {@code /captcha} / {@code /refresh})
+ *         and user-facing endpoints ({@code /me} / {@code /logout} / {@code /sessions*}).
+ *         User-facing endpoints consume identity exclusively from gateway-injected
+ *         {@code X-Auth-User-Id} / {@code X-Auth-Session-Id} headers via
+ *         {@link IdentityHeaderValidationFilter}; no filter on this chain decodes JWTs.</li>
+ * </ul>
+ *
+ * <p>CORS and global 401/403 entry points are intentionally not configured here: per
+ * {@code backend.md §11} / {@code gateway.md §6.4} both are gateway's responsibility.</p>
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig
 {
-    private final JwtTokenProvider jwtTokenProvider;
     private final String internalIntrospectionSecret;
 
-    public SecurityConfig(JwtTokenProvider jwtTokenProvider,
-                          @Value("${internal.introspection.secret:change-me}") String internalIntrospectionSecret)
+    public SecurityConfig(@Value("${internal.introspection.secret:}") String internalIntrospectionSecret)
     {
-        this.jwtTokenProvider = jwtTokenProvider;
         this.internalIntrospectionSecret = internalIntrospectionSecret;
     }
 
+    /**
+     * Chain 1 of 2: every {@code /api/internal/**} route is gated by {@link InternalAuthFilter}.
+     *
+     * <p>HttpSecurity authorization is left as {@code permitAll()} because the filter itself
+     * performs the secret check and short-circuits with {@code 500 + INTERNAL_AUTH_FAILED}; adding
+     * another {@code authenticated()} layer would only translate shared-secret failures into
+     * misleading 401/403 responses.</p>
+     */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                                   UserDetailsService userDetailsService,
-                                                   AuthSessionService authSessionService) throws Exception
+    @Order(1)
+    public SecurityFilterChain internalApiChain(HttpSecurity http) throws Exception
     {
-        ObjectMapper objectMapper = new ObjectMapper();
-
         http
-                // Enable CORS
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                // CSRF protection is handled at the API gateway layer.
+                .securityMatcher(new AntPathRequestMatcher("/api/internal/**"))
                 .csrf(csrf -> csrf.disable())
-                // Stateless session management
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // Configure authorization rules
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
+                .logout(logout -> logout.disable())
+                .addFilterBefore(new InternalAuthFilter(internalIntrospectionSecret),
+                        UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+
+    /**
+     * Chain 2 of 2: public entry points plus user-facing endpoints.
+     *
+     * <p>Authorization rules:</p>
+     * <ul>
+     *     <li>{@code permitAll} — {@code /health} + the four public entry points only. Anything
+     *         else (notably {@code /me} / {@code /logout*} / {@code /sessions*}) falls through to
+     *         {@code authenticated()} and is protected by {@link IdentityHeaderValidationFilter},
+     *         which rejects missing/malformed {@code X-Auth-User-Id} with
+     *         {@code 500 + GATEWAY_IDENTITY_MISSING} (see {@code backend.md §3.3}).</li>
+     * </ul>
+     *
+     * <p>No JWT filter is mounted on this chain — identity on the user face is read
+     * exclusively via {@code @RequestHeader("X-Auth-User-Id")}.</p>
+     */
+    @Bean
+    @Order(2)
+    public SecurityFilterChain publicAndUserChain(HttpSecurity http) throws Exception
+    {
+        http
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/health",
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/captcha",
-                                "/api/v1/auth/refresh",
-                                "/api/v1/auth/jwks",
-                                "/api/v1/auth/me",
-                                "/api/internal/auth/introspect"
+                                "/api/v1/auth/refresh"
                         ).permitAll()
+                        // User-facing endpoints (/me, /logout*, /sessions*) must be marked
+                        // authenticated so the IdentityHeaderValidationFilter's 500 response is
+                        // reached before Spring Security would otherwise short-circuit.
                         .anyRequest().authenticated()
                 )
-                // Disable form login (we use JWT)
                 .formLogin(form -> form.disable())
-                // Disable default logout
+                .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
-                // Handle authentication errors
-                .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint((request, response, authException) -> {
-                            response.setContentType("application/json;charset=UTF-8");
-                            response.setStatus(HttpStatus.UNAUTHORIZED);
-                            ApiResponse<?> result = ApiResponse.error(
-                                    ErrorCode.AUTHENTICATION_REQUIRED,
-                                    "Unauthorized, please login"
-                            );
-                            response.getWriter().write(objectMapper.writeValueAsString(result));
-                        })
-                        .accessDeniedHandler((request, response, accessDeniedException) -> {
-                            response.setContentType("application/json;charset=UTF-8");
-                            response.setStatus(HttpStatus.FORBIDDEN);
-                            ApiResponse<?> result = ApiResponse.error(ErrorCode.ACCESS_DENIED, "Access denied");
-                            response.getWriter().write(objectMapper.writeValueAsString(result));
-                        })
-                )
-                .addFilterBefore(new InternalAuthFilter(internalIntrospectionSecret),
-                        JwtAuthenticationFilter.class)
-                // Add JWT filter before UsernamePasswordAuthenticationFilter
-                .addFilterBefore(
-                        new JwtAuthenticationFilter(jwtTokenProvider, userDetailsService, authSessionService),
-                        UsernamePasswordAuthenticationFilter.class
-                );
+                // Allow requests carrying a valid X-Auth-User-Id to satisfy authenticated()
+                // without running any AuthN/AuthZ logic locally; identity trust flows from
+                // gateway's introspect cache (see backend.md §3.4). The same filter rejects
+                // missing/malformed headers with 500 + GATEWAY_IDENTITY_MISSING.
+                .addFilterBefore(new IdentityHeaderValidationFilter(),
+                        UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
-    }
-
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource()
-    {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("*"));
-        configuration.setAllowCredentials(true);
-        configuration.setMaxAge(3600L);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
     }
 
     @Bean

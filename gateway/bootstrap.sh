@@ -117,21 +117,6 @@ put_resource routes 220 '{
   "upstream_id": 1
 }'
 
-put_resource routes 230 '{
-  "name": "auth-jwks",
-  "priority": 950,
-  "uri": "/api/v1/auth/jwks",
-  "methods": ["GET", "OPTIONS"],
-  "plugins": {
-    "gateway-auth": {
-      "require_auth": false,
-      "csrf_protect": false,
-      "introspection_url": "http://auth-service:8081/api/internal/auth/introspect"
-    }
-  },
-  "upstream_id": 1
-}'
-
 put_resource routes 240 '{
   "name": "auth-refresh",
   "priority": 940,
@@ -234,9 +219,9 @@ put_resource routes 410 '{
 }'
 
 put_resource routes 420 '{
-  "name": "backends-root",
-  "priority": 830,
-  "uri": "/api/v1/backends",
+  "name": "analysis-backends-root",
+  "priority": 890,
+  "uri": "/api/v1/analysis/backends",
   "methods": ["GET", "OPTIONS"],
   "plugins": {
     "gateway-auth": {
@@ -249,9 +234,9 @@ put_resource routes 420 '{
 }'
 
 put_resource routes 430 '{
-  "name": "backends-detail",
-  "priority": 820,
-  "uri": "/api/v1/backends/*",
+  "name": "analysis-backends-detail",
+  "priority": 885,
+  "uri": "/api/v1/analysis/backends/*",
   "plugins": {
     "gateway-auth": {
       "require_auth": true,

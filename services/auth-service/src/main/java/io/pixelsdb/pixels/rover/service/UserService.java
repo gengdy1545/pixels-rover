@@ -23,4 +23,6 @@ public interface UserService
     void register(RegisterRequest request);
 
     UserInfoResponse getUserInfo(String email);
+
+    UserInfoResponse getUserInfoById(Long userId);
 }

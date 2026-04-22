@@ -113,24 +113,34 @@ local function set_forwarded_headers()
     ngx.req.set_header("X-Forwarded-Host", get_header("Host") or ngx.var.host or "")
 end
 
+-- Strip ALL client-supplied `X-Auth-*` headers before we inject authoritative
+-- identity. Enumerating only known names (X-Auth-User-Id / X-Auth-User-Email /
+-- X-Auth-Session-Id) is unsafe: any future `X-Auth-<Attr>` would silently pass
+-- through and become client-forgeable. See gateway.md §3.2.
 local function clear_identity_headers()
-    ngx.req.clear_header("X-Auth-User-Id")
-    ngx.req.clear_header("X-Auth-User-Email")
-    ngx.req.clear_header("X-Auth-Session-Id")
+    local headers = ngx.req.get_headers()
+    for name, _ in pairs(headers) do
+        -- ngx.req.get_headers() returns keys lower-cased by default; match both
+        -- just in case a future lua-nginx version changes normalization.
+        if type(name) == "string"
+            and (string.sub(name, 1, 7) == "X-Auth-"
+                 or string.sub(name, 1, 7) == "x-auth-") then
+            ngx.req.clear_header(name)
+        end
+    end
 end
 
 local function is_safe_method(method)
     return method == "GET" or method == "HEAD" or method == "OPTIONS"
 end
 
-local function should_skip_csrf(method, access_cookie, refresh_cookie)
-    if is_safe_method(method) then
-        return true
-    end
-    if access_cookie or refresh_cookie then
-        return false
-    end
-    return true
+-- CSRF enforcement MUST be driven by route config + HTTP method alone; it MUST
+-- NOT branch on "does this request happen to carry auth cookies". Reason: on
+-- routes like POST /api/v1/auth/refresh and POST /api/v1/auth/logout that
+-- require CSRF even before the browser-side state is fully populated, skipping
+-- the check for "no cookie" requests is exploitable. See gateway.md §5.2.
+local function should_skip_csrf(method)
+    return is_safe_method(method)
 end
 
 local function write_error(status, request_id, message)
@@ -228,29 +238,35 @@ local function introspect(conf, token, request_id)
         return nil, "introspection_unavailable"
     end
 
+    -- Per backend.md §8.6.1, the introspection endpoint returns the standard ApiResponse
+    -- envelope (no RFC 7662 bare-schema exemption). The token-state object lives under
+    -- `data`; we unwrap here and cache only the inner payload so downstream code in
+    -- `access()` can keep using `payload.active / userId / email / sessionId` unchanged.
     local decoded = cjson.decode(res.body or "")
-    if not decoded or decoded.active == nil then
+    if not decoded or type(decoded.data) ~= "table" or decoded.data.active == nil then
         core.log.error("invalid introspection response body")
         return nil, "introspection_unavailable"
     end
 
+    local payload = decoded.data
+
     local ttl = conf.negative_cache_ttl
-    if decoded.active then
+    if payload.active then
         ttl = conf.positive_cache_ttl
     end
     if cache then
-        cache_store(cache, cache_key, decoded, ttl)
+        cache_store(cache, cache_key, payload, ttl)
     end
 
-    return decoded, nil
+    return payload, nil
 end
 
-local function apply_csrf(conf, request_id, access_cookie, refresh_cookie)
+local function apply_csrf(conf, request_id)
     if not conf.csrf_protect then
         return nil
     end
 
-    if should_skip_csrf(ngx.req.get_method(), access_cookie, refresh_cookie) then
+    if should_skip_csrf(ngx.req.get_method()) then
         return nil
     end
 
@@ -275,9 +291,8 @@ function _M.access(conf, ctx)
     set_forwarded_headers()
 
     local access_cookie = get_cookie_value("access_token")
-    local refresh_cookie = get_cookie_value("refresh_token")
 
-    local csrf_err = apply_csrf(conf, request_id, access_cookie, refresh_cookie)
+    local csrf_err = apply_csrf(conf, request_id)
     if csrf_err then
         return csrf_err
     end

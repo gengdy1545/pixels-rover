@@ -108,7 +108,7 @@ setup_python_dotenv() {
 
 setup_frontend() {
     log_step "Installing frontend dependencies..."
-    local fe_dir="$PROJECT_ROOT/apps/frontend"
+    local fe_dir="$PROJECT_ROOT/frontend"
 
     if [[ ! -d "$fe_dir/node_modules" ]]; then
         cd "$fe_dir" && npm install

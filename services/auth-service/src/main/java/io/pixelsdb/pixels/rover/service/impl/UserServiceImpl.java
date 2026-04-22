@@ -69,4 +69,19 @@ public class UserServiceImpl implements UserService
 
         return new UserInfoResponse(user.getId(), user.getName(), user.getEmail(), user.getAffiliation());
     }
+
+    @Override
+    public UserInfoResponse getUserInfoById(Long userId)
+    {
+        if (userId == null)
+        {
+            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        User user = userRepository.findById(userId.longValue());
+        if (user == null)
+        {
+            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        return new UserInfoResponse(user.getId(), user.getName(), user.getEmail(), user.getAffiliation());
+    }
 }

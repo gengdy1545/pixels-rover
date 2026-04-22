@@ -1,0 +1,21 @@
+/**
+ * lint-1 probe — 纪律 1（features/*\/model/ 不得 import react / react-router-dom / antd）
+ *
+ * 本文件必须放在 `src/features/*\/model/**` 下（首层目录任意命名即可）才能命中
+ * `.eslintrc.cjs` 里针对 `src/features/*\/model/**\/*.{ts,tsx}` 的 overrides。
+ *
+ * 验证方式：
+ *   1. `cp lint-1-model-react.lint-assertion.ts.skip lint-1-model-react.lint-assertion.ts`
+ *   2. `cd frontend && npm run lint`
+ *   3. 预期输出：该文件 3 处 `no-restricted-imports` error，消息分别为
+ *      "features/*\/model 不允许依赖 React"、"... React Router"、"... AntD"。
+ *   4. `rm lint-1-model-react.lint-assertion.ts`。
+ */
+
+// @ts-nocheck
+
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button } from 'antd';
+
+export const lint1ModelReactProbe = { React, useNavigate, Button };

@@ -56,7 +56,6 @@ class AuthSessionServiceImplTest
                 "",
                 "",
                 "",
-                "",
                 3600000L,
                 604800000L
         );

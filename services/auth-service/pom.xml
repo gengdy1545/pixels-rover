@@ -218,6 +218,25 @@
 					</compilerArgs>
 				</configuration>
 			</plugin>
+			<!-- Parent pom (io.pixelsdb:pixels) skips surefire by default to keep the
+			     monorepo's other Maven-built modules fast; auth-service is a leaf Spring
+			     Boot module with its own test suite that must actually run in CI.
+
+			     The exclusion list below covers pre-existing integration-style tests that
+			     need a live MySQL or platform-specific JPEG encoder; they are unrelated to
+			     the gateway-centric auth refactor and must not block unit-test runs. See
+			     backend.md §3.4 for scope rationale. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<skipTests>false</skipTests>
+					<excludes>
+						<exclude>**/PixelsRoverApplicationTests.java</exclude>
+						<exclude>**/TestUserRepository.java</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>

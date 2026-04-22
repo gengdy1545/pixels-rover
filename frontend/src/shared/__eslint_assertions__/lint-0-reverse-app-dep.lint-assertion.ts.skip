@@ -1,0 +1,20 @@
+/**
+ * lint-0 probe — 纪律 3（features/ shared/ 反向依赖 app/）
+ *
+ * 本文件必须放在 `src/shared/**` 下才能命中 `.eslintrc.cjs` 里针对
+ * `src/shared/**\/*.{ts,tsx}` 的 overrides。
+ *
+ * 验证方式：
+ *   1. `cp lint-0-reverse-app-dep.lint-assertion.ts.skip lint-0-reverse-app-dep.lint-assertion.ts`
+ *   2. `cd frontend && npm run lint`
+ *   3. 预期输出：该文件 2 处 `no-restricted-imports` error，消息以
+ *      "features/ 和 shared/ 不允许反向依赖 app/" 开头。
+ *   4. `rm lint-0-reverse-app-dep.lint-assertion.ts`。
+ */
+
+// @ts-nocheck
+
+import '@/app/router';
+import '@/app';
+
+export const lint0ReverseAppDepProbe = 'expected to be rejected by ESLint lint-0';

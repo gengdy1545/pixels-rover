@@ -1,12 +1,14 @@
 # Pixels Rover JWT RS256 切换与密钥轮换 Runbook
 
-> 本文档是可执行的运维手册。对应的设计背景与决策见 [`../../.notes/jwt-rotation-design.md`](../../.notes/jwt-rotation-design.md)。
+> 本文档是可执行的运维手册。对应的设计背景与决策见 [`../design/jwt-rotation.md`](../design/jwt-rotation.md)。
+>
+> **架构前提（必读）**：本 Runbook 基于 **gateway-centric 架构**——JWT 的签发与校验只发生在 `auth-service` 进程内部，`gateway` 通过 `introspect` 消费身份，`assistant-service` 只消费 `X-Auth-*` 头。因此**不涉及**向 Python 服务或 gateway 分发公钥。如果未来架构回到"业务服务自校验 JWT"形态，本 Runbook 需要整体重写。
 
 本 Runbook 用于指导在**预发或生产环境**完成：
 
 - 首次 `HS256 → RS256` 切换
 - `kid` 生效验证
-- 多公钥并存验证
+- 多公钥并存验证（均在 auth-service 内部）
 - 密钥轮换
 - 回滚
 
@@ -19,10 +21,10 @@
 
 本次演练需要验证：
 
-1. Java `auth-service` 能以 `RS256` 签发 access token 和 refresh token
-2. Python `assistant-service` 能根据 `kid` 校验 token
-3. 浏览器登录、刷新 token、调用分析接口不受影响
-4. 新旧公钥可并存校验
+1. `auth-service` 能以 `RS256` 签发 access token 和 refresh token
+2. `auth-service` 能根据 `kid` 自校验 token（在 `/api/v1/auth/refresh` 与 `POST /api/internal/auth/introspect` 路径上）
+3. 浏览器登录、刷新 token、调用分析接口（经 gateway introspect 通过后注入 `X-Auth-*`）不受影响
+4. 新旧公钥在 auth-service 内部可并存校验
 5. 切换 `active-kid` 后新 token 使用新密钥签发
 6. 旧 token 在旧公钥保留期内仍可用
 7. 回滚到旧 `kid` 或旧配置时系统可恢复
@@ -33,18 +35,23 @@
 
 确认目标环境部署的版本已经包含：
 
-- Java `auth-service` 的 `HS256/RS256 + kid` 支持
-- Python `assistant-service` 的 `HS256/RS256 + kid` 支持
-- `GET /api/v1/auth/jwks`
+- `auth-service` 的 `HS256/RS256 + kid` 支持
+- `auth-service` 内部多公钥校验能力
 - `scripts/generate-jwt-rsa-keys.sh`
+
+**不再要求**：
+
+- `assistant-service` 的 JWT 校验能力（业务服务不参与 JWT 校验）
+- gateway 的 JWT 校验能力（gateway 通过 introspect 消费身份）
+- `GET /api/v1/auth/jwks`（当前系统内部不消费 JWKS，相关端点已计划下线，见 [`../../.notes/todolist.md`](../../.notes/todolist.md)）
 
 ### 2.2 环境前提
 
 确认目标环境具备：
 
-- 可单独更新 Java 配置
-- 可单独更新 Python 配置
-- 可查看 Java 和 Python 日志
+- 可单独更新 `auth-service` 的配置（多副本部署时要确保所有副本同步）
+- 可查看 `auth-service` 日志
+- 可查看 gateway access log（用于观察 introspect 子请求结果）
 - 可通过浏览器完成登录、刷新 token 和分析请求
 
 ### 2.3 数据前提
@@ -68,15 +75,14 @@
 
 在任何切换前，先记录当前基线：
 
-1. 登录一次，保存当前 access token 和 refresh token
+1. 登录一次，保存当前 access token 和 refresh token cookie（注意 HttpOnly，需要从 gateway 日志或调试手段获取）
 2. 访问 `GET /api/v1/auth/me`
-3. 访问一个 Python 受保护接口，例如：
-   - `GET /api/v1/analysis/backends`
-4. 执行一次 refresh token
+3. 访问一个受保护业务接口，例如 `GET /api/v1/analysis/backends`
+4. 执行一次 refresh token（`POST /api/v1/auth/refresh`）
 5. 记录当前 token header 中的：
    - `alg`
-   - `kid`
-6. 记录 Java 与 Python 日志中的 `requestId`
+   - `kid`（`HS256` 基线下可能为空）
+6. 记录 gateway 与 auth-service 日志中的 `X-Request-Id`
 
 预期：
 
@@ -101,113 +107,104 @@ bash scripts/generate-jwt-rsa-keys.sh /secure/preprod/jwt-keys preprod-rsa-b
 
 - `preprod-rsa-a-private.pem`
 - `preprod-rsa-a-public.pem`
-- `preprod-rsa-a-public-keys.json`
 - `preprod-rsa-b-private.pem`
 - `preprod-rsa-b-public.pem`
-- `preprod-rsa-b-public-keys.json`
 
-### 阶段 C：先发布公钥，不切签发
+> 不再需要 `*-public-keys.json` 文件或 `all-public-keys.json` 合并产物——公钥只在 auth-service 自身配置里使用。下一阶段直接以 PEM 文件路径或环境变量下发。
 
-先把两把公钥都发布给校验方：
+### 阶段 C：先发布公钥，不切签发（仅 auth-service）
 
-- Python `assistant-service`
-- 网关（如网关在本阶段也做公钥校验；否则只发给 Python）
+将两把公钥都发布到 **`auth-service` 自身**的配置目录或配置中心，并保持 `HS256` 签发不变。
 
-建议 Python 配置：
+建议 auth-service 配置：
 
-```dotenv
-ROVER_JWT_ALGORITHM=RS256
-ROVER_JWT_ACTIVE_KID=preprod-rsa-a
-ROVER_JWT_PUBLIC_KEYS_PATH=/secure/preprod/jwt-keys/all-public-keys.json
-```
-
-其中 `all-public-keys.json` 至少包含：
-
-```json
-{
-  "preprod-rsa-a": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
-  "preprod-rsa-b": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----"
-}
+```properties
+jwt.algorithm=HS256
+jwt.issuer=pixels-rover-auth-service
+jwt.secret=<existing HS256 secret>
+jwt.public-keys.preprod-rsa-a=/secure/preprod/jwt-keys/preprod-rsa-a-public.pem
+jwt.public-keys.preprod-rsa-b=/secure/preprod/jwt-keys/preprod-rsa-b-public.pem
 ```
 
 注意：
 
-- 这一步先只更新公钥配置，不切 Java 签发算法
-- 发布后确认 Python 服务可正常启动
+- 这一步仅把**潜在**的 RS256 校验公钥预加载进 `auth-service` 内存；仍然用 HS256 签发；
+- 发布后确认 `auth-service` 服务可正常启动、旧 HS256 token 可继续通过 `introspect`；
+- **不**需要同时更新 `assistant-service` 或 gateway 配置。
 
-> 本 Runbook 当前假设存在将多个 `<kid>-public-keys.json` 合并成 `all-public-keys.json` 的步骤。该合并过程目前由人工或环境 SRE 工具链完成，尚未沉淀到仓库脚本；演练前需先确认合并产物。
+### 阶段 D：auth-service 首次切换到 RS256
 
-### 阶段 D：Java 首次切换到 RS256
-
-将 Java `auth-service` 切换为：
+将 `auth-service` 切换为：
 
 ```properties
 jwt.algorithm=RS256
 jwt.active-kid=preprod-rsa-a
 jwt.private-key-path=/secure/preprod/jwt-keys/preprod-rsa-a-private.pem
-jwt.public-key-path=/secure/preprod/jwt-keys/preprod-rsa-a-public.pem
-jwt.public-keys-path=/secure/preprod/jwt-keys/all-public-keys.json
+jwt.public-keys.preprod-rsa-a=/secure/preprod/jwt-keys/preprod-rsa-a-public.pem
+jwt.public-keys.preprod-rsa-b=/secure/preprod/jwt-keys/preprod-rsa-b-public.pem
 ```
 
-发布 Java 后执行：
+发布 `auth-service` 后执行：
 
-1. 登录获取新 token
-2. 解码 token header
+1. 通过浏览器完成登录（实际的 access token / refresh token 对浏览器不可见，以 HttpOnly cookie 下发）
+2. 从 `auth-service` 日志中捕获新签发 token 的 header 摘要（不要把完整 token 打印到日志）
 3. 确认：
    - `alg=RS256`
    - `kid=preprod-rsa-a`
-4. 用该 token 访问：
-   - `GET /api/v1/auth/me`
-   - `GET /api/v1/analysis/backends`
-   - `POST /api/v1/analysis`
-5. 执行 refresh token
+4. 校验目标（注意：下游服务**不**直接校验 token header）：
+   - `GET /api/v1/auth/me`（经 gateway introspect → auth-service → 注入 `X-Auth-*` → auth-service 自身 me 端点）
+   - `GET /api/v1/analysis/backends`（经 gateway introspect → 注入 `X-Auth-*` → assistant-service）
+   - `POST /api/v1/analysis`（同上）
+5. 执行 refresh token（`POST /api/v1/auth/refresh`）
 6. 确认刷新出的 access token 仍为：
    - `alg=RS256`
    - `kid=preprod-rsa-a`
+7. 观察 gateway access log 中 introspect 子请求返回 `active=true` 且带用户身份字段
 
 ### 阶段 E：验证多公钥并存
 
-保持 Python 与 Java 都持有：
+保持 `auth-service` 内部持有：
 
 - `preprod-rsa-a`
 - `preprod-rsa-b`
 
-但此时 Java 仍用：
+但此时 `auth-service` 仍用：
 
 - `active-kid=preprod-rsa-a`
 
 验证：
 
-1. 使用阶段 D 中签发的 token 调用接口
-2. 确认旧 token 继续可用
-3. 访问 `GET /api/v1/auth/jwks`
-4. 确认返回的 JWK 集中包含当前可公开的 RSA key 集合
+1. 使用阶段 D 中签发的 token 调用若干受保护接口
+2. 确认旧 token 继续可用（经由 introspect 被成功识别）
+3. 在 `auth-service` 内部确认 `JwtVerificationKeyProvider` 按 `kid` 成功选择到对应公钥（可通过调试日志或单元测试协同确认）
+
+> 不再验证 `GET /api/v1/auth/jwks`——该端点已计划下线，且 gateway / assistant-service 本来也不消费 JWKS。
 
 ### 阶段 F：模拟轮换切到新 kid
 
-将 Java 切换为：
+将 `auth-service` 切换为：
 
 ```properties
 jwt.algorithm=RS256
 jwt.active-kid=preprod-rsa-b
 jwt.private-key-path=/secure/preprod/jwt-keys/preprod-rsa-b-private.pem
-jwt.public-key-path=/secure/preprod/jwt-keys/preprod-rsa-b-public.pem
-jwt.public-keys-path=/secure/preprod/jwt-keys/all-public-keys.json
+jwt.public-keys.preprod-rsa-a=/secure/preprod/jwt-keys/preprod-rsa-a-public.pem
+jwt.public-keys.preprod-rsa-b=/secure/preprod/jwt-keys/preprod-rsa-b-public.pem
 ```
 
 发布后执行：
 
 1. 重新登录获取新 token
-2. 确认新 token：
+2. 从 auth-service 日志确认新 token：
    - `alg=RS256`
    - `kid=preprod-rsa-b`
-3. 用新 token 访问 Java 和 Python 受保护接口
-4. 再使用阶段 D 里签发的旧 token 调用 Python 接口
+3. 用新 token 访问受保护接口（通过 gateway introspect）
+4. 再使用阶段 D 里签发的旧 token 调用受保护接口
 
 预期：
 
-- 新 token 正常通过
-- 旧 token 也仍然通过
+- 新 token 正常通过 introspect
+- 旧 token 也仍然通过 introspect（依赖 `preprod-rsa-a` 公钥仍在 auth-service 内部并存）
 
 这一步就是"多公钥并存 + 切 active-kid"的关键验证。
 
@@ -215,7 +212,7 @@ jwt.public-keys-path=/secure/preprod/jwt-keys/all-public-keys.json
 
 在切到 `preprod-rsa-b` 后：
 
-1. 使用阶段 D 获取的旧 refresh token 调用 `/api/v1/auth/refresh`
+1. 使用阶段 D 获取的旧 refresh token 调用 `POST /api/v1/auth/refresh`
 2. 确认 refresh 仍成功
 3. 确认新 access token 由当前激活 `kid=preprod-rsa-b` 签发
 
@@ -230,23 +227,22 @@ jwt.public-keys-path=/secure/preprod/jwt-keys/all-public-keys.json
 
 - 首次 `RS256` 切换成功
 - `kid` 正常写入 token header
-- Python 能根据 `kid` 校验 token
+- auth-service 能根据 `kid` 自校验 token
 - 新旧 token 能在并存窗口内同时被接受
 - refresh token 兼容验证成功
-- `jwks` 端点可用
+- gateway 的 introspect 路径全程正确返回 `active=true` + 身份字段
 - 回滚方案已验证
 
 ## 6. 回滚步骤
 
 如果任一步失败，按下面顺序回滚：
 
-1. Java `auth-service`
+1. `auth-service`
    - 恢复到上一个稳定配置
    - 恢复旧 `jwt.algorithm`
    - 恢复旧 `active-kid` 或旧 `HS256` 配置
-2. Python `assistant-service`
-   - 保留多公钥配置，不需要立即删
-   - 确认仍能校验旧 token
+2. gateway / assistant-service
+   - **通常无需改动**；它们不参与 JWT 校验
 3. 前端
    - 一般无需改动
    - 如用户本地 cookie 对应的 token 已不兼容，可提示重新登录
@@ -255,17 +251,18 @@ jwt.public-keys-path=/secure/preprod/jwt-keys/all-public-keys.json
 
 - 登录
 - `GET /api/v1/auth/me`
-- refresh token
-- Python 受保护接口
+- `POST /api/v1/auth/refresh`
+- 一个受保护业务接口
 
 ## 7. 观察项清单
 
 演练期间建议记录：
 
-- Java 登录接口日志
-- Java refresh 接口日志
-- Python 鉴权失败日志
-- `requestId`
+- `auth-service` 登录接口日志
+- `auth-service` refresh 接口日志
+- `auth-service` introspect 接口日志（`active=true/false`、`errorCode`）
+- gateway access log 中 introspect 子请求结果
+- `X-Request-Id`
 - token 的 `alg` / `kid`
 - 切换前后成功率
 
@@ -319,4 +316,4 @@ jwt.public-keys-path=/secure/preprod/jwt-keys/all-public-keys.json
 
 - 密钥生成脚本：[`../../scripts/generate-jwt-rsa-keys.sh`](../../scripts/generate-jwt-rsa-keys.sh)（已存在）
 
-> 演练早期文档曾引用 `scripts/merge-jwt-public-keys.sh` 与 `scripts/preprod-rotation-drill.sh`。这两个脚本**尚未在仓库落地**——多公钥合并与分阶段自动化目前由人工按本 Runbook 驱动执行。若需要落成脚本，建议作为独立工程任务推动，而不是在演练现场补写。
+> 早期版本曾引用 `scripts/merge-jwt-public-keys.sh` 与 `scripts/preprod-rotation-drill.sh`。前者在 gateway-centric 架构下**彻底不再需要**（不存在跨服务公钥合并场景，移除）；后者作为分阶段自动化愿景，目前仍由人工按本 Runbook 驱动执行。若需要落成脚本，建议作为独立工程任务推动，而不是在演练现场补写。

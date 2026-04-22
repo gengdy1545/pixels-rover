@@ -5,8 +5,12 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
@@ -15,6 +19,14 @@ import java.util.Date;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Note: JJWT 0.12 requires a key resolver to call {@code parseSignedClaims(token)} — the
+ * zero-arg {@code Jwts.parser().build()} no longer exposes the header alone. Tests that
+ * need just the header read it via {@link JwtTokenProvider#getKeyIdFromToken(String)} /
+ * {@link JwtTokenProvider#getAlgorithmFromToken(String)} which internally Base64-decode
+ * the first segment.
+ */
 
 class JwtTokenProviderTest
 {
@@ -36,7 +48,6 @@ class JwtTokenProviderTest
                 "",
                 "",
                 "",
-                "",
                 3600000L,
                 604800000L
         );
@@ -52,7 +63,7 @@ class JwtTokenProviderTest
         assertEquals(Long.valueOf(7L), jwtTokenProvider.getUserIdFromToken(token));
         assertEquals("access", jwtTokenProvider.getTokenType(token));
         assertEquals("session-1", jwtTokenProvider.getSessionIdFromToken(token));
-        assertEquals("default-hmac", Jwts.parser().build().parseSignedClaims(token).getHeader().getKeyId());
+        assertEquals("default-hmac", jwtTokenProvider.getKeyIdFromToken(token));
     }
 
     @Test
@@ -101,9 +112,8 @@ class JwtTokenProviderTest
                 ISSUER,
                 "rsa-key-1",
                 toPem("PRIVATE KEY", keyPair.getPrivate().getEncoded()),
+                "",
                 toPem("PUBLIC KEY", keyPair.getPublic().getEncoded()),
-                "",
-                "",
                 "",
                 "",
                 3600000L,
@@ -116,20 +126,29 @@ class JwtTokenProviderTest
         assertEquals("alice@example.com", rsaProvider.getUsernameFromToken(token));
         assertEquals(Long.valueOf(9L), rsaProvider.getUserIdFromToken(token));
         assertEquals("access", rsaProvider.getTokenType(token));
-        assertEquals("RS256", Jwts.parser().build().parseSignedClaims(token).getHeader().getAlgorithm());
-        assertEquals("rsa-key-1", Jwts.parser().build().parseSignedClaims(token).getHeader().getKeyId());
+        assertEquals("RS256", rsaProvider.getAlgorithmFromToken(token));
+        assertEquals("rsa-key-1", rsaProvider.getKeyIdFromToken(token));
     }
 
+    /**
+     * Verifies the directory-enumeration multi-key loader: {@code jwt.public-keys-directory}
+     * replaces the retired {@code public-keys-json} artifact (see
+     * {@code docs/design/jwt-rotation.md §1.2}). Every {@code <kid>-public.pem} file under the
+     * directory must be picked up so a mid-rotation refresh-token signed by the new kid can
+     * still be validated alongside tokens from the previous kid.
+     */
     @Test
-    void rs256ValidationShouldAcceptConfiguredRotationKeySet() throws Exception
+    void rs256ValidationShouldAcceptKeysDiscoveredFromDirectory(@TempDir Path publicKeysDir) throws Exception
     {
         KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
         keyPairGenerator.initialize(2048);
         KeyPair oldKeyPair = keyPairGenerator.generateKeyPair();
         KeyPair newKeyPair = keyPairGenerator.generateKeyPair();
 
-        String publicKeysJson = "{\"rsa-old\":\"" + escapeForJson(toPem("PUBLIC KEY", oldKeyPair.getPublic().getEncoded()))
-                + "\",\"rsa-new\":\"" + escapeForJson(toPem("PUBLIC KEY", newKeyPair.getPublic().getEncoded())) + "\"}";
+        Files.write(publicKeysDir.resolve("rsa-old-public.pem"),
+                toPem("PUBLIC KEY", oldKeyPair.getPublic().getEncoded()).getBytes(StandardCharsets.UTF_8));
+        Files.write(publicKeysDir.resolve("rsa-new-public.pem"),
+                toPem("PUBLIC KEY", newKeyPair.getPublic().getEncoded()).getBytes(StandardCharsets.UTF_8));
 
         JwtTokenProvider signingProvider = new JwtTokenProvider(
                 SECRET,
@@ -138,10 +157,9 @@ class JwtTokenProviderTest
                 "rsa-new",
                 toPem("PRIVATE KEY", newKeyPair.getPrivate().getEncoded()),
                 "",
-                publicKeysJson,
                 "",
                 "",
-                "",
+                publicKeysDir.toString(),
                 3600000L,
                 604800000L
         );
@@ -149,7 +167,7 @@ class JwtTokenProviderTest
         String token = signingProvider.generateRefreshToken("alice@example.com", 9L);
 
         assertTrue(signingProvider.validateToken(token));
-        assertEquals("rsa-new", Jwts.parser().build().parseSignedClaims(token).getHeader().getKeyId());
+        assertEquals("rsa-new", signingProvider.getKeyIdFromToken(token));
     }
 
     private static String toPem(String label, byte[] keyBytes)
@@ -157,10 +175,5 @@ class JwtTokenProviderTest
         return "-----BEGIN " + label + "-----\n"
                 + Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(keyBytes)
                 + "\n-----END " + label + "-----";
-    }
-
-    private static String escapeForJson(String value)
-    {
-        return value.replace("\\", "\\\\").replace("\n", "\\n").replace("\"", "\\\"");
     }
 }

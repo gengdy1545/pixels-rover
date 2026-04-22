@@ -64,22 +64,22 @@ out/
 # =============================================================================
 # Node.js / Frontend (Vite + React + TypeScript)
 # =============================================================================
-apps/frontend/node_modules/
-apps/frontend/dist/
-apps/frontend/dist-ssr/
-apps/frontend/coverage/
-apps/frontend/.vite/
-apps/frontend/.vitest-cache/
-apps/frontend/playwright-report/
-apps/frontend/test-results/
-apps/frontend/.env.local
-apps/frontend/.env.*.local
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/coverage/
+frontend/.vite/
+frontend/.vitest-cache/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.env.local
+frontend/.env.*.local
 
 # Vite/TS build artifacts that should not be committed
-apps/frontend/vite.config.js
-apps/frontend/vite.config.d.ts
-apps/frontend/vite.config.*.timestamp-*
-apps/frontend/**/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/vite.config.*.timestamp-*
+frontend/**/*.tsbuildinfo
 
 # Package manager noise
 .npm/

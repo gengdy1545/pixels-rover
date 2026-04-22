@@ -2,7 +2,6 @@ package io.pixelsdb.pixels.rover.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.pixelsdb.pixels.rover.config.security.CookieHelper;
-import io.pixelsdb.pixels.rover.config.security.JwtTokenProvider;
 import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.rest.request.LoginRequest;
 import io.pixelsdb.pixels.rover.rest.request.RegisterRequest;
@@ -17,10 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.bean.MockBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
@@ -39,12 +37,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Controller-layer integration tests for {@link AuthController}.
- * Uses @WebMvcTest to load only the web layer with mocked service dependencies.
+ *
+ * <p>User-facing endpoints now consume identity from the gateway-injected
+ * {@code X-Auth-User-Id} header (see {@code backend.md §3.1} / §3.4). Tests exercise the
+ * controller directly with {@code addFilters = false}; gateway identity validation
+ * (including 500 + {@code GATEWAY_IDENTITY_MISSING}) is covered in
+ * {@link io.pixelsdb.pixels.rover.config.security.IdentityHeaderValidationFilterTest}.</p>
  */
 @WebMvcTest(AuthController.class)
-@AutoConfigureMockMvc(addFilters = false) // disable security filters for controller-level testing
+@AutoConfigureMockMvc(addFilters = false)
 class AuthControllerTest
 {
+    private static final String USER_ID_HEADER = "X-Auth-User-Id";
+    private static final String SESSION_ID_HEADER = "X-Auth-Session-Id";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -58,12 +64,9 @@ class AuthControllerTest
     private UserService userService;
 
     @MockBean
-    private JwtTokenProvider jwtTokenProvider;
-
-    @MockBean
     private CookieHelper cookieHelper;
 
-    // Required by SecurityConfig but not used in these tests
+    // Required by SecurityConfig but not used in these tests.
     @MockBean
     private UserDetailsService userDetailsService;
 
@@ -260,26 +263,16 @@ class AuthControllerTest
     // ---------------------------------------------------------------
 
     @Test
-    @WithMockUser(username = "alice@example.com")
-    void meShouldReturnUserInfoWhenAuthenticated() throws Exception
+    void meShouldReturnUserInfoFromGatewayHeader() throws Exception
     {
         UserInfoResponse userInfo = new UserInfoResponse(1L, "Alice", "alice@example.com", "PixelsDB");
-        when(userService.getUserInfo("alice@example.com")).thenReturn(userInfo);
+        when(userService.getUserInfoById(1L)).thenReturn(userInfo);
 
-        mockMvc.perform(get("/api/v1/auth/me"))
+        mockMvc.perform(get("/api/v1/auth/me").header(USER_ID_HEADER, "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.email").value("alice@example.com"))
                 .andExpect(jsonPath("$.data.name").value("Alice"));
-    }
-
-    @Test
-    void meShouldReturnUnauthorizedWhenNotAuthenticated() throws Exception
-    {
-        mockMvc.perform(get("/api/v1/auth/me"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(401))
-                .andExpect(jsonPath("$.message").value("Not authenticated"));
     }
 
     // ---------------------------------------------------------------
@@ -287,31 +280,15 @@ class AuthControllerTest
     // ---------------------------------------------------------------
 
     @Test
-    @WithMockUser(username = "alice@example.com")
-    void getUserInfoShouldReturnUserInfo() throws Exception
+    void getUserInfoShouldReadIdentityFromHeader() throws Exception
     {
         UserInfoResponse userInfo = new UserInfoResponse(1L, "Alice", "alice@example.com", "PixelsDB");
-        when(userService.getUserInfo("alice@example.com")).thenReturn(userInfo);
+        when(userService.getUserInfoById(1L)).thenReturn(userInfo);
 
-        mockMvc.perform(get("/api/v1/auth/user-info"))
+        mockMvc.perform(get("/api/v1/auth/user-info").header(USER_ID_HEADER, "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.email").value("alice@example.com"));
-    }
-
-    // ---------------------------------------------------------------
-    // GET /api/v1/auth/jwks
-    // ---------------------------------------------------------------
-
-    @Test
-    void jwksShouldReturnPublicKeys() throws Exception
-    {
-        when(jwtTokenProvider.getPublicJwks()).thenReturn(Map.of("keys", java.util.List.of()));
-
-        mockMvc.perform(get("/api/v1/auth/jwks"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.keys").isArray());
     }
 
     // ---------------------------------------------------------------
@@ -319,45 +296,43 @@ class AuthControllerTest
     // ---------------------------------------------------------------
 
     @Test
-    @WithMockUser(username = "alice@example.com")
-    void logoutShouldReturnSuccess() throws Exception
+    void logoutShouldRevokeGatewaySessionAndClearCookies() throws Exception
     {
-        when(cookieHelper.resolveAccessToken(any())).thenReturn("access-token");
-        when(jwtTokenProvider.getSessionIdFromToken("access-token")).thenReturn("session-1");
-        doNothing().when(sysLoginService).revokeSession("alice@example.com", "session-1");
+        doNothing().when(sysLoginService).revokeSessionById(eq(1L), eq("session-1"));
 
-        mockMvc.perform(post("/api/v1/auth/logout"))
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .header(USER_ID_HEADER, "1")
+                        .header(SESSION_ID_HEADER, "session-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.message").value("Logged out"));
 
+        verify(sysLoginService).revokeSessionById(eq(1L), eq("session-1"));
         verify(cookieHelper).clearTokenCookies(any());
     }
 
     @Test
-    @WithMockUser(username = "alice@example.com")
     void logoutAllShouldRevokeAllSessionsAndClearCookies() throws Exception
     {
-        doNothing().when(sysLoginService).revokeAllSessions("alice@example.com");
+        doNothing().when(sysLoginService).revokeAllSessionsById(1L);
 
-        mockMvc.perform(post("/api/v1/auth/logout-all"))
+        mockMvc.perform(post("/api/v1/auth/logout-all").header(USER_ID_HEADER, "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.message").value("Logged out from all sessions"));
 
-        verify(sysLoginService).revokeAllSessions("alice@example.com");
+        verify(sysLoginService).revokeAllSessionsById(1L);
         verify(cookieHelper).clearTokenCookies(any());
     }
 
     @Test
-    @WithMockUser(username = "alice@example.com")
     void revokeCurrentSessionShouldClearCookies() throws Exception
     {
-        when(cookieHelper.resolveAccessToken(any())).thenReturn("access-token");
-        when(jwtTokenProvider.getSessionIdFromToken("access-token")).thenReturn("session-1");
-        doNothing().when(sysLoginService).revokeSession("alice@example.com", "session-1");
+        doNothing().when(sysLoginService).revokeSessionById(eq(1L), eq("session-1"));
 
-        mockMvc.perform(delete("/api/v1/auth/sessions/session-1"))
+        mockMvc.perform(delete("/api/v1/auth/sessions/session-1")
+                        .header(USER_ID_HEADER, "1")
+                        .header(SESSION_ID_HEADER, "session-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.message").value("Current session revoked"));
 

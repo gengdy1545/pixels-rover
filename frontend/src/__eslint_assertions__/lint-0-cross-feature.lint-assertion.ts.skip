@@ -1,0 +1,27 @@
+/**
+ * lint-0 probe — 纪律 3（跨 feature barrel 穿透）
+ *
+ * 本文件是对 ESLint 规则 `no-restricted-imports` / pattern
+ * `@/features/*\/components/*` 等的**固化反例**。
+ *
+ * 验证方式：
+ *   1. `cp lint-0-cross-feature.lint-assertion.ts.skip lint-0-cross-feature.lint-assertion.ts`
+ *   2. `cd frontend && npm run lint`
+ *   3. 预期输出：该文件 4 处 `no-restricted-imports` error，消息以
+ *      "跨 feature 访问请只经由 `@/features/<name>` 的 index.ts" 开头。
+ *   4. 验证完毕：`rm lint-0-cross-feature.lint-assertion.ts`。
+ *
+ * 最近一次触发验证：
+ *   见 `.notes/todolist.md §2` 配套 PR 描述里粘贴的 lint 输出。
+ */
+
+// @ts-nocheck — 反例文件，故意引用不存在的模块；关 tsc 避免污染 CI 的 tsc 步骤。
+// 注：本 `.skip` 文件不会被 ESLint 命中；重命名成 `.ts` 时 `@ts-nocheck` 还能
+// 让 `tsc --noEmit` 也安静通过。
+
+import '@/features/auth/components/LoginForm';
+import '@/features/conversation/hooks/useChat';
+import '@/features/analysis/services/analysisApi';
+import '@/features/report/model/reportStore';
+
+export const lint0CrossFeatureProbe = 'expected to be rejected by ESLint lint-0';

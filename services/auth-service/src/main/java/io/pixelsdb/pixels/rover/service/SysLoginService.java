@@ -31,13 +31,11 @@ public interface SysLoginService
 
     AccessTokenResponse refreshToken(String refreshToken, String userAgent, String clientIp);
 
-    List<UserSessionResponse> listSessions(String username, String currentSessionId);
+    List<UserSessionResponse> listSessionsById(Long userId, String currentSessionId);
 
-    void revokeSession(String username, String sessionId);
+    void revokeSessionById(Long userId, String sessionId);
 
-    void revokeOtherSessions(String username, String currentSessionId);
-
-    void revokeAllSessions(String username);
+    void revokeAllSessionsById(Long userId);
 
     void verifyCaptcha(String captchaKey, String captcha);
 }

@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.bean.MockBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -36,6 +36,10 @@ class InternalAuthControllerTest
     @MockBean
     private AuthSessionService authSessionService;
 
+    // Introspection now returns the standard ApiResponse envelope (backend.md §8.6.1),
+    // so the RFC 7662 token-state fields live under `$.data.*` and the envelope carries
+    // the top-level `code` / `message` / `requestId` metadata.
+
     @Test
     void introspectShouldReturnInactiveWhenTokenMissing() throws Exception
     {
@@ -43,8 +47,9 @@ class InternalAuthControllerTest
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.active").value(false))
-                .andExpect(jsonPath("$.reason").value("missing_token"));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.active").value(false))
+                .andExpect(jsonPath("$.data.reason").value("missing_token"));
     }
 
     @Test
@@ -61,8 +66,9 @@ class InternalAuthControllerTest
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.active").value(false))
-                .andExpect(jsonPath("$.reason").value("invalid_token_type"));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.active").value(false))
+                .andExpect(jsonPath("$.data.reason").value("invalid_token_type"));
     }
 
     @Test
@@ -88,13 +94,14 @@ class InternalAuthControllerTest
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.active").value(true))
-                .andExpect(jsonPath("$.sub").value("alice@example.com"))
-                .andExpect(jsonPath("$.email").value("alice@example.com"))
-                .andExpect(jsonPath("$.userId").value(7))
-                .andExpect(jsonPath("$.sessionId").value("session-7"))
-                .andExpect(jsonPath("$.iat").value(1_710_000_000L))
-                .andExpect(jsonPath("$.exp").value(1_710_003_600L));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.active").value(true))
+                .andExpect(jsonPath("$.data.sub").value("alice@example.com"))
+                .andExpect(jsonPath("$.data.email").value("alice@example.com"))
+                .andExpect(jsonPath("$.data.userId").value(7))
+                .andExpect(jsonPath("$.data.sessionId").value("session-7"))
+                .andExpect(jsonPath("$.data.iat").value(1_710_000_000L))
+                .andExpect(jsonPath("$.data.exp").value(1_710_003_600L));
     }
 
     @Test
@@ -114,7 +121,8 @@ class InternalAuthControllerTest
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.active").value(false))
-                .andExpect(jsonPath("$.reason").value("invalid_token_payload"));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.active").value(false))
+                .andExpect(jsonPath("$.data.reason").value("invalid_token_payload"));
     }
 }

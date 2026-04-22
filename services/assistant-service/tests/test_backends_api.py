@@ -10,9 +10,9 @@ from tests.conftest import auth_header, make_access_token
 
 @pytest.mark.asyncio
 async def test_list_backends(async_client: AsyncClient):
-    """GET /api/v1/backends should return the registered mock backend."""
+    """GET /api/v1/analysis/backends should return the registered mock backend."""
     token = make_access_token()
-    resp = await async_client.get("/api/v1/backends", headers=auth_header(token))
+    resp = await async_client.get("/api/v1/analysis/backends", headers=auth_header(token))
     assert resp.status_code == 200
     body = resp.json()
     assert body["code"] == 200
@@ -26,10 +26,10 @@ async def test_list_backends(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_list_schemas(async_client: AsyncClient):
-    """GET /api/v1/backends/{id}/schemas should return schemas from the mock backend."""
+    """GET /api/v1/analysis/backends/{id}/schemas should return schemas from the mock backend."""
     token = make_access_token()
     resp = await async_client.get(
-        "/api/v1/backends/mock-backend/schemas", headers=auth_header(token)
+        "/api/v1/analysis/backends/mock-backend/schemas", headers=auth_header(token)
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -39,10 +39,10 @@ async def test_list_schemas(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_list_tables(async_client: AsyncClient):
-    """GET /api/v1/backends/{id}/schemas/{schema}/tables should return tables."""
+    """GET /api/v1/analysis/backends/{id}/schemas/{schema}/tables should return tables."""
     token = make_access_token()
     resp = await async_client.get(
-        "/api/v1/backends/mock-backend/schemas/test_schema/tables",
+        "/api/v1/analysis/backends/mock-backend/schemas/test_schema/tables",
         headers=auth_header(token),
     )
     assert resp.status_code == 200
@@ -57,10 +57,10 @@ async def test_list_tables(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_list_columns(async_client: AsyncClient):
-    """GET /api/v1/backends/{id}/schemas/{schema}/tables/{table}/columns should return columns."""
+    """GET /api/v1/analysis/backends/{id}/schemas/{schema}/tables/{table}/columns should return columns."""
     token = make_access_token()
     resp = await async_client.get(
-        "/api/v1/backends/mock-backend/schemas/test_schema/tables/test_table/columns",
+        "/api/v1/analysis/backends/mock-backend/schemas/test_schema/tables/test_table/columns",
         headers=auth_header(token),
     )
     assert resp.status_code == 200
@@ -77,6 +77,6 @@ async def test_list_columns(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_list_backends_without_auth(async_client: AsyncClient):
-    """GET /api/v1/backends without auth should return 401."""
-    resp = await async_client.get("/api/v1/backends")
+    """GET /api/v1/analysis/backends without auth should return 401."""
+    resp = await async_client.get("/api/v1/analysis/backends")
     assert resp.status_code == 401

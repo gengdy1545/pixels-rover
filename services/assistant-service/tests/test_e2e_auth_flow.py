@@ -24,9 +24,9 @@ async def create_thread(async_client, headers: dict[str, str]) -> str:
 class TestGatewayHeaderJourney:
     async def test_unauthenticated_user_blocked_everywhere(self, async_client):
         protected_endpoints = [
-            ("GET", "/api/v1/backends"),
+            ("GET", "/api/v1/analysis/backends"),
             ("GET", "/api/v1/conversations"),
-            ("GET", "/api/v1/backends/mock-backend/schemas"),
+            ("GET", "/api/v1/analysis/backends/mock-backend/schemas"),
             ("GET", "/api/v1/semantic/metrics"),
             ("POST", "/api/v1/analysis"),
             ("GET", "/api/v1/analysis/some-session"),
@@ -42,7 +42,7 @@ class TestGatewayHeaderJourney:
     async def test_authenticated_user_can_access_read_endpoints(self, async_client):
         headers = gateway_identity_headers(user_id=1, email="e2e-user@pixelsdb.io", session_id="sess-1")
 
-        resp = await async_client.get("/api/v1/backends", headers=headers)
+        resp = await async_client.get("/api/v1/analysis/backends", headers=headers)
         assert resp.status_code == 200
 
         resp = await async_client.get("/api/v1/semantic/metrics", headers=headers)
@@ -52,11 +52,11 @@ class TestGatewayHeaderJourney:
         headers = gateway_identity_headers(user_id=10, email="analyst@pixelsdb.io", session_id="sess-10")
         thread_id = await create_thread(async_client, headers)
 
-        resp = await async_client.get("/api/v1/backends", headers=headers)
+        resp = await async_client.get("/api/v1/analysis/backends", headers=headers)
         assert resp.status_code == 200
         backend_id = resp.json()["data"][0]["backend_id"]
 
-        resp = await async_client.get(f"/api/v1/backends/{backend_id}/schemas", headers=headers)
+        resp = await async_client.get(f"/api/v1/analysis/backends/{backend_id}/schemas", headers=headers)
         assert resp.status_code == 200
 
         with patch("app.api.analysis.get_analysis_service") as mock_get_svc:
@@ -80,7 +80,7 @@ class TestGatewayHeaderJourney:
 class TestRequestIdPropagation:
     async def test_request_id_in_success_response(self, async_client):
         resp = await async_client.get(
-            "/api/v1/backends",
+            "/api/v1/analysis/backends",
             headers={**gateway_identity_headers(user_id=1, email="a@b.com"), "X-Request-Id": "e2e-req-001"},
         )
         assert resp.status_code == 200
@@ -89,7 +89,7 @@ class TestRequestIdPropagation:
 
     async def test_request_id_in_error_response(self, async_client):
         resp = await async_client.get(
-            "/api/v1/backends",
+            "/api/v1/analysis/backends",
             headers={"X-Request-Id": "e2e-req-err-001"},
         )
         assert resp.status_code == 401

@@ -17,20 +17,26 @@ package io.pixelsdb.pixels.rover.controller;
 
 import io.pixelsdb.pixels.rover.config.common.ApiResponse;
 import io.pixelsdb.pixels.rover.config.security.CookieHelper;
-import io.pixelsdb.pixels.rover.config.security.JwtTokenProvider;
 import io.pixelsdb.pixels.rover.rest.request.LoginRequest;
 import io.pixelsdb.pixels.rover.rest.request.RegisterRequest;
+import io.pixelsdb.pixels.rover.rest.response.AccessTokenResponse;
+import io.pixelsdb.pixels.rover.rest.response.TokenResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import io.pixelsdb.pixels.rover.service.SysLoginService;
 import io.pixelsdb.pixels.rover.service.UserService;
 import jakarta.validation.Valid;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Authentication REST controller providing login, register, captcha, refresh, and user-info endpoints.
+ * Authentication REST controller providing login, register, captcha, refresh, and user-info
+ * endpoints.
+ *
+ * <p>User-facing endpoints ({@code /me}, {@code /logout}, {@code /logout-all},
+ * {@code /sessions*}) consume identity exclusively from the gateway-injected
+ * {@code X-Auth-User-Id} / {@code X-Auth-Session-Id} headers (see {@code backend.md §3.1}
+ * and {@code §3.4}). Missing / malformed headers are rejected upstream by
+ * {@link io.pixelsdb.pixels.rover.config.security.IdentityHeaderValidationFilter}.</p>
  *
  * @author pixels
  */
@@ -38,17 +44,18 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/auth")
 public class AuthController
 {
+    private static final String USER_ID_HEADER = "X-Auth-User-Id";
+    private static final String SESSION_ID_HEADER = "X-Auth-Session-Id";
+
     private final SysLoginService sysLoginService;
     private final UserService userService;
-    private final JwtTokenProvider jwtTokenProvider;
     private final CookieHelper cookieHelper;
 
     public AuthController(SysLoginService sysLoginService, UserService userService,
-                          JwtTokenProvider jwtTokenProvider, CookieHelper cookieHelper)
+                          CookieHelper cookieHelper)
     {
         this.sysLoginService = sysLoginService;
         this.userService = userService;
-        this.jwtTokenProvider = jwtTokenProvider;
         this.cookieHelper = cookieHelper;
     }
 
@@ -60,7 +67,7 @@ public class AuthController
                                 HttpServletRequest httpRequest,
                                 HttpServletResponse httpResponse)
     {
-        var tokenResponse = sysLoginService.login(request,
+        TokenResponse tokenResponse = sysLoginService.login(request,
                 resolveUserAgent(httpRequest), resolveClientIp(httpRequest));
         cookieHelper.writeTokenCookies(httpResponse, tokenResponse.getAccessToken(), tokenResponse.getRefreshToken());
         return ApiResponse.success("Login success", null);
@@ -74,7 +81,7 @@ public class AuthController
     {
         sysLoginService.verifyCaptcha(request.getCaptchaKey(), request.getCaptcha());
         userService.register(request);
-        return ApiResponse.success("Registration successful");
+        return ApiResponse.success("Registration successful", null);
     }
 
     /**
@@ -88,6 +95,11 @@ public class AuthController
 
     /**
      * Refresh token endpoint. Reads refresh token from HttpOnly cookie only.
+     *
+     * <p>Hard boundary (see {@code backend.md §3.4}): this controller never uses
+     * {@code SecurityContextHolder} nor decodes the refresh token JWT itself — the cookie
+     * value is handed to {@link SysLoginService} as an opaque string and all JWT-level
+     * checks (signature, session activeness, reuse) are service-layer domain logic.</p>
      */
     @PostMapping("/refresh")
     public ApiResponse<?> refreshToken(HttpServletRequest httpRequest,
@@ -101,131 +113,67 @@ public class AuthController
                     "Refresh token is required");
         }
 
-        var tokenResponse = sysLoginService.refreshToken(refreshToken,
+        AccessTokenResponse tokenResponse = sysLoginService.refreshToken(refreshToken,
                 resolveUserAgent(httpRequest), resolveClientIp(httpRequest));
         cookieHelper.writeTokenCookies(httpResponse, tokenResponse.getAccessToken(), tokenResponse.getRefreshToken());
         return ApiResponse.success("Token refreshed", null);
     }
 
     /**
-     * Lightweight login-state check. Returns current user info if authenticated.
-     * Used by the frontend to determine login state when using HttpOnly cookies.
+     * Returns the current user's info, identified by the gateway-injected
+     * {@code X-Auth-User-Id} header.
      */
     @GetMapping("/me")
-    public ApiResponse<?> me()
+    public ApiResponse<?> me(@RequestHeader(name = USER_ID_HEADER) Long userId)
     {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()
-                || "anonymousUser".equals(authentication.getPrincipal()))
-        {
-            return ApiResponse.unauthorized("Not authenticated");
-        }
-        return ApiResponse.success(userService.getUserInfo(authentication.getName()));
+        return ApiResponse.success(userService.getUserInfoById(userId));
     }
 
     @PostMapping("/logout")
-    public ApiResponse<?> logout(HttpServletRequest request, HttpServletResponse response)
+    public ApiResponse<?> logout(@RequestHeader(name = USER_ID_HEADER) Long userId,
+                                 HttpServletRequest request,
+                                 HttpServletResponse response)
     {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        sysLoginService.revokeSession(authentication.getName(), resolveCurrentSessionId(request));
+        String sessionId = resolveCurrentSessionId(request);
+        if (sessionId != null && !sessionId.isBlank())
+        {
+            sysLoginService.revokeSessionById(userId, sessionId);
+        }
         cookieHelper.clearTokenCookies(response);
-        return ApiResponse.success("Logged out");
+        return ApiResponse.success("Logged out", null);
     }
 
     @PostMapping("/logout-all")
-    public ApiResponse<?> logoutAll(HttpServletRequest request, HttpServletResponse response)
+    public ApiResponse<?> logoutAll(@RequestHeader(name = USER_ID_HEADER) Long userId,
+                                    HttpServletResponse response)
     {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        sysLoginService.revokeAllSessions(authentication.getName());
+        sysLoginService.revokeAllSessionsById(userId);
         cookieHelper.clearTokenCookies(response);
-        return ApiResponse.success("Logged out from all sessions");
+        return ApiResponse.success("Logged out from all sessions", null);
     }
 
     @GetMapping("/user-info")
-    public ApiResponse<?> getUserInfo()
+    public ApiResponse<?> getUserInfo(@RequestHeader(name = USER_ID_HEADER) Long userId)
     {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated())
-        {
-            return ApiResponse.unauthorized("Not authenticated");
-        }
-
-        return ApiResponse.success(userService.getUserInfo(authentication.getName()));
-    }
-
-    /**
-     * Public JWKS endpoint for RSA verification consumers.
-     */
-    @GetMapping("/jwks")
-    public ApiResponse<?> getJwks()
-    {
-        return ApiResponse.success(jwtTokenProvider.getPublicJwks());
+        return ApiResponse.success(userService.getUserInfoById(userId));
     }
 
     @GetMapping("/sessions")
-    public ApiResponse<?> listSessions(HttpServletRequest request)
+    public ApiResponse<?> listSessions(@RequestHeader(name = USER_ID_HEADER) Long userId,
+                                       HttpServletRequest request)
     {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         return ApiResponse.success(
-                sysLoginService.listSessions(authentication.getName(), resolveCurrentSessionId(request))
+                sysLoginService.listSessionsById(userId, resolveCurrentSessionId(request))
         );
     }
 
     @DeleteMapping("/sessions/{sessionId}")
     public ApiResponse<?> revokeSession(@PathVariable String sessionId,
+                                        @RequestHeader(name = USER_ID_HEADER) Long userId,
                                         HttpServletRequest request,
                                         HttpServletResponse response)
     {
-        return revokeSessionInternal(sessionId, request, response);
-    }
-
-    private String resolveCurrentSessionId(HttpServletRequest request)
-    {
-        // Try Cookie first, then Authorization header
-        String token = cookieHelper.resolveAccessToken(request);
-        if (token == null)
-        {
-            String authorization = request.getHeader("Authorization");
-            if (authorization != null && authorization.startsWith("Bearer "))
-            {
-                token = authorization.substring("Bearer ".length());
-            }
-        }
-        if (token == null)
-        {
-            return null;
-        }
-        try
-        {
-            return jwtTokenProvider.getSessionIdFromToken(token);
-        }
-        catch (Exception e)
-        {
-            return null;
-        }
-    }
-
-    private String resolveUserAgent(HttpServletRequest request)
-    {
-        return request.getHeader("User-Agent");
-    }
-
-    private String resolveClientIp(HttpServletRequest request)
-    {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank())
-        {
-            return forwardedFor.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
-    }
-
-    private ApiResponse<?> revokeSessionInternal(String sessionId,
-                                                 HttpServletRequest request,
-                                                 HttpServletResponse response)
-    {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        sysLoginService.revokeSession(authentication.getName(), sessionId);
+        sysLoginService.revokeSessionById(userId, sessionId);
         String currentSessionId = resolveCurrentSessionId(request);
         boolean revokedCurrentSession = currentSessionId != null && sessionId.equals(currentSessionId);
         if (revokedCurrentSession)
@@ -233,6 +181,37 @@ public class AuthController
             cookieHelper.clearTokenCookies(response);
         }
         String message = revokedCurrentSession ? "Current session revoked" : "Session revoked";
-        return ApiResponse.success(message);
+        return ApiResponse.success(message, null);
+    }
+
+    /**
+     * Reads the current session id directly from the gateway-injected {@code X-Auth-Session-Id}
+     * header. Under the cookie-only model there is no {@code Authorization: Bearer} fallback —
+     * session id is part of the identity envelope the gateway attaches after successful
+     * introspect (see {@code backend.md §3.1}).
+     */
+    private static String resolveCurrentSessionId(HttpServletRequest request)
+    {
+        String header = request.getHeader(SESSION_ID_HEADER);
+        if (header == null || header.isBlank())
+        {
+            return null;
+        }
+        return header;
+    }
+
+    private static String resolveUserAgent(HttpServletRequest request)
+    {
+        return request.getHeader("User-Agent");
+    }
+
+    private static String resolveClientIp(HttpServletRequest request)
+    {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank())
+        {
+            return forwardedFor.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }
