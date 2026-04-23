@@ -28,6 +28,23 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.UUID;
 
+/**
+ * Consumes the inbound {@code X-Request-Id} header for logging and body-envelope
+ * propagation, generating a UUID fallback when the header is absent.
+ *
+ * <p><b>Contract (gateway.md §7.5 / §7.6 + backend.md §5):</b> the gateway's
+ * global {@code response-rewrite} / {@code request-id} plugin is the <i>sole</i>
+ * writer of the outbound {@code X-Request-Id} response header. Business services
+ * MUST NOT set this header themselves — doing so creates two writers, which
+ * breaks the "single writer" invariant that {@code scripts/check-contracts.py}
+ * enforces and lets request-id values drift between log line and response header
+ * during middleware rewrites.</p>
+ *
+ * <p>The fallback id is reported via the body envelope's {@code requestId} field
+ * (populated from {@link RequestIdContext}) — see {@code ApiResponse} — so
+ * downstream consumers always have a stable correlation handle even in the
+ * "no inbound header" path.</p>
+ */
 @Component
 public class RequestIdFilter extends OncePerRequestFilter
 {
@@ -48,7 +65,6 @@ public class RequestIdFilter extends OncePerRequestFilter
 
         RequestIdContext.set(requestId);
         MDC.put(MDC_KEY, requestId);
-        response.setHeader(REQUEST_ID_HEADER, requestId);
 
         try
         {
