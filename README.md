@@ -214,7 +214,7 @@ pixels-rover/
 ├── docs/development/             # Cross-repo specs (frontend/gateway/backend)
 ├── docs/design/                  # Long-lived design archives (e.g. jwt-rotation)
 ├── docs/runbooks/                # Operational runbooks
-└── .notes/                       # Working todo / temporary plans (engineering-design / todolist / paper-outline); not for long-term reference
+└── .notes/                       # Historical snapshot (engineering-design) + paper outline; not a long-term reference (engineering truths live in docs/development/*)
 ```
 
 ## Related Docs

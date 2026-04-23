@@ -23,23 +23,35 @@
  */
 
 import { get } from '../../../shared/api/client';
-import { openSSEStream } from '../../../shared/api/sse';
-import type { SSECallbacks, SSEConnection } from '../../../shared/types/sse';
+import type { SSEConnection } from '../../../shared/types/sse';
 import type {
   AnalysisRequest,
   AnalysisResponse,
 } from '../../../shared/types/analysis';
+import {
+  openSSEStreamWithRetry,
+  type RetryingSSECallbacks,
+} from './sseRetry';
 
 /**
  * Submit an analysis question via POST and consume the SSE stream.
  * Returns an `SSEConnection` handle so callers can abort mid-flight
  * (`store.cancelAnalysis()` calls `connection.abort()`).
+ *
+ * Goes through {@link openSSEStreamWithRetry} rather than the raw
+ * {@link openSSEStream} primitive so pre-stream network / UPSTREAM
+ * jitter gets auto-recovered per the policy in
+ * ``features/analysis/model/sseErrorPolicy.ts``. Callers that want
+ * finer control (e.g. a "Reconnecting (1/3)…" indicator) should wire
+ * the retry-aware callbacks {@link RetryingSSECallbacks#onRetrying} /
+ * {@link RetryingSSECallbacks#onApiError} alongside the usual
+ * ``onEvent`` / ``onComplete``.
  */
 export function submitAnalysis(
   request: AnalysisRequest,
-  callbacks: SSECallbacks,
+  callbacks: RetryingSSECallbacks,
 ): SSEConnection {
-  return openSSEStream('/api/v1/analysis', request, callbacks);
+  return openSSEStreamWithRetry('/api/v1/analysis', request, callbacks);
 }
 
 /** Get a completed analysis result by session ID. */

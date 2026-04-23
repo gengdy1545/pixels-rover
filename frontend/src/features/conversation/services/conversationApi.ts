@@ -6,12 +6,11 @@
  * `useConversationQuery` / `useCreateConversationMutation` / `useUpdate...`）
  * 消费，不需要 shared/api 这一公共字典。
  *
- * 对外 escape hatch（见 `../index.ts` barrel 注释）：
- *   `Reports` 页面（features/report）在做 N-thread aggregate 时直接
- *   `await Promise.all(threads.map(getConversation))`——这种 batch 拉取没
- *   有现成的 hook 覆盖（hooks 都是单个 thread 的 single-cache 视图）。
- *   barrel 上把 conversationApi 暴露出去作为兼容入口，保留\"未来用
- *   `useQueries` 重写 Reports 后撤回\"的弹性。
+ * **feature-private**：本模块不从 barrel 对外暴露。历史上 Stage 3 §10 PR-3
+ * 曾短期把 `conversationApi` 通过 barrel 透出来，给 Reports 做 N-thread
+ * aggregate 的过渡 escape hatch；§10 条 2 完成后，Reports 已改用
+ * `useConversationDetailsQueries(threadIds)` 这个 batch-hook 消费，本模块
+ * 随之收回成 hooks-only 的私有依赖。
  */
 
 import { get, patch, post } from '../../../shared/api/client';

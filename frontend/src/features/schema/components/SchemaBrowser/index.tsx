@@ -26,7 +26,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Tree, Select } from 'antd';
 import { DatabaseOutlined, TableOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { useSchemaStore } from '../../../../stores/schemaStore';
+import { useSchemaStore } from '../../model/selectionStore';
 import {
   useBackendsQuery,
   useSchemasQuery,

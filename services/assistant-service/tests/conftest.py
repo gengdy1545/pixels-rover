@@ -21,14 +21,19 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
 
 from app.api_response import api_error, api_unknown_error
 from app.config import Settings
-from app.error_codes import ANALYSIS_INVALID_ARGUMENT, ErrorCategory
-from app.request_id import REQUEST_ID_HEADER, clear_request_id, ensure_request_id, set_request_id
+from app.error_codes import (
+    ANALYSIS_DATABASE_UNAVAILABLE,
+    ANALYSIS_INVALID_ARGUMENT,
+    ErrorCategory,
+)
+from app.request_id import REQUEST_ID_HEADER, clear_request_id, resolve_request_id, set_request_id
 from app.schemas.backend import BackendCapability, ColumnInfo, QueryResult, TableInfo
 from app.storage.base import StorageBackend
 from app.storage.registry import BackendRegistry
@@ -321,12 +326,22 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
     # The middleware is consume-only: gateway is the sole writer of the
     # outbound X-Request-Id header (gateway.md §7.5). The test harness
     # mirrors that invariant so contract tests catch any regression that
-    # re-introduces response-side writes.
+    # re-introduces response-side writes. It also mirrors the backend.md §5
+    # rule 1 "one warning per fallback" behavior so tests/test_request_id.py
+    # can assert on the warning line.
+    import logging as _logging
+    _request_id_logger = _logging.getLogger("app.main")
+
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
-        request_id = ensure_request_id(request.headers.get(REQUEST_ID_HEADER))
+        request_id, is_fallback = resolve_request_id(request.headers.get(REQUEST_ID_HEADER))
         set_request_id(request_id)
         request.state.request_id = request_id
+        if is_fallback:
+            _request_id_logger.warning(
+                "request_id_missing=true route=%s method=%s fallback=%s",
+                request.url.path, request.method, request_id,
+            )
         try:
             response = await call_next(request)
         finally:
@@ -386,6 +401,21 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
             ),
         )
 
+    @app.exception_handler(OperationalError)
+    @app.exception_handler(InterfaceError)
+    async def database_unavailable_handler(request: Request, exc: DBAPIError):
+        # Mirror production degradation-mode contract (backend.md §6.7):
+        # transient database unavailability → 503 + ANALYSIS_DATABASE_UNAVAILABLE.
+        return JSONResponse(
+            status_code=503,
+            content=api_error(
+                http_status=503,
+                message="Analysis service is temporarily unavailable",
+                error_code=ANALYSIS_DATABASE_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+            ),
+        )
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         return JSONResponse(
@@ -400,6 +430,11 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
     app.include_router(analysis_router)
     app.include_router(conversations_router)
     app.include_router(semantic_router)
+
+    # Mirror the production OpenAPI customization so tests/test_openapi_* can
+    # assert on the exposed error envelope schemas (backend.md §6.0).
+    from app.schemas.api_error import register_openapi_error_components
+    register_openapi_error_components(app)
 
     @app.get("/health")
     async def health():

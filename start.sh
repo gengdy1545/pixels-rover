@@ -2,7 +2,7 @@
 #
 # Frontend dev-server launcher (Vite).
 #
-# Scope — DELIBERATELY narrowed (see .notes/todolist.md §15 C2):
+# Scope — DELIBERATELY narrowed:
 #   * This script used to also start auth-service (`mvn spring-boot:run`)
 #     and assistant-service (`uvicorn`) directly on the host. Those
 #     paths are GONE. They encouraged running backends WITHOUT the

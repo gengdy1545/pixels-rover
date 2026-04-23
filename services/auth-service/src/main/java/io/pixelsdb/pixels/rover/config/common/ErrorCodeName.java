@@ -93,6 +93,17 @@ public final class ErrorCodeName
     /** Authenticated principal materialized by Spring Security is not the expected type. */
     public static final String AUTH_INVALID_PRINCIPAL = "AUTH_INVALID_PRINCIPAL";
 
+    /**
+     * {@code pixels_auth} database is transiently unavailable (connection refused,
+     * connection pool exhausted, query timeout). Surfaces as {@code HTTP 503 +
+     * category=UPSTREAM} per {@code backend.md §6.7}; login / refresh /
+     * introspect all fail uniformly, and the gateway's introspect route maps
+     * an upstream 503 back to {@code GATEWAY_INTROSPECT_UNAVAILABLE} for the
+     * browser, so the user-facing banner stays "login temporarily
+     * unavailable" rather than "unknown error".
+     */
+    public static final String AUTH_DATABASE_UNAVAILABLE = "AUTH_DATABASE_UNAVAILABLE";
+
     private ErrorCodeName()
     {
     }

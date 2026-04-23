@@ -1,3 +1,21 @@
+/**
+ * Analysis-pipeline shapes served by `assistant-service`:
+ *   • task-layer payloads (AnalysisTask, TimeRange, FilterCondition)
+ *   • plan-layer payloads (AnalysisPlan, PlanStep)
+ *   • session / response envelopes (AnalysisResponse, SessionStatus, ...)
+ *   • SSE event payloads (SSEStatusChangeData, SSEStepCompletedData, ...).
+ *
+ * owning-service: assistant-service
+ * source-of-truth: services/assistant-service/openapi.json#/components/schemas/
+ *   — AnalysisTask / AnalysisPlan / AnalysisResponse / SSEStatusChangeData /
+ *     ... (generated from the pydantic models in
+ *     services/assistant-service/app/schemas/analysis.py and app/schemas/sse.py).
+ *
+ * Hand-mirrored per frontend.md §4.6 "手写契约镜像文件的顶部元数据" rule;
+ * any field addition needs a paired assistant-service OpenAPI change so the
+ * long-term plan (auto-generate this file) keeps working.
+ */
+
 // ════════════════════════════════════════
 // Task Layer
 // ════════════════════════════════════════

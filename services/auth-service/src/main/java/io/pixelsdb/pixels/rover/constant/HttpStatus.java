@@ -101,4 +101,16 @@ public class HttpStatus
      * 接口未实现
      */
     public static final int NOT_IMPLEMENTED = 501;
+
+    /**
+     * Service is temporarily unavailable because a critical upstream dependency
+     * (e.g. ``pixels_auth`` database) is unreachable.
+     *
+     * <p>See ``docs/development/backend.md §6.7`` for the degradation-mode
+     * contract; this status is paired with {@code AUTH_DATABASE_UNAVAILABLE}
+     * and {@code category=UPSTREAM} so the gateway's introspect layer can map
+     * it back to {@code GATEWAY_INTROSPECT_UNAVAILABLE} for browser clients
+     * without losing the root-cause signal in logs.</p>
+     */
+    public static final int SERVICE_UNAVAILABLE = 503;
 }

@@ -120,10 +120,26 @@
 			</exclusions>
 		</dependency>
 
-		<!-- prometheus -->
+		<!-- prometheus: powers GET /metrics (MetricsController). Stage A
+		     exposes only the default JVM / process / GC collectors from
+		     simpleclient_hotspot; no business counters are registered yet.
+		     See docs/runbooks/observability-roadmap.md §2.1 for the stage-B
+		     roadmap (auth/refresh/introspection failures, identity-missing,
+		     request-id fallback). simpleclient_common provides TextFormat
+		     for the 0.0.4 text exposition written by the controller. -->
 		<dependency>
 			<groupId>io.prometheus</groupId>
 			<artifactId>simpleclient</artifactId>
+			<version>${dep.prometheus.client.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.prometheus</groupId>
+			<artifactId>simpleclient_common</artifactId>
+			<version>${dep.prometheus.client.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.prometheus</groupId>
+			<artifactId>simpleclient_hotspot</artifactId>
 			<version>${dep.prometheus.client.version}</version>
 		</dependency>
 		<dependency>

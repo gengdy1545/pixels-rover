@@ -20,19 +20,26 @@ import { afterEach } from 'vitest';
 // antd 依赖 matchMedia；jsdom 默认没实现，这里打个最小 polyfill 让 render
 // 不炸。返回的对象始终 matches=false——我们不在单测里做 responsive breakpoint
 // 断言，触达该条件的组件行为归 E2E。
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: (query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  }),
-});
+//
+// Guard on `typeof window` 是为了 `@vitest-environment node` pragma 生效的
+// 那些纯逻辑测试——vitest 会把 setupFiles 载进每个 worker 的环境里，不论
+// 该测试声明的是 jsdom 还是 node；没有这层 guard，node-env 测试在加载
+// setup 时就会 ReferenceError，还没开始跑就挂。
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
 
 afterEach(() => {
   cleanup();

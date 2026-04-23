@@ -1,13 +1,16 @@
 /**
- * Sidebar shell 样式（Stage 3 §10 PR-3 拆分后）。
+ * Sidebar shell 样式。
  *
- * 已迁出：
+ * 物理位置：`src/app/components/Sidebar/index.css`（随 index.tsx 一同从历史
+ * 位置 `src/components/Sidebar/` 上升到 app 层）。
+ *
+ * 已迁出（在 Stage 3 §10 PR-3 就完成）：
  *   - `.schema-tree`         → `features/schema/components/SchemaBrowser/index.css`
  *   - `.conversation-*`      → `features/conversation/components/ConversationList/index.css`
  *
- * 这里只保留\"shell 自身\"的样式：暗色面板、折叠宽度、顶部 logo header、
- * 顶层 ant-menu 的颜色覆盖。如果将来把 Sidebar 提升到 `app/components/`
- * （见 index.tsx 注释），这套 CSS 一同搬迁。
+ * 这里只保留 "shell 自身" 的样式：暗色面板、折叠宽度、顶部 logo header、
+ * 顶层 ant-menu 的颜色覆盖。不承担 feature 子面板的任何样式——那部分由对
+ * 应 feature 自己管，改色 / 改布局时不会反过来扫到本文件。
  */
 
 .sidebar {

@@ -528,6 +528,19 @@ export type ErrorCode =
 - `frontend/src/shared/types/<service>/ErrorCode.ts` 同步镜像；
 - `frontend/src/shared/types/common.ts` 的 `ErrorCode` union 自动受益（无需改动，只要服务各自的 `XxxErrorCode` 已扩）。
 
+**代码侧落地进度**（来自早期 todolist §16 的收尾条目，归档于此以便后续 PR 直接认领）：
+
+| 落地项 | 状态 | 证据 / 归宿 |
+|---|---|---|
+| 错误码常量 | ✅ 已落 | `services/assistant-service/app/error_codes.py`（`ANALYSIS_*_UNAVAILABLE`） / `services/auth-service/.../ErrorCodeName.java`（`AUTH_DATABASE_UNAVAILABLE`） |
+| OpenAPI enum | ✅ 已落 | 由 `services/assistant-service/app/schemas/api_error.py::register_openapi_error_components` 与 auth-service `ApiErrorDetails` 同步暴露 |
+| 前端 TS union | ✅ 已落 | `frontend/src/shared/types/analysis/ErrorCode.ts` / `auth/ErrorCode.ts`；由 `scripts/check-contracts.py::frontend-analysis-union-equals-python-source` 双向守住 |
+| DB 级全局 handler | ✅ 已落 | assistant: `services/assistant-service/app/main.py::database_unavailable_handler`（`OperationalError` / `InterfaceError` → 503 + `ANALYSIS_DATABASE_UNAVAILABLE`）；auth: `GlobalExceptionHandler` 的 `DataAccessResourceFailureException` 分支（503 + `AUTH_DATABASE_UNAVAILABLE`） |
+| LLM 调用路径 `try/except` 拦截 → 503 + `ANALYSIS_UPSTREAM_UNAVAILABLE` | ⏳ 按业务推进自然补齐 | `services/assistant-service/app/services/analysis_service.py` 的 LLM 调用位点需在"首个真实出现 LLM 故障造成用户投诉"或"LLM 供应商主动下发 deprecation"两类触发时落地；**不阻塞当前主线**，触发前保持"未拦 → 回到 §6.5 global exception handler → 500 + 未知错误"的行为，前端已通过 `threadErrors.test.ts` 验证对该降级码的显示分支 |
+| analysis backend 连接路径 `try/except` 拦截 → 503 + `ANALYSIS_BACKEND_UNAVAILABLE` | ⏳ 按业务推进自然补齐 | `services/assistant-service/app/services/backend_*.py` / DuckDB / 外部数据库连接失败路径；与上条同一节奏落地 |
+
+标记 ⏳ 的两条**不是**遗漏，而是"触发前故意不写防御代码"——过早包裹 `try/except` 会吞掉预期外的故障信号，比"落到 500 + 接警被发现"更难排障。落地节奏绑定**真实触发**而非日历里程碑。
+
 ---
 
 ## 7. 健康检查契约（三层分工）

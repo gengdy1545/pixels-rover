@@ -26,4 +26,9 @@ export {
 
 export { schemaKeys } from './model/queryKeys';
 
+// Pure-UI selected backend / schema state. Feature-owned zustand store;
+// the barrel is the only legitimate cross-feature entry (Home / Sidebar
+// shell need the selected-id pair to drive downstream query hooks).
+export { useSchemaStore } from './model/selectionStore';
+
 export { default as SchemaBrowser } from './components/SchemaBrowser';

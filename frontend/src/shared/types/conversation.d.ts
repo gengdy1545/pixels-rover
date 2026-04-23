@@ -1,3 +1,14 @@
+/**
+ * Conversation thread + session history shapes served by `assistant-service`.
+ *
+ * owning-service: assistant-service
+ * source-of-truth: services/assistant-service/openapi.json#/components/schemas/
+ *   — ConversationThread / ConversationHistoryItem / ... (generated from the
+ *     pydantic models in services/assistant-service/app/schemas/conversation.py).
+ *
+ * Hand-mirrored per frontend.md §4.6 "手写契约镜像文件的顶部元数据" rule;
+ * any field addition needs a paired assistant-service OpenAPI change.
+ */
 import type { AnalysisPlan, AnalysisTask, PlanStep, SessionStatus } from './analysis';
 
 export interface ConversationThread {

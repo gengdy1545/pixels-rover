@@ -43,7 +43,7 @@
 
 - `assistant-service` 的 JWT 校验能力（业务服务不参与 JWT 校验）
 - gateway 的 JWT 校验能力（gateway 通过 introspect 消费身份）
-- `GET /api/v1/auth/jwks`（当前系统内部不消费 JWKS，相关端点已计划下线，见 [`../../.notes/todolist.md`](../../.notes/todolist.md)）
+- `GET /api/v1/auth/jwks`（当前系统内部不消费 JWKS，相关端点已计划下线；触发复活的前置条件见 [`../design/jwt-rotation.md §6.B.1`](../design/jwt-rotation.md)）
 
 ### 2.2 环境前提
 

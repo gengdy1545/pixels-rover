@@ -53,20 +53,32 @@ async function consumeStream(
   callbacks: SSECallbacks,
 ): Promise<void> {
   try {
-    const buildRequest = () => new Request(url, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...buildCommonHeaders(),
-      },
-      body: JSON.stringify(body),
-      signal: abortController.signal,
-    });
+    // Capture the X-Request-Id once per logical SSE open (frontend.md §4.6
+    // request-id reuse rule). The 401→refresh→retry path below MUST send the
+    // SAME id as the initial attempt so backend logs can stitch the two
+    // underlying fetches together. We do this by pulling the id out of the
+    // first header bundle and threading it into the retry via the optional
+    // ``existingRequestId`` parameter on ``buildCommonHeaders``.
+    let streamRequestId: string | null = null;
+    const buildRequest = () => {
+      const commonHeaders = buildCommonHeaders(streamRequestId);
+      streamRequestId = commonHeaders['X-Request-Id'];
+      return new Request(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...commonHeaders,
+        },
+        body: JSON.stringify(body),
+        signal: abortController.signal,
+      });
+    };
 
     let response = await fetch(buildRequest());
 
-    // Handle 401: refresh token and retry once
+    // Handle 401: refresh token and retry once (reuses ``streamRequestId``
+    // that was stashed by the first ``buildRequest()`` call).
     if (response.status === 401) {
       await refreshAccessToken();
       response = await fetch(buildRequest());

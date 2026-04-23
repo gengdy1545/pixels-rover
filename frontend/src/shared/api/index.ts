@@ -33,6 +33,15 @@ export { get, post, put, patch, del, postVoid, putVoid } from './client';
 // `err.details.category` per backend.md §6.3.2.
 export { ApiError } from './apiError';
 
+// Category-driven error policy helpers (isRetryable / categorize /
+// retryAfterSec). Features route through these instead of re-reading
+// `err.httpStatus` — the SSOT for retryability / bucketing is the
+// `category` + `retryable` columns in `gateway/error-codes.json`, and
+// `errorPolicy.ts` is the single consumer-side mirror. See backend.md
+// §6.3.2 two-tier dispatch contract.
+export { isRetryable, categorize, retryAfterSec } from './errorPolicy';
+export type { ApiErrorBucket } from './errorPolicy';
+
 // Re-export types for convenience
 export type { SSECallbacks, SSEConnection, SSEEventName, SSEEventMap } from '../types/sse';
 export type {

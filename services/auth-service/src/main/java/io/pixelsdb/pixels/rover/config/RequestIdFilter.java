@@ -20,17 +20,20 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.UUID;
+import java.security.SecureRandom;
+import java.util.HexFormat;
 
 /**
  * Consumes the inbound {@code X-Request-Id} header for logging and body-envelope
- * propagation, generating a UUID fallback when the header is absent.
+ * propagation.
  *
  * <p><b>Contract (gateway.md §7.5 / §7.6 + backend.md §5):</b> the gateway's
  * global {@code response-rewrite} / {@code request-id} plugin is the <i>sole</i>
@@ -40,16 +43,40 @@ import java.util.UUID;
  * enforces and lets request-id values drift between log line and response header
  * during middleware rewrites.</p>
  *
- * <p>The fallback id is reported via the body envelope's {@code requestId} field
- * (populated from {@link RequestIdContext}) — see {@code ApiResponse} — so
- * downstream consumers always have a stable correlation handle even in the
- * "no inbound header" path.</p>
+ * <p><b>Fallback rule (backend.md §5):</b> when the inbound header is absent
+ * this filter performs exactly three actions:</p>
+ * <ol>
+ *   <li>emit a single {@code request_id_missing=true} warning carrying the
+ *       triggering route + method so the upstream gateway misconfig is
+ *       investigable from the log aggregator alone;</li>
+ *   <li>use the literal {@code missing-<8 hex>} as the local request id in
+ *       both MDC and the body envelope's {@code requestId} field so the
+ *       single-event log line can still be aggregated — the {@code missing-}
+ *       prefix keeps the fallback visually distinct from a real gateway id;</li>
+ *   <li>never write the fallback value back onto the response header; see
+ *       the single-writer invariant above.</li>
+ * </ol>
  */
 @Component
 public class RequestIdFilter extends OncePerRequestFilter
 {
     public static final String REQUEST_ID_HEADER = "X-Request-Id";
+    public static final String FALLBACK_PREFIX = "missing-";
     private static final String MDC_KEY = "requestId";
+
+    /** 4 bytes = 8 hex chars per backend.md §5 fallback shape. */
+    private static final int FALLBACK_RAND_BYTES = 4;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(RequestIdFilter.class);
+
+    /**
+     * {@link SecureRandom} is thread-safe per the JDK spec; a single shared
+     * instance avoids the (small but non-zero) per-request seeding cost of
+     * creating a fresh one on every fallback path.
+     */
+    private static final SecureRandom RAND = new SecureRandom();
+
+    private static final HexFormat HEX = HexFormat.of();
 
     @Override
     protected void doFilterInternal(
@@ -57,14 +84,29 @@ public class RequestIdFilter extends OncePerRequestFilter
             HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException
     {
-        String requestId = request.getHeader(REQUEST_ID_HEADER);
-        if (!StringUtils.hasText(requestId))
+        String inbound = request.getHeader(REQUEST_ID_HEADER);
+        String requestId;
+        boolean isFallback;
+        if (StringUtils.hasText(inbound))
         {
-            requestId = UUID.randomUUID().toString();
+            requestId = inbound;
+            isFallback = false;
+        }
+        else
+        {
+            requestId = generateFallbackRequestId();
+            isFallback = true;
         }
 
         RequestIdContext.set(requestId);
         MDC.put(MDC_KEY, requestId);
+
+        if (isFallback)
+        {
+            // backend.md §5 rule 1: exactly one warning per fallback request.
+            LOGGER.warn("request_id_missing=true route={} method={} fallback={}",
+                    request.getRequestURI(), request.getMethod(), requestId);
+        }
 
         try
         {
@@ -76,5 +118,18 @@ public class RequestIdFilter extends OncePerRequestFilter
             MDC.remove("userId");
             RequestIdContext.clear();
         }
+    }
+
+    /**
+     * Produces the {@code missing-<8 hex chars>} literal mandated by
+     * {@code backend.md §5} rule 2. Package-private so that
+     * {@code RequestIdFilterTest} can exercise the shape directly without
+     * routing a full servlet request through the filter chain.
+     */
+    static String generateFallbackRequestId()
+    {
+        byte[] buf = new byte[FALLBACK_RAND_BYTES];
+        RAND.nextBytes(buf);
+        return FALLBACK_PREFIX + HEX.formatHex(buf);
     }
 }

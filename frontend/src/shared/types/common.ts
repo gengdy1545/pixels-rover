@@ -7,6 +7,17 @@
  * errorCode as "already exhaustive" in `switch (err.details.errorCode)` and
  * silently falls through to the generic 5xx fallback -- which is the
  * historical hardest-to-find drift bug.
+ *
+ * owning-service: shared (cross-service envelope; genuinely unowned by any
+ *   single backend service — every service produces responses in this shape).
+ * source-of-truth: backend.md §6.0 (unified response envelope: `code` /
+ *   `message` / `data | details` / `requestId`) + §6.3.2 (how per-service
+ *   `ErrorCode` unions merge into the top-level union declared here).
+ *   Per-service branches import from `./infra` (gateway), `./auth/ErrorCode`
+ *   (auth-service), `./analysis/ErrorCode` (assistant-service), each of
+ *   which carries its own owning-service + source-of-truth tags.
+ *
+ * Hand-mirrored per frontend.md §4.6 "手写契约镜像文件的顶部元数据" rule.
  */
 import type { InfraErrorCode } from './infra';
 import type { AuthErrorCode } from './auth/ErrorCode';

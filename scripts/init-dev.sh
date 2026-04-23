@@ -183,7 +183,7 @@ print_summary() {
     echo ""
     echo "  Note: ./start.sh java / python / --prod are removed — running"
     echo "        backends outside the gateway bypasses every auth / CSRF"
-    echo "        / CORS / X-Request-Id contract (see .notes/todolist.md §15)."
+    echo "        / CORS / X-Request-Id contract (see docs/development/gateway.md)."
     echo ""
     echo -e "${CYAN}============================================${NC}"
 }

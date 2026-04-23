@@ -32,6 +32,35 @@
 
 这五条是"观测管道未来可接入"的前提条件——如果它们破损，届时再想接管道会发现"先要补半年的日志规范化"，成本远大于现在顺手遵守。
 
+### 2.1 `/metrics` 端点当前状态与业务计数器落地路线
+
+本节承接早期 todolist §16 的收尾条目，归档后续的代码级落地路径。
+
+**当前阶段（阶段 A）代码现状**：
+
+- `assistant-service`：`GET /metrics` 由 `prometheus_client.make_asgi_app()` 挂载，返回 Prometheus 文本格式；阶段 A 仅暴露 `prometheus_client` 默认收集的 process / platform 指标（`process_cpu_seconds_total` / `process_resident_memory_bytes` / `python_gc_*` 等），**不注册业务计数器**。
+- `auth-service`：`GET /metrics` 由 `io.prometheus.client` `MetricsServlet` 在 `/metrics` 路径下挂载，返回 Prometheus 文本格式；阶段 A 仅暴露 `DefaultExports` 下的 JVM / process 指标，**不注册业务计数器**。
+
+两服务的端点满足上节规则 5："即便当前没有 Prometheus 在爬，该端点必须返回 200 且格式正确"。`scripts/smoke.sh` 可直连校验。
+
+**业务计数器落地被显式推迟到阶段 B**（进入阶段 B 的触发信号见 §3）。阶段 B 启动时需落地的最小集合：
+
+| 计数器（候选名） | 所在服务 | 含义 | 依据 |
+|---|---|---|---|
+| `auth_login_failures_total{reason}` | auth-service | 登录失败分原因计数（凭据错 / 用户锁 / 其他） | `backend.md §10.2` |
+| `auth_refresh_failures_total{reason}` | auth-service | refresh token 失败分原因计数 | 同上 |
+| `auth_introspection_failures_total{reason}` | auth-service | gateway introspect 回源失败分原因 | `gateway.md §5.x` / `backend.md §8.6` |
+| `gateway_identity_missing_total{service,route}` | assistant-service | `X-Auth-*` 头缺失 / 格式错（触发 `GATEWAY_IDENTITY_MISSING`） | `assistant-service/app/auth.py::_gateway_identity_missing` |
+| `request_id_missing_total{service,route}` | auth-service + assistant-service | 入站 `X-Request-Id` 缺失需 fallback 的次数（与 `backend.md §5 rule 1` 的 warning 配对） | `backend.md §5` |
+
+**为什么阶段 A 不顺手注册这些计数器**：
+
+- 没有采集方的计数器是"死指标"——只增不减、没人看也没人告警，消耗进程内存但不产生信号；
+- 一旦提前注册，计数器命名 / 标签维度一旦写进代码就隐形成为契约（下游接入方会按此形态准备 dashboard），调整成本远高于"阶段 B 触发时一次性落地 + 同步 dashboard"；
+- 过早落地会诱导业务 PR "顺手加个计数器"，无约束蔓延到阶段 B 就要花精力做回溯对齐。
+
+阶段 B 触发时，本节候选表**必须**在选型 PR 里与 `backend.md §10.2` 显式比对，确认命名 / 标签维度兼容选定的时序库查询约束（Prometheus / VictoriaMetrics 对 label cardinality 的容忍度不同）。
+
 ## 3. 重新评估触发信号
 
 出现下列任一信号时，回到本 roadmap 重新评估是否进入"阶段 B：引入观测采集管道"：

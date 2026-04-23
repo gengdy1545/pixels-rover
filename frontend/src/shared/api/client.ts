@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { AxiosRequestConfig } from 'axios';
 import type { ApiErrorResponse, ApiSuccessResponse } from '../types/common';
-import { createRequestId } from '../storage/requestId';
+import { ensureRequestId } from '../storage/requestId';
 import { getCookie } from '../storage/cookie';
 import { redirectToLogin } from '../storage/navigation';
 import { ApiError, apiErrorFromEnvelope } from './apiError';
@@ -50,14 +50,22 @@ export async function refreshAccessToken(): Promise<void> {
 /**
  * Build common headers for any outgoing request (CSRF token + request ID).
  * Used by both the Axios client and the SSE fetch client.
+ *
+ * **Request-id lifecycle (frontend.md §4.6 hard rule).** Pass the id from
+ * the previous attempt via ``existingRequestId`` to reuse it — SSE clients
+ * must do this on heartbeat reconnect; axios retries do it implicitly via
+ * the request interceptor preserving ``config.headers['X-Request-Id']``.
+ * Omitting the argument mints a fresh id via ``ensureRequestId()``.
  */
-export function buildCommonHeaders(): Record<string, string> {
+export function buildCommonHeaders(
+  existingRequestId?: string | null,
+): Record<string, string> {
   const headers: Record<string, string> = {};
   const csrfToken = getCookie('XSRF-TOKEN');
   if (csrfToken) {
     headers['X-XSRF-TOKEN'] = csrfToken;
   }
-  headers['X-Request-Id'] = createRequestId();
+  headers['X-Request-Id'] = ensureRequestId(existingRequestId);
   return headers;
 }
 
@@ -71,8 +79,16 @@ httpClient.interceptors.request.use(
     if (csrfToken && config.headers) {
       config.headers['X-XSRF-TOKEN'] = csrfToken;
     }
-    if (config.headers && !config.headers['X-Request-Id']) {
-      config.headers['X-Request-Id'] = createRequestId();
+    if (config.headers) {
+      // X-Request-Id reuse invariant (frontend.md §4.6): a 401→refresh→retry
+      // cycle flows through this interceptor twice with the SAME config
+      // object, and ensureRequestId() keeps the header value verbatim if
+      // already set. Never mint a new id on retry — doing so would break
+      // log correlation between the original attempt and its retry.
+      const current = config.headers['X-Request-Id'];
+      config.headers['X-Request-Id'] = ensureRequestId(
+        typeof current === 'string' ? current : null,
+      );
     }
     return config;
   },

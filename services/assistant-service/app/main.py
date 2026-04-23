@@ -4,6 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.responses import Response
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
 import app.models  # noqa: F401 - import side-effect: populate Base.metadata for Alembic reflection in tests
 from app.config import get_settings
@@ -11,8 +14,12 @@ from app.database import async_session_factory
 from app.required_env import validate_or_die
 from app.dependencies import get_duckdb_backend, get_backend_registry
 from app.api_response import api_error, api_unknown_error
-from app.error_codes import ANALYSIS_INVALID_ARGUMENT, ErrorCategory
-from app.request_id import REQUEST_ID_HEADER, clear_request_id, ensure_request_id, set_request_id
+from app.error_codes import (
+    ANALYSIS_DATABASE_UNAVAILABLE,
+    ANALYSIS_INVALID_ARGUMENT,
+    ErrorCategory,
+)
+from app.request_id import REQUEST_ID_HEADER, clear_request_id, resolve_request_id, set_request_id
 from app.logging_config import setup_logging
 from app.core.task_lifecycle import recover_zombie_sessions_on_startup, start_periodic_reaper
 from app.seed import seed_duckdb, seed_semantic_layer
@@ -21,6 +28,7 @@ from app.api.conversations import router as conversations_router
 from app.api.semantic import router as semantic_router
 from app.api.backends import router as backends_router
 from app.api.internal import router as internal_router
+from app.schemas.api_error import register_openapi_error_components
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -93,9 +101,17 @@ def create_app() -> FastAPI:
         # header (gateway.md §7.5 / §7.6). Writing it here would duplicate the
         # header and bypass the "single writer" invariant that check-contracts.py
         # enforces.
-        request_id = ensure_request_id(request.headers.get(REQUEST_ID_HEADER))
+        request_id, is_fallback = resolve_request_id(request.headers.get(REQUEST_ID_HEADER))
         set_request_id(request_id)
         request.state.request_id = request_id
+        if is_fallback:
+            # backend.md §5 rule 1: exactly one warning per fallback request,
+            # carrying the triggering route so the upstream gateway misconfig
+            # is investigable from the log aggregator alone.
+            logger.warning(
+                "request_id_missing=true route=%s method=%s fallback=%s",
+                request.url.path, request.method, request_id,
+            )
         try:
             response = await call_next(request)
         finally:
@@ -162,6 +178,33 @@ def create_app() -> FastAPI:
             ),
         )
 
+    @app.exception_handler(OperationalError)
+    @app.exception_handler(InterfaceError)
+    async def database_unavailable_handler(
+        request: Request, exc: DBAPIError,
+    ):
+        # backend.md §6.7 degradation-mode contract: transient ``pixels_analysis``
+        # unavailability (connection refused, pool exhausted, query timeout,
+        # driver-level disconnect) maps to HTTP 503 + ANALYSIS_DATABASE_UNAVAILABLE
+        # + category=UPSTREAM. Only the narrow SQLAlchemy subtypes that signal
+        # *transient* resource failure are caught here — a generic ``DBAPIError``
+        # would also include statement-level bugs (constraint violations, syntax
+        # errors) that MUST surface as a plain 500 so they get investigated
+        # rather than absorbed into "DB flaky today" noise.
+        logger.error(
+            "pixels_analysis database unavailable on path %s: %s",
+            request.url.path, exc, exc_info=exc,
+        )
+        return JSONResponse(
+            status_code=503,
+            content=api_error(
+                http_status=503,
+                message="Analysis service is temporarily unavailable",
+                error_code=ANALYSIS_DATABASE_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+            ),
+        )
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.exception("Unhandled exception on path %s", request.url.path, exc_info=exc)
@@ -186,6 +229,12 @@ def create_app() -> FastAPI:
     # additional auth check on it.
     app.include_router(internal_router)
 
+    # OpenAPI component registration: expose the failure envelope shape
+    # (ApiErrorDetails / ApiErrorResponse) so /openapi.json callers can
+    # enumerate details.errorCode / details.category values without
+    # grepping the Python source. See backend.md §6.0 + §6.3.2.
+    register_openapi_error_components(app)
+
     @app.get("/health")
     async def health():
         # Process-level liveness only; MUST NOT probe database, DuckDB, or
@@ -201,6 +250,25 @@ def create_app() -> FastAPI:
                 "version": "0.1.0",
             },
         )
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        # Prometheus text-format exposition.
+        #
+        # Stage A exposes only prometheus_client's default process / platform /
+        # GC collectors — no business counters are registered. The endpoint
+        # exists to satisfy docs/runbooks/observability-roadmap.md §2 rule 5
+        # ("endpoint must return 200 with correct format even before a scraper
+        # exists") so a future metrics pipeline can attach without a dev-side
+        # scramble. Business counters (auth failures / identity-missing /
+        # request-id fallback) are deferred to stage B per §2.1 of that
+        # roadmap; any PR that wants to add one here must first expand §2.1.
+        #
+        # Served on the assistant-service port directly alongside /health and
+        # /internal/ready. `apisix.yaml.template` does NOT expose this path,
+        # so external access is blocked at the gateway boundary (same posture
+        # as /internal/ready before it was wrapped by the `internal;` location).
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app
 

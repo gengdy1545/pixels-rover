@@ -6,10 +6,11 @@
  * 按需加载，又不暴露 `features/report/components/Reports` 这种穿透路径
  * （lint-0 精神）。
  *
- * 本 feature 暂时没有独立 model / services：Reports 目前以 on-demand
- * fetch 的方式读 conversation 历史，数据流水依赖 shared/api 的 conversationApi；
- * 后续如果迁 TanStack Query（通过 useQueries 聚合多 thread detail），
- * 再在这里补 hooks / model。
+ * 本 feature 暂时没有独立 model / services：Reports 以 `features/conversation`
+ * 暴露的 `useConversationDetailsQueries` / `useThreadsQuery` hooks 读 N-thread
+ * aggregate，数据流水完全走 TanStack Query 的共享缓存（与 Home 页的单
+ * thread detail 缓存同源）。一旦后续需要自有类型 / 服务（比如独立的报表
+ * 指标接口），再在这里补 `model/` / `services/`。
  */
 
 import React from 'react';

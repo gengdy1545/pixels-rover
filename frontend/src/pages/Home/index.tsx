@@ -1,7 +1,7 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { message, Spin } from 'antd';
 import { useSearchParams } from 'react-router-dom';
-import Sidebar from '../../components/Sidebar';
+import Sidebar from '../../app/components/Sidebar';
 import { AppHeader } from '../../features/auth';
 import { Reports } from '../../features/report';
 import { Analysis, useAnalysisStore } from '../../features/analysis';
@@ -9,8 +9,9 @@ import {
   useThreadsQuery,
   useConversationQuery,
   useCreateConversationMutation,
+  classifyThreadError,
 } from '../../features/conversation';
-import { useSchemaStore } from '../../stores/schemaStore';
+import { useSchemaStore } from '../../features/schema';
 import './index.css';
 
 const Home: React.FC = () => {
@@ -54,7 +55,23 @@ const Home: React.FC = () => {
   }, [currentThreadId, conversationDetail, prepareThread, restoreSession]);
 
   useEffect(() => {
-    if (currentThreadId && conversationError) {
+    if (!currentThreadId) return;
+    const decision = classifyThreadError(conversationError);
+    if (!decision) return;
+
+    // Per-kind UX. Surfacing the specific backend errorCode instead of
+    // silently dropping the selection is the backend.md §6.3.2 step-1
+    // payoff — "this conversation is archived" vs "we couldn't reach the
+    // server" vs "it's gone forever" are different user recoveries.
+    if (decision.kind === 'archived') {
+      message.warning(decision.message);
+    } else if (decision.kind === 'transient') {
+      message.error(decision.message);
+    } else {
+      message.error(decision.message);
+    }
+
+    if (decision.stripThreadIdFromUrl) {
       prepareThread(null);
       const nextParams = new URLSearchParams(searchParams);
       nextParams.delete('threadId');

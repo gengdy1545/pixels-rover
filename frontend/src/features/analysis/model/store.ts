@@ -43,7 +43,25 @@ import type {
 } from '../../../shared/types/analysis';
 import type { SSEEventName, SSEConnection } from '../../../shared/types/sse';
 import type { ConversationHistoryItem } from '../../../shared/types/conversation';
+import { ApiError } from '../../../shared/api';
 import { submitAnalysis } from '../services/analysisApi';
+import { classifyThreadError } from '../../conversation';
+
+/**
+ * Client-side progress for pre-stream reconnect attempts driven by
+ * {@link openSSEStreamWithRetry}. Non-null ONLY during the window
+ * between a retryable failure and the next open attempt — the UI keys
+ * off this to render a "Reconnecting (N/max)…" banner instead of the
+ * normal "analyzing…" spinner.
+ *
+ * Not persisted; not serialized; purely a transient client effect.
+ */
+export interface ReconnectInfo {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: 'network' | 'upstream';
+}
 
 interface AnalysisState {
   threadId: string | null;
@@ -56,6 +74,8 @@ interface AnalysisState {
   warnings: string[];
   error: string | null;
   isLoading: boolean;
+  /** Pre-stream reconnect progress; null except during a backoff window. */
+  reconnectInfo: ReconnectInfo | null;
   /** Active SSE connection handle for user cancellation. */
   _connection: SSEConnection | null;
 
@@ -78,6 +98,7 @@ const initialState = {
   warnings: [],
   error: null,
   isLoading: false,
+  reconnectInfo: null as ReconnectInfo | null,
   _connection: null as SSEConnection | null,
 };
 
@@ -98,19 +119,64 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       { question, threadId },
       {
         onEvent: (eventType, data) => {
+          // Clearing reconnectInfo here (rather than in onRetrying's
+          // reciprocal "connected" hook, which doesn't exist) is how we
+          // close the "Reconnecting (1/3)…" banner: the first event to
+          // arrive after a successful re-open wipes the progress state.
+          if (get().reconnectInfo) {
+            set({ reconnectInfo: null });
+          }
           get().handleSSEEvent(eventType, data as unknown);
         },
-        onError: (error) => {
-          set({ error: error.message, status: 'failed', isLoading: false, _connection: null });
+        onRetrying: (info) => {
+          set({ reconnectInfo: info });
         },
-        onComplete: () => {
-          set({ isLoading: false, _connection: null });
-        },
-        onDisconnect: (error) => {
+        onApiError: (apiError) => {
+          // Business-error dispatch (backend.md §6.3.2 step-1). Reuse
+          // the conversation feature's classifier for thread / session
+          // codes — it already knows the right copy for the overlap set
+          // (``ANALYSIS_THREAD_NOT_FOUND`` / ``ANALYSIS_SESSION_NOT_FOUND``
+          // / ``ANALYSIS_THREAD_ARCHIVED``). For analysis-specific codes
+          // not in its table the decision falls through to ``unknown``
+          // with ``apiError.message`` preserved, which is acceptable
+          // fidelity until an analysis-specific classifier exists.
+          const decision = classifyThreadError(apiError);
           set({
-            error: `Connection lost: ${error.message}. Please retry your analysis.`,
+            error: decision?.message || apiError.message,
             status: 'failed',
             isLoading: false,
+            reconnectInfo: null,
+            _connection: null,
+          });
+        },
+        onError: (error) => {
+          // Non-ApiError failures (shouldn't normally happen — the
+          // retry wrapper routes ApiErrors to ``onApiError``). Keep as
+          // a safety net so unexpected throws don't leave the UI stuck
+          // spinning.
+          const apiMessage =
+            error instanceof ApiError ? error.message : error.message;
+          set({
+            error: apiMessage,
+            status: 'failed',
+            isLoading: false,
+            reconnectInfo: null,
+            _connection: null,
+          });
+        },
+        onComplete: () => {
+          set({ isLoading: false, reconnectInfo: null, _connection: null });
+        },
+        onDisconnect: (error) => {
+          // Reached here only after the retry wrapper has exhausted its
+          // pre-stream budget OR the stream dropped mid-way (which we
+          // intentionally don't auto-retry — see sseErrorPolicy.ts for
+          // why). The wrapper already composed a user-facing message.
+          set({
+            error: error.message,
+            status: 'failed',
+            isLoading: false,
+            reconnectInfo: null,
             _connection: null,
           });
         },
@@ -122,7 +188,12 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
 
   cancelAnalysis: () => {
     get()._connection?.abort();
-    set({ isLoading: false, status: 'idle', _connection: null });
+    set({
+      isLoading: false,
+      status: 'idle',
+      reconnectInfo: null,
+      _connection: null,
+    });
   },
 
   handleSSEEvent: (eventType: SSEEventName, data: unknown) => {

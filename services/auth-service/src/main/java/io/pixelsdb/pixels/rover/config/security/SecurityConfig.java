@@ -124,6 +124,13 @@ public class SecurityConfig
                                 // identity. External exposure is prevented at the gateway layer,
                                 // not here.
                                 "/internal/ready",
+                                // /metrics exposes Prometheus text-format metrics (default
+                                // JVM / process / GC collectors only, per
+                                // docs/runbooks/observability-roadmap.md §2.1). The endpoint
+                                // is not exposed through apisix.yaml.template, so external
+                                // access is blocked at the gateway; Spring-level permitAll
+                                // here only enables the in-cluster scrape / smoke-check path.
+                                "/metrics",
                                 // /openapi.json is the springdoc-served OpenAPI document
                                 // (application.properties `springdoc.api-docs.path=/openapi.json`).
                                 // External exposure is controlled EXCLUSIVELY at the gateway

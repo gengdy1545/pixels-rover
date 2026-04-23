@@ -21,12 +21,13 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Button, Empty, Spin, Space, Typography } from 'antd';
+import { Alert, Button, Empty, Spin, Space, Typography } from 'antd';
 import {
   RocketOutlined,
   CheckCircleFilled,
   ExclamationCircleFilled,
   InfoCircleFilled,
+  SyncOutlined,
 } from '@ant-design/icons';
 import AnalysisInput from '../AnalysisInput';
 import TaskCard from '../TaskCard';
@@ -72,6 +73,7 @@ const Analysis: React.FC<AnalysisProps> = ({ currentThread, onCreateConversation
     warnings,
     error,
     isLoading,
+    reconnectInfo,
     startAnalysis,
     reset,
   } = useAnalysisStore();
@@ -128,6 +130,20 @@ const Analysis: React.FC<AnalysisProps> = ({ currentThread, onCreateConversation
         availableMetrics={availableMetrics}
         disabled={!threadId}
       />
+
+      {reconnectInfo && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<SyncOutlined spin />}
+          message={
+            reconnectInfo.reason === 'upstream'
+              ? '分析服务暂时不稳，正在重试…'
+              : `网络连接中断，正在重试 (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})…`
+          }
+          style={{ marginTop: 12 }}
+        />
+      )}
 
       {showResults && (
         <div className="analysis-results" ref={resultRef}>

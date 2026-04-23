@@ -25,6 +25,12 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     "passlib[bcrypt]>=1.7",
     "python-multipart>=0.0.12",
+    # /metrics endpoint: exposes process / GC / platform counters in Prometheus
+    # text format. See docs/runbooks/observability-roadmap.md §2.1 — current
+    # stage does NOT register business counters; the endpoint exists only to
+    # satisfy the "scrapable and 200 OK" contract so a future metrics pipeline
+    # can attach without a dev-side scramble.
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]

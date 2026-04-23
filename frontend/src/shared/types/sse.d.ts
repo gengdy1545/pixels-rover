@@ -1,3 +1,17 @@
+/**
+ * SSE stream event map + client callback / connection shape served by
+ * `assistant-service`'s `/api/v1/analysis/stream` endpoint.
+ *
+ * owning-service: assistant-service
+ * source-of-truth: services/assistant-service/openapi.json#/components/schemas/
+ *   SSE event names come from backend.md §6.6; per-event payload shapes are
+ *   re-exported here from ./analysis (which itself mirrors
+ *   services/assistant-service/app/schemas/sse.py). `SSECallbacks` /
+ *   `SSEConnection` are client-only types — they shape how `shared/api/sse/`
+ *   surfaces the stream to feature code and have no wire counterpart.
+ *
+ * Hand-mirrored per frontend.md §4.6 "手写契约镜像文件的顶部元数据" rule.
+ */
 import type {
   AnalysisTask,
   AnalysisPlan,

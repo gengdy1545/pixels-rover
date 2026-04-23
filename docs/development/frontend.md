@@ -11,7 +11,7 @@
 
 ## 1. 目录结构（唯一正确形态）
 
-> 本节描述**唯一正确形态**。仓库已固定 `frontend/` 为根级单 Web 前端目录；本文件内所有路径引用（`frontend/src/...` / `@/features/...`）即为代码事实。`src/` 内部从 `pages + components + services + stores + ...` 向 `app + features + shared` 三层迁移的进度由 `.notes/todolist.md §10` 跟踪。
+> 本节描述**唯一正确形态**。仓库已固定 `frontend/` 为根级单 Web 前端目录；本文件内所有路径引用（`frontend/src/...` / `@/features/...`）即为代码事实。`src/` 内部从 `pages + components + services + stores + ...` 向 `app + features + shared` 三层迁移已完成，沿革背景见 `.notes/engineering-design.md`。
 
 ```text
 frontend/
@@ -473,6 +473,34 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 
 这些约束只会出现在 `shared/api/` 与 `shared/storage/` 两层；feature 代码应该感受不到协议细节，只拿到已解析好的业务 `data` 或已分类的错误对象。
 
+- **手写契约镜像文件的顶部元数据（硬规则）**：`frontend/src/shared/types/` 下任何"后端契约镜像"类型文件（当前形态：`infra.ts`、`auth/ErrorCode.ts`、`analysis/ErrorCode.ts`、`api.d.ts`、`conversation.d.ts`、`schema.d.ts`、`sse.d.ts`、`user.d.ts`、`analysis.d.ts`）——即凡是"手工与后端保持一致"的 TS 类型文件，**必须**在文件顶部 JSDoc 里显式写清以下两个字段，便于 `scripts/check-contracts.py` 与 review 快速定位 SSOT：
+  1. **owning service**：该契约归属哪个服务（`auth-service` / `assistant-service` / `gateway`；`shared` 仅限真正跨服务的信封类型，默认禁用）。
+  2. **Source of truth（二选一）**：
+     - **OpenAPI schema 名**，形如 `services/<svc>/openapi.json#/components/schemas/<SchemaName>`，或
+     - **SSOT 源文件 + 符号**，形如 `gateway/error-codes.json::code`、`services/auth-service/.../ErrorCodeName.java::AUTH_*`、`services/assistant-service/app/error_codes.py::ANALYSIS_*`。
+     如果两者都有，优先 OpenAPI schema——它是将来自动生成的锚点；与 Java/Python 常量的对齐由 `check-contracts.py` 的双向一致性断言（`frontend-auth-union-equals-java-source` / `frontend-analysis-union-equals-python-source`）兜底。
+
+  模板：
+
+  ```ts
+  /**
+   * <一句话用途>.
+   *
+   * owning-service: auth-service
+   * source-of-truth: services/auth-service/src/main/java/io/pixelsdb/pixels/rover/config/common/ErrorCodeName.java::AUTH_*
+   *   (long-term mirror of services/auth-service/openapi.json#/components/schemas/ApiErrorDetails/properties/errorCode/enum)
+   */
+  export type AuthErrorCode = /* ... */;
+  ```
+
+  违例条件（PR 层面拒绝合并）：
+  - 新加一个 `frontend/src/shared/types/<svc>/*.ts` / `.d.ts` 文件没写这两个字段；
+  - owning service 写的是"`shared`"但契约实际属于某个具体服务；
+  - source-of-truth 的路径对不上（文件 / 符号不存在）。
+
+  已有文件的迁移由 §10 条 10 的一次性 PR 集中做（`infra.ts` / `auth/ErrorCode.ts` / `analysis/ErrorCode.ts` 已符合；`.d.ts` 手写镜像待补）。
+
+
 ---
 
 ## 5. 显式约束：什么**不要做**（硬约束）
@@ -484,7 +512,8 @@ import { fetchAnalysis } from '@/features/analysis/services/analysisApi';   // �
 - **不写"未来支持多端"类注释或 TODO**：结构本身已经让未来抽离成本足够低；冗余注释反而会误导新同学。
 - **不把"feature A 调 feature B 的内部文件"合法化**：即使是一次性的 hotfix，也应通过在 B 的 `index.ts` 上补一条暴露。
 - **不让 frontend 容器在 `docker-compose.yml` 里 `ports` 对外暴露端口**：frontend 容器与业务服务同等，**只 `expose` 不 `ports`**，浏览器永远只通过 gateway 访问（见 [`./gateway.md §2.4`](./gateway.md)）。
-- **不在 frontend 容器的 `nginx.conf` 里下发 CSP / HSTS / XFO 等安全响应头**：这些头由 gateway 一层统一下发（见 [`./gateway.md §6.6`](./gateway.md)）。`index.html` 的 `Cache-Control: no-store` 仍配在前端 nginx（属于静态分发层职责）。
+- **不在 frontend 容器的 `nginx.conf` 里下发 CSP / HSTS / XFO 等安全响应头**：这些头由 gateway 一层统一下发（见 [`./gateway.md §6.6`](./gateway.md)）。
+- **`index.html` 必须在 frontend nginx 下发 `Cache-Control: no-store`（硬规则）**：写法为 `location = /index.html { add_header Cache-Control "no-store" always; try_files $uri =404; }`。这是"静态分发层职责"而非网关职责。理由：Vite 构建产物里只有两个 URL 族——(1) 内容哈希化的资源 `assets/index-<hash>.{js,css}`，内容即 URL，所以安全地 `public, immutable`；(2) 作为唯一入口的 `index.html`，其内容（对资源 bundle hash 的引用）**每次部署都变**。若中间缓存（浏览器 / 公司代理 / CDN 边缘）持有旧 `index.html`，它会继续指向发布后已被删除的 `assets/index-<old>.js`，用户看到白屏或 404 直到缓存过期。`always` 修饰符必须加——没有它 `add_header` 会在非 2xx/3xx 状态下被 nginx 静默丢弃，让错误路径把 stale-index 风险偷偷带回来。该条由 `scripts/check-contracts.py::frontend-index-html-no-store` 做长期回潮防线。
 - **SPA 深链接 fallback 必须配在 frontend 容器的 `nginx.conf`**（硬规则，见 [`./gateway.md §2.4`](./gateway.md)）：`try_files $uri $uri/ /index.html;` 或等价形态。HTML5 history routing 下，刷新 `/reports/abc` 这类深链接没有 fallback 会 404。**禁止**把 fallback 配在 gateway 层（用 `proxy-rewrite` 把 404 改写为 `/index.html`）——gateway 不理解 SPA 路由形态，未来引入 SSR / SSG 时会成为改造阻碍。
 
 ---

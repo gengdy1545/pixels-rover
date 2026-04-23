@@ -54,3 +54,28 @@ ANALYSIS_BACKEND_NOT_FOUND = "ANALYSIS_BACKEND_NOT_FOUND"
 
 ANALYSIS_SCHEMA_UNAVAILABLE = "ANALYSIS_SCHEMA_UNAVAILABLE"
 """Schema is not available on the requested analysis backend."""
+
+# ---- Degradation-mode UPSTREAM codes (backend.md §6.7) ----
+#
+# Each of these maps to ``HTTP 503 + category=UPSTREAM``. The frontend's
+# fallback dispatcher (backend.md §6.3.2) keys off the prefix to decide
+# whether the whole page degrades or only the affected feature — see the
+# per-service failure contract table in backend.md §6.7.
+
+ANALYSIS_DATABASE_UNAVAILABLE = "ANALYSIS_DATABASE_UNAVAILABLE"
+"""``pixels_analysis`` database transiently unreachable (connection refused,
+pool exhausted, query timeout). New analysis / write-conversation / semantic
+CRUD paths fail uniformly; pure-read paths that happen to be served from
+memory MAY survive but that is not a contract."""
+
+ANALYSIS_UPSTREAM_UNAVAILABLE = "ANALYSIS_UPSTREAM_UNAVAILABLE"
+"""External LLM API unavailable (network / quota / provider 5xx). Affects
+the analysis route only — conversation-history browsing and semantic CRUD
+keep working because they do not share the LLM downstream dependency."""
+
+ANALYSIS_BACKEND_UNAVAILABLE = "ANALYSIS_BACKEND_UNAVAILABLE"
+"""Specific analysis-backend data source (user-configured external DB / file
+source) is unreachable. Only requests hitting that backend are affected; other
+backends and non-analysis paths keep working. Do NOT widen this to "the
+whole ``/api/v1/analysis/*`` domain is 5xx" — that violates the "粒度就低不就高"
+rule in backend.md §6.7."""

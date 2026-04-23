@@ -60,6 +60,7 @@ out/
 .aider*
 .continue/
 .windsurf/
+.codex
 
 # =============================================================================
 # Node.js / Frontend (Vite + React + TypeScript)

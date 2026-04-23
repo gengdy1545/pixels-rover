@@ -27,7 +27,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.validation.BindException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -104,6 +110,45 @@ public class GlobalExceptionHandler
         return ResponseEntity.status(e.getHttpStatus()).body(
                 ApiResponse.error(e.getHttpStatus(), e.getMessage(),
                         e.getErrorCode(), e.getCategory()));
+    }
+
+    /**
+     * Handle the narrow slice of {@link DataAccessException} subtypes that signal
+     * <em>transient</em> {@code pixels_auth} unavailability — connection refused,
+     * connection pool exhausted, query timeout, transaction system failure.
+     *
+     * <p>Per {@code backend.md §6.7} these map to {@code HTTP 503 +
+     * AUTH_DATABASE_UNAVAILABLE + category=UPSTREAM}; the gateway's introspect
+     * layer then converts an upstream 503 back to
+     * {@code GATEWAY_INTROSPECT_UNAVAILABLE} for browser clients so the
+     * user-facing banner stays "login temporarily unavailable" rather than
+     * "unknown error".</p>
+     *
+     * <p><b>Why the narrow taxonomy.</b> Persistent data failures
+     * ({@code DataIntegrityViolationException}, {@code DuplicateKeyException}
+     * etc.) are caller / schema bugs and must <em>not</em> be dressed up as
+     * upstream degradation — those fall through to the {@code RuntimeException}
+     * safety-net below and surface as plain 500 so they get investigated rather
+     * than absorbed into "DB flaky today" noise.</p>
+     */
+    @ExceptionHandler({
+            DataAccessResourceFailureException.class,
+            CannotCreateTransactionException.class,
+            TransactionSystemException.class,
+            QueryTimeoutException.class,
+            TransientDataAccessException.class,
+    })
+    public ResponseEntity<ApiResponse<?>> handleDatabaseUnavailable(
+            DataAccessException e, HttpServletRequest request)
+    {
+        String requestURI = request.getRequestURI();
+        log.error("Request URI '{}', pixels_auth database unavailable: {}",
+                requestURI, e.getMessage(), e);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Authentication service is temporarily unavailable",
+                        ErrorCodeName.AUTH_DATABASE_UNAVAILABLE,
+                        ErrorCategory.UPSTREAM));
     }
 
     /**

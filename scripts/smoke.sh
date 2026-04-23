@@ -2,7 +2,9 @@
 # scripts/smoke.sh — Pixels Rover contract-layer smoke test
 # ==========================================================
 #
-# Canonical spec: .notes/todolist.md §15.1.
+# Canonical spec: docs/development/backend.md §7 (contract-level readiness) +
+# gateway.md §4.1 (/gateway/ready aggregation). Paired with
+# scripts/check-contracts.py — either failure blocks merge.
 #
 # Scope:
 #   This script only validates the CONTRACT layer — request/response envelopes,
