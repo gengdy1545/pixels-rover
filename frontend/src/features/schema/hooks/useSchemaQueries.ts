@@ -20,7 +20,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { metadataApi } from '../../../shared/api';
+import { metadataApi } from '../services/metadataApi';
 import { schemaKeys } from '../model/queryKeys';
 
 export function useBackendsQuery() {

@@ -1,3 +1,15 @@
+/**
+ * Sidebar shell 样式（Stage 3 §10 PR-3 拆分后）。
+ *
+ * 已迁出：
+ *   - `.schema-tree`         → `features/schema/components/SchemaBrowser/index.css`
+ *   - `.conversation-*`      → `features/conversation/components/ConversationList/index.css`
+ *
+ * 这里只保留\"shell 自身\"的样式：暗色面板、折叠宽度、顶部 logo header、
+ * 顶层 ant-menu 的颜色覆盖。如果将来把 Sidebar 提升到 `app/components/`
+ * （见 index.tsx 注释），这套 CSS 一同搬迁。
+ */
+
 .sidebar {
   width: 220px;
   min-height: 100vh;
@@ -47,62 +59,4 @@
 .sidebar-nav .ant-menu-item-selected {
   background-color: rgba(255, 255, 255, 0.1) !important;
   color: #fff;
-}
-
-.schema-tree {
-  padding: 10px 15px;
-}
-
-.schema-tree .ant-tree {
-  background: transparent;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.schema-tree .ant-tree-node-content-wrapper:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-.conversation-list {
-  padding: 10px 15px 16px;
-}
-
-.conversation-create-btn {
-  margin-bottom: 12px;
-}
-
-.conversation-items {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.conversation-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.88);
-  cursor: pointer;
-  text-align: left;
-}
-
-.conversation-item:hover,
-.conversation-item.is-active {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-}
-
-.conversation-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conversation-empty {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 12px;
 }

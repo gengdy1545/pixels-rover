@@ -12,7 +12,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { conversationApi } from '../../../shared/api';
+import { conversationApi } from '../services/conversationApi';
 import { conversationKeys } from '../model/queryKeys';
 
 export function useThreadsQuery() {

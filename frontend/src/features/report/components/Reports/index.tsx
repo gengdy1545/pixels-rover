@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { DatePicker, Button, Card, Row, Col, message } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
-import { conversationApi } from '../../../../shared/api';
+// `conversationApi` 走 conversation feature 的 barrel escape hatch（见
+// `features/conversation/index.ts` 注释）：Reports 当前需要 N-thread
+// aggregate（`Promise.all(map(getConversation))`），未来用 `useQueries`
+// 重写后这条 import 可以撤回为常规 `useThreadsQuery` + per-thread query。
+import { conversationApi } from '../../../conversation';
 import type {
   ConversationHistoryItem,
   ConversationThread,

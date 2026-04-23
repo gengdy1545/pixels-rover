@@ -120,7 +120,6 @@ const Home: React.FC = () => {
         onThreadSelect={handleThreadSelect}
         onCreateThread={handleCreateThread}
         collapsed={collapsed}
-        threads={threads}
         currentThreadId={currentThreadId}
         creatingThread={createConversationMutation.isPending}
       />

@@ -4,13 +4,17 @@
 
 // API modules
 //
-// 注意：原 `authApi` 已迁至 `features/auth/services/authApi.ts`（Stage 3
-// §10 PR-2）——`shared/api/` 只保留跨 feature 通用能力，feature 私有
-// endpoint 归 feature 自己的 `services/` 目录。后续 PR-3 计划把
-// conversationApi / metadataApi 同样迁进各自 feature。
+// 当前仅 `analysis` 模块还住在 shared/api/modules——主要原因是 SSE 客户端
+// 与 analysis endpoint 紧耦合（`submitAnalysis` 直接消费 `openSSEStream`），
+// PR-4 会把 analysis pages / components / SSE-orchestrator 一起搬进
+// `features/analysis/`，届时这一行也跟着撤下，shared/api 退回纯通用层
+// （axios 实例 + envelope 解包 + 401 重放队列 + 通用 SSE）。
+//
+// 已迁的（不要再从这里 re-export）：
+//   - `authApi`           → `features/auth/services/authApi.ts`         （Stage 3 §10 PR-2）
+//   - `conversationApi`   → `features/conversation/services/conversationApi.ts` （Stage 3 §10 PR-3）
+//   - `metadataApi`       → `features/schema/services/metadataApi.ts`   （Stage 3 §10 PR-3）
 export { submitAnalysis, getAnalysisResult, getSemanticMetrics, getSemanticDimensions } from './modules/analysis';
-export { conversationApi } from './modules/conversations';
-export { metadataApi } from './modules/metadata';
 
 // SSE client
 export { openSSEStream } from './sse';

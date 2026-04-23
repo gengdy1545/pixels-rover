@@ -1,0 +1,52 @@
+/**
+ * ConversationList 自有样式（Stage 3 §10 PR-3 从 components/Sidebar/index.css 拆出）。
+ *
+ * 颜色系（半透明白色文字 / 暗色背景）假设组件挂在 Sidebar shell 的暗色面
+ * 板里；如果未来要在浅色容器里复用，需要把这套色彩规则参数化或者再分一
+ * 套主题。短期内消费方只有 Sidebar，不做 over-engineering。
+ */
+
+.conversation-list {
+  padding: 10px 15px 16px;
+}
+
+.conversation-create-btn {
+  margin-bottom: 12px;
+}
+
+.conversation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  text-align: left;
+}
+
+.conversation-item:hover,
+.conversation-item.is-active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.conversation-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-empty {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}

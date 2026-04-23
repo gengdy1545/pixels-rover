@@ -15,7 +15,7 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { conversationApi } from '../../../shared/api';
+import { conversationApi } from '../services/conversationApi';
 import type {
   ConversationThread,
   CreateConversationRequest,

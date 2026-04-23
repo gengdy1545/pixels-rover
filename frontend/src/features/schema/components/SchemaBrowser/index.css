@@ -1,0 +1,19 @@
+/**
+ * SchemaBrowser 自有样式（Stage 3 §10 PR-3 从 components/Sidebar/index.css 拆出）。
+ *
+ * 只声明 schema-tree 范围内的视觉规则；外层布局（暗色背景 / 折叠宽度等）
+ * 由 Sidebar shell 的样式负责，本文件不假设组件挂在何种深色背景上。
+ */
+
+.schema-tree {
+  padding: 10px 15px;
+}
+
+.schema-tree .ant-tree {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.schema-tree .ant-tree-node-content-wrapper:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
