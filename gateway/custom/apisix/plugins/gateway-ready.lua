@@ -30,14 +30,22 @@
 -- Response envelope follows backend.md §6.0:
 --   200: { code: 200, message: "ready", requestId, data: { components[], elapsedMs } }
 --   503: { code: 503, message: "...",    requestId, details: { errorCode:
---         "GATEWAY_NOT_READY", hint, components[], elapsedMs } }
+--         "GATEWAY_NOT_READY", category: "UPSTREAM", hint, components[], elapsedMs } }
 
 local cjson = require("cjson.safe")
 local core = require("apisix.core")
 local random = require("resty.random")
 local stringx = require("resty.string")
+local error_code_registry = require("apisix.plugins.error_code_registry")
 
 local plugin_name = "gateway-ready"
+
+-- See gateway-auth.lua for the full rationale on KNOWN_ERROR_CODES. Short
+-- version: this is the ground truth of which errorCodes this plugin may
+-- emit; init() asserts it is a subset of gateway/error-codes.json.
+local KNOWN_ERROR_CODES = {
+    "GATEWAY_NOT_READY",
+}
 
 local probe_schema = {
     type = "object",
@@ -114,29 +122,91 @@ local function write_json(status, body)
     return ngx.exit(status)
 end
 
+-- Pure helper extracted for unit testing: given a probes[] config and the
+-- parallel responses[] array from ngx.location.capture_multi, compute the
+-- response envelope (status, body) without touching ngx.* output APIs.
+-- Kept internal-only because the gateway-ready contract is route-scoped and
+-- should not be consumed elsewhere.
+local function build_verdict(probes, responses, request_id, elapsed_total_ms)
+    local components = {}
+    local any_failed = false
+    for i, probe in ipairs(probes) do
+        local resp = responses[i]
+        local status = (resp and resp.status) or 0
+        local healthy = (status == 200)
+        if not healthy then
+            any_failed = true
+        end
+        components[i] = {
+            name = probe.name,
+            uri = probe.uri,
+            httpCode = status,
+            status = healthy and "UP" or "DOWN",
+        }
+    end
+
+    if any_failed then
+        return 503, {
+            code = 503,
+            message = "One or more upstream probes not ready",
+            requestId = request_id,
+            details = {
+                errorCode = "GATEWAY_NOT_READY",
+                category = "UPSTREAM",
+                hint = "at least one upstream /health probe returned non-200; check components[]",
+                components = components,
+                elapsedMs = elapsed_total_ms,
+            },
+        }
+    end
+
+    return 200, {
+        code = 200,
+        message = "ready",
+        requestId = request_id,
+        data = {
+            components = components,
+            elapsedMs = elapsed_total_ms,
+        },
+    }
+end
+
+-- An empty probes list makes aggregation meaningless. By contract, a gateway
+-- with no registered upstream probe is NOT ready -- this forces operators to
+-- explicitly configure coverage when onboarding services.
+local function empty_probes_body(request_id)
+    return {
+        code = 503,
+        message = "No upstream probes registered",
+        requestId = request_id,
+        details = {
+            errorCode = "GATEWAY_NOT_READY",
+            category = "UPSTREAM",
+            hint = "gateway-ready plugin has an empty probes[] list; see gateway.md §7 step 7",
+            components = {},
+        },
+    }
+end
+
+-- See gateway-auth.lua _M.init for the reasoning. Same fail-closed contract:
+-- if the registry is missing or out of sync, /gateway/ready stops serving
+-- rather than produce an unregistered errorCode.
+function _M.init()
+    error_code_registry.assert_registered(plugin_name, KNOWN_ERROR_CODES)
+end
+
 function _M.check_schema(conf)
     return core.schema.check(schema, conf)
 end
 
 function _M.access(conf, ctx)
+    local _ = ctx
     local request_id = ensure_request_id()
     local probes = conf.probes or {}
 
-    -- An empty probes list makes aggregation meaningless. By contract, a
-    -- gateway with no registered upstream probe is NOT ready -- this forces
-    -- operators to explicitly configure coverage when onboarding services.
     if #probes == 0 then
         core.log.warn("gateway-ready: no probes configured on this route; returning 503")
-        return write_json(503, {
-            code = 503,
-            message = "No upstream probes registered",
-            requestId = request_id,
-            details = {
-                errorCode = "GATEWAY_NOT_READY",
-                hint = "gateway-ready plugin has an empty probes[] list; see gateway.md §7 step 7",
-                components = {},
-            },
-        })
+        return write_json(503, empty_probes_body(request_id))
     end
 
     local requests = {}
@@ -156,46 +226,14 @@ function _M.access(conf, ctx)
     local responses = { ngx.location.capture_multi(requests) }
     local elapsed_total_ms = math.floor((ngx.now() - start) * 1000 + 0.5)
 
-    local components = core.table.new(#probes, 0)
-    local any_failed = false
-    for i, probe in ipairs(probes) do
-        local resp = responses[i]
-        local status = (resp and resp.status) or 0
-        local healthy = (status == 200)
-        if not healthy then
-            any_failed = true
-        end
-        components[i] = {
-            name = probe.name,
-            uri = probe.uri,
-            httpCode = status,
-            status = healthy and "UP" or "DOWN",
-        }
-    end
-
-    if any_failed then
-        return write_json(503, {
-            code = 503,
-            message = "One or more upstream probes not ready",
-            requestId = request_id,
-            details = {
-                errorCode = "GATEWAY_NOT_READY",
-                hint = "at least one upstream /health probe returned non-200; check components[]",
-                components = components,
-                elapsedMs = elapsed_total_ms,
-            },
-        })
-    end
-
-    return write_json(200, {
-        code = 200,
-        message = "ready",
-        requestId = request_id,
-        data = {
-            components = components,
-            elapsedMs = elapsed_total_ms,
-        },
-    })
+    local status, body = build_verdict(probes, responses, request_id, elapsed_total_ms)
+    return write_json(status, body)
 end
+
+-- Exposed strictly for unit tests. See gateway-auth.lua for the same caveat.
+_M._private = {
+    build_verdict = build_verdict,
+    empty_probes_body = empty_probes_body,
+}
 
 return _M

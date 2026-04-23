@@ -19,33 +19,34 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
 
 import java.io.Serializable;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Unified API response wrapper aligned with {@code backend.md §6.0}.
+ * Unified API response envelope aligned with {@code backend.md §6.0}.
  *
- * <p>Success responses only carry {@code data}; failure responses only carry {@code details}.
- * The top-level {@code code} equals the HTTP status code. {@code details.errorCode} is the
- * SCREAMING_SNAKE_CASE business/infra error identifier.</p>
- *
- * <p>Note: {@code errorCode} and {@code apiVersion} top-level fields are retained as
- * transitional shims while the §9 envelope refactor (`todolist.md §9`) is in flight; new
- * call sites should use {@link #errorWithCode(int, String, String)} which sets
- * {@code details.errorCode} directly.</p>
+ * <p>Contract:</p>
+ * <ul>
+ *   <li>Top-level {@code code} strictly equals the HTTP status code; no 5-digit business codes.</li>
+ *   <li>Success responses carry {@code data} only; failure responses carry {@code details} only.</li>
+ *   <li>Failure responses <strong>must</strong> carry both {@code details.errorCode} (SCREAMING_SNAKE_CASE
+ *       business/infra identifier) and {@code details.category} (coarse {@link ErrorCategory} enum).
+ *       The only exception is the §6.5 safety-net handler for wholly-unknown unhandled exceptions.</li>
+ *   <li>{@code apiVersion} is intentionally absent from the envelope — API versioning is carried by
+ *       the URL prefix {@code /api/v1/}.</li>
+ * </ul>
  *
  * @param <T> the type of the data payload
- * @author pixels
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ApiResponse<T> implements Serializable
 {
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
-    /** HTTP-equivalent status code. */
+    /** HTTP status code; enforced equal to the ResponseEntity status. */
     private int code;
 
-    /** Response message (human-readable, do not leak internals). */
+    /** Human-readable message (do not leak internals; see §6.4). */
     private String message;
 
     /** Success payload; must be null when {@code details} is set. */
@@ -54,87 +55,95 @@ public class ApiResponse<T> implements Serializable
     /** Failure payload; must be null when {@code data} is set. */
     private Map<String, Object> details;
 
-    /** Legacy top-level errorCode mirror; scheduled for removal when §9 lands. */
-    private String errorCode;
-
-    /** Request trace id. */
+    /** Request trace id (see §5; required on every response). */
     private String requestId;
-
-    /** Legacy apiVersion mirror; scheduled for removal when §9 lands. */
-    private String apiVersion = "v1";
 
     public ApiResponse()
     {
     }
 
-    public ApiResponse(int code, String message)
-    {
-        this.code = code;
-        this.message = message;
-        this.errorCode = ErrorCodeName.fromCode(code);
-        this.requestId = RequestIdContext.get();
-        this.apiVersion = "v1";
-    }
-
-    public ApiResponse(int code, String message, T data)
+    private ApiResponse(int code, String message, T data, Map<String, Object> details)
     {
         this.code = code;
         this.message = message;
         this.data = data;
-        this.errorCode = ErrorCodeName.fromCode(code);
+        this.details = details;
         this.requestId = RequestIdContext.get();
-        this.apiVersion = "v1";
     }
 
-    // --- Static factory methods ---
+    // --- Success factory methods ---
 
     public static <T> ApiResponse<T> success()
     {
-        return new ApiResponse<>(HttpStatus.SUCCESS, "success");
+        return new ApiResponse<>(HttpStatus.SUCCESS, "success", null, null);
     }
 
     public static <T> ApiResponse<T> success(T data)
     {
-        return new ApiResponse<>(HttpStatus.SUCCESS, "success", data);
+        return new ApiResponse<>(HttpStatus.SUCCESS, "success", data, null);
     }
 
     public static <T> ApiResponse<T> success(String message, T data)
     {
-        return new ApiResponse<>(HttpStatus.SUCCESS, message, data);
+        return new ApiResponse<>(HttpStatus.SUCCESS, message, data, null);
     }
 
-    public static <T> ApiResponse<T> error(String message)
-    {
-        return new ApiResponse<>(HttpStatus.ERROR, message);
-    }
+    // --- Failure factory methods ---
 
-    public static <T> ApiResponse<T> error(int code, String message)
+    /**
+     * Build a failure response with the mandatory {@code details.errorCode} and
+     * {@code details.category} per {@code backend.md §6.0}.
+     *
+     * @param httpStatus HTTP status code (equals the ResponseEntity status and the top-level {@code code})
+     * @param message    human-readable message (do not leak internals)
+     * @param errorCode  SCREAMING_SNAKE_CASE business/infra identifier (required)
+     * @param category   coarse error category for frontend fallback UX (required)
+     */
+    public static <T> ApiResponse<T> error(int httpStatus, String message, String errorCode,
+                                           ErrorCategory category)
     {
-        return new ApiResponse<>(code, message);
+        return error(httpStatus, message, errorCode, category, null);
     }
 
     /**
-     * Build an error response with an explicit SCREAMING_SNAKE_CASE {@code errorCode} written to
-     * {@code details.errorCode}. This is the target-state factory per {@code backend.md §6.3}.
+     * Same as {@link #error(int, String, String, ErrorCategory)} but merges additional keys
+     * (for example {@code hint} / {@code field}) into {@code details}.
      */
-    public static <T> ApiResponse<T> errorWithCode(int httpStatus, String message, String errorCode)
+    public static <T> ApiResponse<T> error(int httpStatus, String message, String errorCode,
+                                           ErrorCategory category, Map<String, Object> extras)
     {
-        ApiResponse<T> r = new ApiResponse<>(httpStatus, message);
-        r.errorCode = errorCode;
-        Map<String, Object> d = new HashMap<>();
+        if (errorCode == null || errorCode.isBlank())
+        {
+            throw new IllegalArgumentException("errorCode is required on failure responses");
+        }
+        if (category == null)
+        {
+            throw new IllegalArgumentException("category is required on failure responses");
+        }
+        Map<String, Object> d = new LinkedHashMap<>();
         d.put("errorCode", errorCode);
-        r.details = d;
-        return r;
+        d.put("category", category.name());
+        if (extras != null)
+        {
+            for (Map.Entry<String, Object> entry : extras.entrySet())
+            {
+                if (!"errorCode".equals(entry.getKey()) && !"category".equals(entry.getKey()))
+                {
+                    d.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+        return new ApiResponse<>(httpStatus, message, null, d);
     }
 
-    public static <T> ApiResponse<T> unauthorized(String message)
+    /**
+     * Safety-net factory for the §6.5 wholly-unknown unhandled exception handler — this is the
+     * <strong>only</strong> path that may emit a failure response without {@code details}.
+     * All other call sites must use {@link #error(int, String, String, ErrorCategory)}.
+     */
+    public static <T> ApiResponse<T> unknownError(int httpStatus, String message)
     {
-        return new ApiResponse<>(HttpStatus.UNAUTHORIZED, message);
-    }
-
-    public static <T> ApiResponse<T> forbidden(String message)
-    {
-        return new ApiResponse<>(HttpStatus.FORBIDDEN, message);
+        return new ApiResponse<>(httpStatus, message, null, null);
     }
 
     // --- Getters and Setters ---
@@ -169,36 +178,6 @@ public class ApiResponse<T> implements Serializable
         this.data = data;
     }
 
-    public String getRequestId()
-    {
-        return requestId;
-    }
-
-    public void setRequestId(String requestId)
-    {
-        this.requestId = requestId;
-    }
-
-    public String getErrorCode()
-    {
-        return errorCode;
-    }
-
-    public void setErrorCode(String errorCode)
-    {
-        this.errorCode = errorCode;
-    }
-
-    public String getApiVersion()
-    {
-        return apiVersion;
-    }
-
-    public void setApiVersion(String apiVersion)
-    {
-        this.apiVersion = apiVersion;
-    }
-
     public Map<String, Object> getDetails()
     {
         return details;
@@ -207,5 +186,15 @@ public class ApiResponse<T> implements Serializable
     public void setDetails(Map<String, Object> details)
     {
         this.details = details;
+    }
+
+    public String getRequestId()
+    {
+        return requestId;
+    }
+
+    public void setRequestId(String requestId)
+    {
+        this.requestId = requestId;
     }
 }

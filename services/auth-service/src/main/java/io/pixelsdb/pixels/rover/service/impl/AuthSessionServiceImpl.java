@@ -1,7 +1,9 @@
 package io.pixelsdb.pixels.rover.service.impl;
 
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.config.security.JwtTokenProvider;
-import io.pixelsdb.pixels.rover.constant.ErrorCode;
+import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.mapper.AuthSessionRepository;
 import io.pixelsdb.pixels.rover.model.AuthSession;
@@ -66,11 +68,15 @@ public class AuthSessionServiceImpl implements AuthSessionService
     {
         if (!jwtTokenProvider.validateToken(refreshToken))
         {
-            throw new ServiceException("Invalid or expired refresh token", ErrorCode.INVALID_TOKEN);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Invalid or expired refresh token",
+                    ErrorCodeName.AUTH_INVALID_TOKEN, ErrorCategory.AUTH);
         }
         if (!"refresh".equals(jwtTokenProvider.getTokenType(refreshToken)))
         {
-            throw new ServiceException("Invalid token type", ErrorCode.INVALID_TOKEN_TYPE);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Invalid token type",
+                    ErrorCodeName.AUTH_INVALID_TOKEN_TYPE, ErrorCategory.AUTH);
         }
 
         String sessionId = jwtTokenProvider.getSessionIdFromToken(refreshToken);
@@ -79,25 +85,35 @@ public class AuthSessionServiceImpl implements AuthSessionService
         Long userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
         if (sessionId == null || refreshTokenId == null || username == null || userId == null)
         {
-            throw new ServiceException("Invalid token payload", ErrorCode.INVALID_TOKEN);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Invalid token payload",
+                    ErrorCodeName.AUTH_INVALID_TOKEN, ErrorCategory.AUTH);
         }
 
         AuthSession session = authSessionRepository.findBySessionId(sessionId)
-                .orElseThrow(() -> new ServiceException("Invalid or expired refresh token", ErrorCode.INVALID_TOKEN));
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED,
+                        "Invalid or expired refresh token",
+                        ErrorCodeName.AUTH_INVALID_TOKEN, ErrorCategory.AUTH));
 
         if (!Objects.equals(session.getUserId(), userId) || !Objects.equals(session.getUserEmail(), username))
         {
             revokeSessionInternal(session, REASON_REFRESH_REUSE);
-            throw new ServiceException("Invalid or expired refresh token", ErrorCode.INVALID_TOKEN);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Invalid or expired refresh token",
+                    ErrorCodeName.AUTH_INVALID_TOKEN, ErrorCategory.AUTH);
         }
         if (session.getRevokedAt() != null)
         {
-            throw new ServiceException("Session has been revoked", ErrorCode.INVALID_TOKEN);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Session has been revoked",
+                    ErrorCodeName.AUTH_SESSION_REVOKED, ErrorCategory.AUTH);
         }
         if (session.getRefreshTokenExpiresAt().before(now()))
         {
             revokeSessionInternal(session, "refresh_token_expired");
-            throw new ServiceException("Invalid or expired refresh token", ErrorCode.INVALID_TOKEN);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Invalid or expired refresh token",
+                    ErrorCodeName.AUTH_INVALID_TOKEN, ErrorCategory.AUTH);
         }
 
         String presentedHash = hashToken(refreshToken);
@@ -105,7 +121,9 @@ public class AuthSessionServiceImpl implements AuthSessionService
                 || !Objects.equals(session.getCurrentRefreshTokenId(), refreshTokenId))
         {
             revokeSessionInternal(session, REASON_REFRESH_REUSE);
-            throw new ServiceException("Refresh token reuse detected", ErrorCode.INVALID_TOKEN);
+            throw new ServiceException(HttpStatus.UNAUTHORIZED,
+                    "Refresh token reuse detected",
+                    ErrorCodeName.AUTH_REFRESH_TOKEN_REUSED, ErrorCategory.AUTH);
         }
 
         String nextRefreshTokenId = UUID.randomUUID().toString();
@@ -143,10 +161,14 @@ public class AuthSessionServiceImpl implements AuthSessionService
     public void revokeSession(Long userId, String sessionId, String reason)
     {
         AuthSession session = authSessionRepository.findBySessionId(sessionId)
-                .orElseThrow(() -> new ServiceException("Session not found", ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ServiceException(HttpStatus.NOT_FOUND,
+                        "Session not found",
+                        ErrorCodeName.AUTH_SESSION_NOT_FOUND, ErrorCategory.USER_INPUT));
         if (!Objects.equals(session.getUserId(), userId))
         {
-            throw new ServiceException("Session not found", ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ServiceException(HttpStatus.NOT_FOUND,
+                    "Session not found",
+                    ErrorCodeName.AUTH_SESSION_NOT_FOUND, ErrorCategory.USER_INPUT);
         }
         revokeSessionInternal(session, reason == null ? REASON_LOGOUT : reason);
     }

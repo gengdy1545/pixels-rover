@@ -12,15 +12,17 @@ vi.mock('../../shared/storage/cookie', () => ({
   isLoggedInCookie: vi.fn(() => false),
 }));
 
-// Mock the authApi module (now under shared/api/)
+// Mock the authApi module (now under shared/api/). After the §9 envelope
+// refactor, get<T> / post<T> auto-unwrap ApiSuccessResponse<T>.data, so
+// getCaptcha resolves directly to CaptchaResponse -- NOT to the full
+// envelope. An old-style mock that returned { data: { code, message,
+// data: ... } } would surface as `captchaImage = undefined` inside the
+// component.
 vi.mock('../../shared/api', () => ({
   authApi: {
     getCaptcha: vi.fn().mockResolvedValue({
-      data: {
-        code: 200,
-        message: 'success',
-        data: { captchaKey: 'key-1', captchaImage: 'data:image/png;base64,abc' },
-      },
+      captchaKey: 'key-1',
+      captchaImage: 'data:image/png;base64,abc',
     }),
     login: vi.fn(),
     me: vi.fn(),

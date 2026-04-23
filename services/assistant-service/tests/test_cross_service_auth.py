@@ -28,10 +28,11 @@ class TestGatewayIdentityContract:
             "/api/v1/analysis/backends",
             headers={"X-Auth-User-Id": "42"},
         )
-        assert resp.status_code == 401
+        assert resp.status_code == 500
         body = resp.json()
-        assert body["code"] == 40100
-        assert body["errorCode"] == "AUTHENTICATION_REQUIRED"
+        assert body["code"] == 500
+        assert body["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"
+        assert body["details"]["category"] == "INTERNAL"
 
     async def test_rejects_non_numeric_gateway_user_id(self, async_client):
         resp = await async_client.get(
@@ -41,10 +42,11 @@ class TestGatewayIdentityContract:
                 "X-Auth-User-Email": "alice@pixelsdb.io",
             },
         )
-        assert resp.status_code == 401
+        assert resp.status_code == 500
         body = resp.json()
-        assert body["code"] == 40102
-        assert body["errorCode"] == "INVALID_TOKEN"
+        assert body["code"] == 500
+        assert body["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"
+        assert body["details"]["category"] == "INTERNAL"
 
     async def test_accepts_identity_without_session_id(self, async_client):
         resp = await async_client.get(

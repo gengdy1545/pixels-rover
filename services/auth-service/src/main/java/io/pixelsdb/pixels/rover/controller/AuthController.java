@@ -16,7 +16,11 @@
 package io.pixelsdb.pixels.rover.controller;
 
 import io.pixelsdb.pixels.rover.config.common.ApiResponse;
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.config.security.CookieHelper;
+import io.pixelsdb.pixels.rover.constant.HttpStatus;
+import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.rest.request.LoginRequest;
 import io.pixelsdb.pixels.rover.rest.request.RegisterRequest;
 import io.pixelsdb.pixels.rover.rest.response.AccessTokenResponse;
@@ -108,9 +112,11 @@ public class AuthController
         String refreshToken = cookieHelper.resolveRefreshToken(httpRequest);
         if (refreshToken == null || refreshToken.isBlank())
         {
-            return ApiResponse.error(
-                    io.pixelsdb.pixels.rover.constant.ErrorCode.INVALID_ARGUMENT,
-                    "Refresh token is required");
+            throw new ServiceException(
+                    HttpStatus.BAD_REQUEST,
+                    "Refresh token is required",
+                    ErrorCodeName.AUTH_REFRESH_TOKEN_MISSING,
+                    ErrorCategory.USER_INPUT);
         }
 
         AccessTokenResponse tokenResponse = sysLoginService.refreshToken(refreshToken,

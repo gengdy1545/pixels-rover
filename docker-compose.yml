@@ -13,35 +13,33 @@
 #
 # Architecture:
 #   All traffic enters through the API Gateway (port 80/443).
-#   APISIX handles routing, auth introspection, CSRF enforcement,
-#   identity header injection, and audit-friendly request IDs.
+#   APISIX (Standalone YAML mode, no etcd / no Admin API) handles
+#   routing, auth introspection, CSRF enforcement, identity header
+#   injection, and audit-friendly request IDs.
 #   Backend services are not directly exposed.
+#
+# Startup ordering (see docs/development/backend.md §7 / §12.2):
+#   * auth-service / assistant-service depend on mysql with
+#     `condition: service_started` (NOT service_healthy). MySQL being
+#     past its own healthcheck does NOT imply application schemas are
+#     ready — that is owned by Flyway (auth-service) and Alembic
+#     (assistant-service), which run `migrate` / `upgrade head`
+#     synchronously BEFORE their respective HTTP ports open. If
+#     migrations fail, the service container exits 1 and compose
+#     surfaces the failure; there is no "healthy but uninitialised"
+#     intermediate state.
+#   * gateway depends on services with `condition: service_started`
+#     too. gateway's own /gateway/live is pure-local (no upstream), so
+#     it can return 200 before any upstream is ready. System-level
+#     readiness is observable via /gateway/ready (aggregates each
+#     upstream's /internal/ready) and is the signal external smoke /
+#     load-balancer drain should consume.
 #
 # Ports (external):
 #   - 80    API Gateway (unified entry point)
 #   - 3306  MySQL (optional, for direct DB access)
 
 services:
-  # ---------- APISIX Control Plane ----------
-  etcd:
-    image: bitnami/etcd:3.5
-    container_name: pixels-rover-etcd
-    restart: unless-stopped
-    environment:
-      ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
-      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
-    expose:
-      - "2379"
-    volumes:
-      - etcd-data:/bitnami/etcd
-    healthcheck:
-      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl endpoint health --endpoints=http://127.0.0.1:2379"]
-      interval: 10s
-      timeout: 5s
-      start_period: 10s
-      retries: 10
-
   # ---------- MySQL ----------
   mysql:
     image: mysql:8.0
@@ -49,7 +47,10 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: pixels_auth
+      # MYSQL_DATABASE intentionally NOT set -- pixels_auth and
+      # pixels_analysis are both created by db/pixels_rover.sql via
+      # /docker-entrypoint-initdb.d/ (first volume init only).
+      # See docs/development/backend.md §12.1.
       MYSQL_USER: pixels
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
     ports:
@@ -82,39 +83,39 @@ services:
     container_name: pixels-rover-auth
     restart: unless-stopped
     depends_on:
+      # service_started, NOT service_healthy: MySQL being healthy does
+      # not mean pixels_auth is ready for app-table DDL. Flyway does
+      # the real readiness work on startup (backend.md §12.2).
       mysql:
-        condition: service_healthy
+        condition: service_started
       jwt-keygen:
         condition: service_completed_successfully
     environment:
-      # Database
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pixels_auth
       SPRING_DATASOURCE_USERNAME: pixels
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-password}
-      # JWT (RS256)
       JWT_ALGORITHM: RS256
       JWT_ACTIVE_KID: ${JWT_KID:-dev-rsa-1}
       JWT_PRIVATE_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-private.pem
       JWT_PUBLIC_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem
       # Multi-kid verification during rotation: enumerate auth-service's local
       # key directory (every `<kid>-public.pem`). There is no merged JWKS artifact
-      # any more — the former external /api/v1/auth/jwks surface was retired
+      # any more -- the former external /api/v1/auth/jwks surface was retired
       # (see docs/design/jwt-rotation.md §1.2).
       JWT_PUBLIC_KEYS_DIRECTORY: /jwt-keys
-      # Server
       SERVER_PORT: 8081
-      # Gateway -> auth-service internal auth
       INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
-      # Cookie policy
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
-    # No external port exposure — only reachable via gateway
     expose:
       - "8081"
     volumes:
       - jwt-keys:/jwt-keys:ro
     healthcheck:
+      # /health is process-only liveness (backend.md §7.1). Do NOT
+      # switch this to /internal/ready -- that would trigger container
+      # restarts on MySQL blips, which restarting the JVM cannot fix.
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 5s
@@ -129,23 +130,20 @@ services:
     container_name: pixels-rover-assistant
     restart: unless-stopped
     depends_on:
+      # service_started, NOT service_healthy (see auth-service above).
+      # Alembic `upgrade head` runs synchronously from entrypoint.sh
+      # before uvicorn binds the port (backend.md §12.2).
       mysql:
-        condition: service_healthy
+        condition: service_started
     environment:
-      # LLM
       ROVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       ROVER_LLM_API_KEY: ${LLM_API_KEY:-}
       ROVER_LLM_API_BASE: ${LLM_API_BASE:-}
-      # Database
       ROVER_DATABASE_URL: mysql+aiomysql://pixels:${MYSQL_PASSWORD:-password}@mysql:3306/pixels_analysis
-      # DuckDB
       ROVER_DUCKDB_PATH: ":memory:"
-      # Pixels Server
       ROVER_PIXELS_HOST: ${PIXELS_HOST:-host.docker.internal}
       ROVER_PIXELS_PORT: ${PIXELS_PORT:-18890}
-      # Debug
       ROVER_DEBUG: ${DEBUG:-false}
-    # No external port exposure — only reachable via gateway
     expose:
       - "8090"
     healthcheck:
@@ -162,7 +160,6 @@ services:
       dockerfile: Dockerfile
     container_name: pixels-rover-frontend
     restart: unless-stopped
-    # No external port exposure — served via gateway
     expose:
       - "80"
     healthcheck:
@@ -172,7 +169,7 @@ services:
       start_period: 10s
       retries: 3
 
-  # ---------- API Gateway (APISIX — unified entry point) ----------
+  # ---------- API Gateway (APISIX Standalone YAML — unified entry point) ----------
   gateway:
     build:
       context: ./gateway
@@ -180,44 +177,46 @@ services:
     container_name: pixels-rover-gateway
     restart: unless-stopped
     depends_on:
-      etcd:
-        condition: service_healthy
+      # All dependencies use service_started. Reasons:
+      # - gateway's /gateway/live is pure local (no upstream); it comes
+      #   up independently of upstream health.
+      # - waiting on service_healthy of upstreams would create a
+      #   cold-start deadlock if any upstream's healthcheck itself
+      #   takes time to settle; the right signal for "system ready
+      #   for traffic" is /gateway/ready, polled by external smoke.
       auth-service:
-        condition: service_healthy
+        condition: service_started
       assistant-service:
-        condition: service_healthy
+        condition: service_started
       frontend:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "${GATEWAY_PORT:-80}:9080"
     environment:
-      APISIX_ADMIN_API_KEY: ${APISIX_ADMIN_API_KEY:-change-me-admin-key}
+      # INTERNAL_INTROSPECTION_SECRET is consumed at runtime by
+      # gateway-auth.lua via os.getenv(); entrypoint.sh fails fast if
+      # this is missing. See gateway.md §5.1.
       INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
-    expose:
-      - "9180"
+    volumes:
+      # Bind-mount apisix.yaml so iterating on routes is just
+      # `docker compose restart gateway` (no image rebuild). The file
+      # is also COPY'd into the image as a fallback for deployments
+      # where compose isn't the runtime.
+      - ./gateway/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9080/gateway/health"]
+      # /gateway/live is pure-local liveness (gateway.md §4.2). MUST
+      # NOT be /gateway/ready (which is system readiness; failing it
+      # here would restart the gateway on upstream outage, turning a
+      # degraded-but-serving state into a hard outage).
+      test: ["CMD", "curl", "-fsS", "http://localhost:9080/gateway/live"]
       interval: 15s
       timeout: 5s
       start_period: 10s
       retries: 10
 
-  gateway-bootstrap:
-    build:
-      context: ./gateway
-      dockerfile: Dockerfile
-    container_name: pixels-rover-gateway-bootstrap
-    restart: "no"
-    depends_on:
-      gateway:
-        condition: service_started
-    entrypoint: ["/bootstrap.sh"]
-    environment:
-      APISIX_ADMIN_API_KEY: ${APISIX_ADMIN_API_KEY:-change-me-admin-key}
-
 volumes:
-  etcd-data:
-    driver: local
+  # etcd-data volume was removed with the Standalone YAML migration
+  # (see docs/development/gateway.md §1.2). Don't re-introduce it.
   mysql-data:
     driver: local
   jwt-keys:

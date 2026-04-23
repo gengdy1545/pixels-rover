@@ -15,8 +15,9 @@
  */
 package io.pixelsdb.pixels.rover.service.impl;
 
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
-import io.pixelsdb.pixels.rover.constant.ErrorCode;
 import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.mapper.UserRepository;
 import io.pixelsdb.pixels.rover.model.User;
@@ -46,7 +47,9 @@ public class UserServiceImpl implements UserService
         User existUser = userRepository.findByEmail(request.getEmail());
         if (existUser != null)
         {
-            throw new ServiceException("User already exists", ErrorCode.RESOURCE_CONFLICT);
+            throw new ServiceException(HttpStatus.CONFLICT,
+                    "User already exists",
+                    ErrorCodeName.AUTH_USER_ALREADY_EXISTS, ErrorCategory.USER_INPUT);
         }
 
         User user = new User();
@@ -64,7 +67,9 @@ public class UserServiceImpl implements UserService
         User user = userRepository.findByEmail(email);
         if (user == null)
         {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ServiceException(HttpStatus.NOT_FOUND,
+                    "User not found",
+                    ErrorCodeName.AUTH_USER_NOT_FOUND, ErrorCategory.USER_INPUT);
         }
 
         return new UserInfoResponse(user.getId(), user.getName(), user.getEmail(), user.getAffiliation());
@@ -75,12 +80,16 @@ public class UserServiceImpl implements UserService
     {
         if (userId == null)
         {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ServiceException(HttpStatus.NOT_FOUND,
+                    "User not found",
+                    ErrorCodeName.AUTH_USER_NOT_FOUND, ErrorCategory.USER_INPUT);
         }
         User user = userRepository.findById(userId.longValue());
         if (user == null)
         {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ServiceException(HttpStatus.NOT_FOUND,
+                    "User not found",
+                    ErrorCodeName.AUTH_USER_NOT_FOUND, ErrorCategory.USER_INPUT);
         }
         return new UserInfoResponse(user.getId(), user.getName(), user.getEmail(), user.getAffiliation());
     }

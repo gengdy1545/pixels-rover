@@ -1,7 +1,10 @@
 package io.pixelsdb.pixels.rover.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.config.security.CookieHelper;
+import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.rest.request.LoginRequest;
 import io.pixelsdb.pixels.rover.rest.request.RegisterRequest;
@@ -161,13 +164,18 @@ class AuthControllerTest
         request.setCaptcha("WRONG");
         request.setCaptchaKey("key-1");
 
-        doThrow(new ServiceException("Verification code error"))
+        doThrow(new ServiceException(HttpStatus.BAD_REQUEST,
+                "Verification code error",
+                ErrorCodeName.AUTH_CAPTCHA_INVALID, ErrorCategory.USER_INPUT))
                 .when(sysLoginService).verifyCaptcha("key-1", "WRONG");
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().is5xxServerError());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(HttpStatus.BAD_REQUEST))
+                .andExpect(jsonPath("$.details.errorCode").value(ErrorCodeName.AUTH_CAPTCHA_INVALID))
+                .andExpect(jsonPath("$.details.category").value(ErrorCategory.USER_INPUT.name()));
     }
 
     @Test
@@ -253,9 +261,11 @@ class AuthControllerTest
         mockMvc.perform(post("/api/v1/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("refreshToken", "body-token-is-ignored"))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(40000))
-                .andExpect(jsonPath("$.message").value("Refresh token is required"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(HttpStatus.BAD_REQUEST))
+                .andExpect(jsonPath("$.message").value("Refresh token is required"))
+                .andExpect(jsonPath("$.details.errorCode").value(ErrorCodeName.AUTH_REFRESH_TOKEN_MISSING))
+                .andExpect(jsonPath("$.details.category").value(ErrorCategory.USER_INPUT.name()));
     }
 
     // ---------------------------------------------------------------

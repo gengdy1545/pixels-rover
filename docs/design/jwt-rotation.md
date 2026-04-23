@@ -168,7 +168,33 @@ auth-service 侧新增以下配置概念：
 
 **硬边界**：即使启用 JWKS 端点，Pixels Rover 系统内部的 `gateway` / `assistant-service` **仍然不消费** JWKS——它们的身份入口分别是 `introspect` 与 `X-Auth-*` 头。JWKS 是对系统外的出口，不是系统内的耦合点。
 
-当前阶段不急于引入 JWKS 端点，相关代码路径作为未来需求的预留空位。
+#### 阶段 B 当前状态与 grep 兜底（重要）
+
+当前阶段**代码层面已完成 JWKS 下线**：`auth-service` 源码中与 `/.well-known/jwks.json` / `JwksController` / `JwkSetRepresentation` / `toJwksPublicKey()` 相关的类、路由、测试一律删除——不保留"注释掉"或"`@ConditionalOnProperty`"这类"预留空位"形态。历史上"注释保留"只会让代码库里出现不活跃的分支，新同学以为它还能被重新启用、反复试图复活却不知道需要补的协议细节，反而比直接删掉更危险。
+
+作为**防止意外复活**的兜底，`scripts/check-contracts.py` 运行一条 grep 断言：对上述符号名在 `services/auth-service/src/**` 做正则扫描，任一命中即 CI fail，错误提示指向本节。该断言**不是 bug**——它是"下线决策的长期执行器"，与本节 §1.2 的架构前提（业务服务不接触 JWT）成对存在。
+
+**断言的 sunset 条件（何时可以删除该 grep 断言）**：
+
+当 Pixels Rover 真的出现"对接外部 IdP / 第三方 SSO"的需求、并完整走完下节"复活清单"后，`check-contracts.py` 中对应断言一并在**同一次 PR**里删除（不留注释式保留）；断言的"使命已完成"等价于 JWKS 端点已被正式引入为 §6.B 的活跃形态。PR review 必须在同一次改动中看到：新端点实现 + 本文档 §6.B "当前状态" 更新为"已启用" + `check-contracts.py` 断言删除——三者缺一视为中间态，退回。
+
+#### 复活清单（Resurrection Checklist，出现外部互认需求时使用）
+
+若未来系统需要引入 JWKS 端点，**不得**仅"把删掉的文件 git revert 回来"——架构前提、运维契约、轮换语义都需要一起复核。下列清单**必须逐条显式通过**，任一未通过即 PR 不予合并：
+
+1. **更新架构前提**：在本文件顶部"架构前提"块里追加复活记录（时间 / 驱动场景 / 新的对外消费方列表）；明确列出该 JWKS 端点**只服务于哪些外部系统**，同时重申"`gateway` / `assistant-service` 仍然不消费 JWKS"的系统内硬边界（§1.2）。
+2. **绑定密钥模型**：确认 §5 的多公钥并存机制（`auth-service` 内部枚举密钥目录）可以直接作为 JWKS 的数据源——`kid` / 算法 / 公钥材料的产出路径与 JWKS 序列化的输入路径一一对应；如果 §5 的形态在此之前发生变更，先补 §5，再动 §6.B。
+3. **界定缓存与 TTL**：JWKS 端点对**外**下发的 `Cache-Control` / ETag / `max-age` 策略需与外部互认方的 OIDC discovery 缓存周期可用；本节显式声明基线值（例如 `Cache-Control: public, max-age=3600`）并写入 `apisix.yaml` 对该路由的响应头下发规则。
+4. **路由规划**：该端点**必须**经过 gateway 暴露（不允许直连 auth-service 端口），且路由**匿名可访问**（OIDC discovery 协议要求）——在 `apisix.yaml` 显式为 `/.well-known/jwks.json` 加一条不挂 `gateway-auth` 插件的路由，避免被默认鉴权链污染；限流按客户端 IP 维度单独配置。
+5. **轮换语义联动**：§7 标准轮换步骤中"加入新公钥" / "下线旧公钥"两步需同步说明 JWKS 下发时序——新公钥**先**进 JWKS 被外部拉取到，**再**切 `jwt.active-kid`；旧公钥**先**等外部 discovery 最长 TTL 自然过期，**再**从 JWKS 移除（否则外部互认方会出现"拉到新 JWKS 但本地还缓存着旧公钥"的短窗口）。该联动写入 §7 本节而非运维 runbook——因为它是**设计级约束**，实现时写不对会直接破坏轮换正确性。
+6. **删除 grep 兜底**：同一次 PR 里删除 `scripts/check-contracts.py` 对 JWKS 符号名的禁止扫描（见上节"sunset 条件"）；**不得**保留"仅作为警告"的中间态。
+7. **OpenAPI 与前端镜像**：若 JWKS 端点对本项目 frontend **不消费**（默认情形），不需要更新 `frontend/src/shared/types/**`；若有本项目内的新消费方（例如未来自研 IdP 客户端），按 [`../development/backend.md §9`](../development/backend.md) / [`../development/frontend.md`](../development/frontend.md) 正常流程扩展。
+
+**反模式（不允许）**：
+
+- ❌ "先把 JWKS 端点开起来，将来再看谁用"——对外接口没有确定消费方时不开；防止"预留的对外端点"变成后续拆不掉的协议承诺。
+- ❌ "JWKS 端点同时喂给本项目的 gateway / assistant-service"——违反 §1.2 架构前提硬边界；系统内部只走 introspect。
+- ❌ "复活时先跳过几步验收"——本节 1–7 逐条显式通过是下次重新引入的硬准入门槛，不允许 PR review 阶段以"后面补"为由放行。
 
 ## 7. 密钥轮换流程
 

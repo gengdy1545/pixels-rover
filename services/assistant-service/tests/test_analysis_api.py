@@ -56,17 +56,19 @@ async def test_submit_analysis_returns_sse_stream(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_submit_analysis_without_auth(async_client: AsyncClient):
-    """POST /api/v1/analysis without auth should return 401."""
+    """POST /api/v1/analysis without gateway identity should surface GATEWAY_IDENTITY_MISSING."""
     resp = await async_client.post(
         "/api/v1/analysis",
         json={"question": "What is the total revenue?", "threadId": "missing-thread"},
     )
-    assert resp.status_code == 401
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"
 
 
 @pytest.mark.asyncio
 async def test_submit_analysis_missing_question(async_client: AsyncClient):
-    """POST /api/v1/analysis without question field should return 422."""
+    """RequestValidationError must surface as 400 + ANALYSIS_INVALID_ARGUMENT (§6.0)."""
     token = make_access_token()
     thread_id = await create_thread(async_client, token)
     resp = await async_client.post(
@@ -74,7 +76,10 @@ async def test_submit_analysis_missing_question(async_client: AsyncClient):
         json={"threadId": thread_id},
         headers=auth_header(token),
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["details"]["errorCode"] == "ANALYSIS_INVALID_ARGUMENT"
+    assert body["details"]["category"] == "USER_INPUT"
 
 
 @pytest.mark.asyncio
@@ -92,6 +97,8 @@ async def test_get_analysis_result_not_found(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_get_analysis_result_without_auth(async_client: AsyncClient):
-    """GET /api/v1/analysis/{session_id} without auth should return 401."""
+    """GET /api/v1/analysis/{session_id} without gateway identity must surface GATEWAY_IDENTITY_MISSING."""
     resp = await async_client.get("/api/v1/analysis/some-session")
-    assert resp.status_code == 401
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"

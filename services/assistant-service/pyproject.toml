@@ -9,6 +9,11 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "aiomysql>=0.2",
     "aiosqlite>=0.20",
+    # Alembic runs synchronously from entrypoint.sh (`alembic upgrade head`);
+    # env.py rewrites mysql+aiomysql URLs to mysql+pymysql for that path,
+    # so pymysql must be available at runtime. It is NOT used by the FastAPI
+    # app itself (which still speaks mysql+aiomysql via SQLAlchemy async).
+    "pymysql>=1.1",
     "alembic>=1.14",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

@@ -31,7 +31,7 @@
 
 1. **浏览器不直连**：`docker-compose.yml` 里只 `expose` 内部端口，**不 `ports`**；所有浏览器流量必须过 gateway。
 2. **独占数据域**：每个服务拥有自己的数据库/schema（`pixels_auth` 归 `auth-service`，`pixels_analysis` 归 `assistant-service`，未来新服务走 `pixels_<domain>`）。**禁止跨服务直接读对方的表**。
-3. **无横向调用（短期）**：服务之间短期不互相调用。如果出现必须互调的场景，单独评估（候选方案：走内部鉴权的 HTTP 接口；绝不走直连数据库）。
+3. **无横向调用**：业务服务之间**默认不互相调用**，这是长期约束而非短期过渡形态。具体边界（包括唯一允许的反向依赖与新增互调的准入流程）见 §2.2。
 4. **按领域注册路由前缀**：`/api/v1/<domain>*`，以领域命名而不是以实现细节命名（反例：`/api/v1/mysql-stuff/*`、`/api/v1/duckdb/*`）。
 5. **依赖关系单向**：服务只能依赖 `auth-service` 提供的身份（经过 gateway 注入的头），不得反向。
 
@@ -55,9 +55,45 @@ flowchart LR
 
 说明：
 
-- `auth-service` / `assistant-service` 的启动必须在 MySQL **schema 可用**之后（schema 由 `db/pixels_rover.sql` 通过 MySQL `initdb.d` 初始化，见 §12.1）；服务本身只探 `/health`（§7.1），不级联探 DB。
-- `gateway` 的 `/gateway/ready` 聚合上游 `/health`，因此业务链上"服务就绪"→"网关就绪"是顺序关系；具体聚合契约见 [`./gateway.md §4.1`](./gateway.md)。
+- `auth-service` / `assistant-service` 的启动分两步（B1+B2 后的 ready 链）：
+  1. MySQL **逻辑库可用**（`db/pixels_rover.sql` 通过 `initdb.d` 建好 `pixels_auth` / `pixels_analysis`，见 §12.1）；
+  2. 服务启动时自动跑 **migration `upgrade head`**（Alembic / Flyway，见 §12.2），失败即 `exit 1`；
+  3. Migration 成功后 HTTP 端口开始 listen，`/health`（§7.1，进程级）即可返 200；`/internal/ready`（§7.2，依赖级）在 DB 探针成功后返 200。
+- `gateway` 的 `/gateway/ready` 聚合上游 `/internal/ready`（**不是** `/health`，B1+B2 决定），因此业务链上"逻辑库可用 → migration 到 head → `/internal/ready` 绿 → gateway 聚合绿"是顺序关系；具体聚合契约见 [`./gateway.md §4.1`](./gateway.md)。
+- 容器层 `depends_on` 只用 `service_started` 表达"容器进程已启动"，**不用** `service_healthy`——因为 `/health` 只探进程，等它绿对"系统就绪"没有任何额外保证，用 `service_started` 语义更诚实（见 §7.4 硬规则）；系统级就绪由 `/gateway/ready` 在运行期轮询表达。
 - `frontend` 运行期依赖通过 gateway 统一入口反向代理，不直连后端服务。
+
+### 2.2 横向调用边界细则
+
+§2 的"无横向调用"是长期硬规则。本节给出精确边界、唯一允许的例外、以及新增互调的准入流程——避免"默认答案是 No"被口口相传后漂移成"特定场景下可以讨论"。
+
+**默认状态（硬规则）**：
+
+- ❌ 业务服务**不得**持有对方服务的 HTTP 客户端 / URL 常量 / SDK。
+- ❌ 业务服务**不得**通过 gateway 的对外 `/api/v1/*` 路由绕路调到对方（该路由只面向浏览器）。
+- ❌ 业务服务**不得**直连对方服务的数据库或内部端口。
+- ❌ 业务服务**不得**消费对方的内部事件总线 / 消息队列（当前阶段不存在此类总线；引入总线本身就是新的架构决策，不在本文档范围）。
+
+以上四条由 `scripts/check-contracts.py` 在 CI 阶段做**源码级 grep 断言**：扫描各服务源码中是否出现"对方服务 base URL / 对方服务名的 HTTP 构造"字样，任一命中即 CI fail。断言白名单仅包含下一条的"被特许反向依赖"。
+
+**唯一被特许的反向依赖：`auth-service → gateway` 的 `/gateway/internal/*`**。
+
+- 特许条目见 [`./gateway.md §5.3.0`](./gateway.md)；当前阶段只包含 `POST /gateway/internal/invalidate_session` 一个端点。
+- 特许的前提是"缓存一致性问题方向天然反转，不构成业务耦合向 gateway 泄露"；任何承载业务语义的反向调用**不在**本特许范围内。
+- 该反向调用的故障语义是**尽力而为**（fail-open）——失败不阻塞 logout 主流程，由 `positive_cache_ttl` 自然衰减兜底。
+
+**新增互调的准入流程**（如果未来确实出现必须互调的业务场景）：
+
+1. **先写 ADR**：在 `.notes/` 下新增决策文档，说明"为什么无法通过数据所有权重划 / 领域合并 / gateway 侧加路由三条现有路径解决"；
+2. **更新本节**：把特许条目追加到本节或 `gateway.md §5.3.0` 的特许清单，明确方向、被调端点、鉴权方式（`X-Internal-Auth` + 独立 secret，**不得**共用 `INTERNAL_INTROSPECTION_SECRET`）、故障语义；
+3. **更新 `scripts/check-contracts.py` 白名单**：把新特许路径显式加入白名单，**不得**通过"放宽 grep 表达式"的方式让断言变松；
+4. **更新 OpenAPI**：被调端点必须是内部路由（`/gateway/internal/*` 或等价前缀），在 gateway 侧声明为 internal route（见 [`./gateway.md §5.3.1`](./gateway.md)），**不得**暴露到 `/api/v1/*` 浏览器面。
+
+**反模式（不允许）**：
+
+- ❌ "我只是读一下对方的一个字段"——这句话是把服务边界打穿的最常见开头；应走 §4 资源授权 + 数据边界的方向解决。
+- ❌ "先 MVP 互调，后面再重构"——现在这轮就是重构窗口；先欠下的债在下一轮必然还不上。
+- ❌ "通过共享数据库表解决"——违反 §2 拓扑第 2 条独占数据域。
 
 ---
 
@@ -272,7 +308,7 @@ JWT.exp  ≤  gateway.positive_cache_ttl  ≤  auth_session.expires_at
 - **`code`（顶层）必须等于 HTTP 状态码**（`200` / `400` / `404` / `500` / ...）。禁止使用 `40100` / `40102` 这类 5 位"业务码"——业务细分是 `details.errorCode` 的职责，顶层 `code` 只表达协议语义。
 - **`message`**：面向终端用户或调用方的人类可读短语（成功场景可为 `"OK"` 或省略的简短字符串；失败场景应描述"出了什么问题"）。无论成功还是失败，**禁止**写入堆栈、SQL 文本、内部路径、内部类/函数名、真实主机名/IP、token 片段或任何可能在面向外网/前端日志里成为信息泄漏面的内容。面向开发者的调试信息一律写结构化日志并用 `requestId` 关联，不经由 `message` 带出。
 - **`requestId`**：见 §5；所有响应必填。
-- **`data` 与 `details` 互斥**：同一响应只会出现其中之一。`200 OK` 带 `data`，非 2xx 带 `details`（`details` 本身仍然可选，某些简单错误可以不带）。
+- **`data` 与 `details` 互斥**：同一响应只会出现其中之一。`200 OK` 带 `data`；**非 2xx 必须带 `details`，且 `details` 至少包含 `errorCode` 与 `category` 两个字段**（见 §6.3 + §6.0 `category` 表）。**唯一例外**：§6.5 所述"完全未知、无法归类的未捕获异常"兜底 handler 允许省略 `details`；此时必须伴随 `level=error` 的结构化日志条目以保证可排查性。`errorCode` / `category` 两者缺一不可——前端分流硬规则（§6.3.2）要求"先查 `errorCode` 精确命中、miss fallback 到 `category`"，少任一个都会让前端退化成通用 5xx 文案。
 - **不允许出现 `apiVersion` 字段**：API 版本由 URL 前缀 `/api/v1/` 唯一承载，body 里重复只会导致"URL 说 v1、body 说 v2"这类漂移事故。
 
 **`details.category` 粗分类枚举（跨服务统一，失败响应必填）**：
@@ -364,16 +400,22 @@ JWT.exp  ≤  gateway.positive_cache_ttl  ≤  auth_session.expires_at
 
 #### 6.3.1 基础设施前缀错误码注册表（`GATEWAY_*` / `INTERNAL_*`）
 
-下表是**接入面基础设施**类错误码的**唯一真源**。`gateway.md` / `frontend.md` / `docs/design/*` / `docs/runbooks/*` 若出现与本表冲突，以本表为准。业务领域前缀（`AUTH_*` / `ANALYSIS_*` / ...）由各服务在自己的 OpenAPI `details.errorCode` `enum` 中独立维护，不在此表。
+下表是**接入面基础设施**类错误码的**唯一真源的渲染视图**：**真源**是 [`../../gateway/error-codes.json`](../../gateway/error-codes.json)，本节的表格由 `scripts/generate-error-code-registry.py` 从该 JSON 渲染得到。`gateway.md` / `frontend.md` / `docs/design/*` / `docs/runbooks/*` 若出现与本表冲突，以本表为准；本表与 JSON 冲突则以 **JSON 为准**（本节是渲染视图，不是真源）。业务领域前缀（`AUTH_*` / `ANALYSIS_*` / ...）由各服务在自己的 OpenAPI `details.errorCode` `enum` 中独立维护，不在此表。
+
+**直接手改本节下方 `AUTO-GENERATED` 标记之间的表格是没有意义的**——下一次 `scripts/generate-error-code-registry.py` 执行（或 `scripts/check-contracts.py --check` 的 CI 钩子）会把改动盖回去。增删某条错误码请改 `gateway/error-codes.json`，再跑渲染脚本把本表同步回来。
+
+<!-- AUTO-GENERATED-ERROR-CODE-REGISTRY:BEGIN -->
 
 | `errorCode` | HTTP | `category` | 写入方 | 触发条件 | 文档锚点 |
 |---|---|---|---|---|---|
-| `GATEWAY_IDENTITY_MISSING` | `500` | `INTERNAL` | 业务服务（§3.3 前置 filter） | 受保护路由收到**缺失或非法**的 `X-Auth-User-Id`（绕过 gateway / gateway 路由漏配 `gateway-auth`） | §3.3 |
-| `GATEWAY_AUTH_REQUIRED` | `401` | `AUTH` | gateway `gateway-auth` 插件 | `introspect` 返回 `active=false` 或 access_token cookie 缺失/非法 | [`./gateway.md §5.1`](./gateway.md) |
-| `GATEWAY_CSRF_INVALID` | `403` | `AUTH` | gateway `gateway-auth` 插件 | 写方法缺失 `X-Xsrf-Token` 头或值与 `XSRF-TOKEN` cookie 不一致 | [`./gateway.md §5.1`](./gateway.md) |
-| `GATEWAY_INTROSPECT_UNAVAILABLE` | `503` | `UPSTREAM` | gateway `gateway-auth` 插件 | `introspect` 子请求超时、连接失败、或返回非 2xx | [`./gateway.md §5.1`](./gateway.md) |
-| `GATEWAY_NOT_READY` | `503` | `UPSTREAM` | gateway `gateway-ready` 插件 | `/gateway/ready` 聚合探测任一上游 `/health` 非 200 | [`./gateway.md §4.1`](./gateway.md) |
-| `INTERNAL_AUTH_FAILED` | `500` | `INTERNAL` | 业务服务（§8.6 `InternalAuthFilter`） | `/api/internal/*` 路径 `X-Internal-Auth` 头缺失或 secret 不匹配 | §8.6 |
+| `GATEWAY_AUTH_REQUIRED` | `401` | `AUTH` | gateway:gateway-auth | introspect returned active=false or the access_token cookie was missing / malformed on a route that requires authentication. | gateway.md §5.1 |
+| `GATEWAY_CSRF_INVALID` | `403` | `AUTH` | gateway:gateway-auth | Unsafe HTTP method missing X-Xsrf-Token header, or header value did not match the XSRF-TOKEN cookie (double-submit failure). | gateway.md §5.2 |
+| `GATEWAY_IDENTITY_MISSING` | `500` | `INTERNAL` | business-service | Protected route received a missing or malformed X-Auth-User-Id — gateway route mis-configured (gateway-auth not applied) or the request bypassed the gateway entirely. | backend.md §3.3 |
+| `INTERNAL_AUTH_FAILED` | `500` | `INTERNAL` | business-service:InternalAuthFilter | /api/internal/* path received a request whose X-Internal-Auth header was missing or did not match the shared secret. Deliberately 500 (not 401/403) because any occurrence signals gateway routing drift, not a user-facing auth failure. | backend.md §8.6 |
+| `GATEWAY_INTROSPECT_UNAVAILABLE` | `503` | `UPSTREAM` | gateway:gateway-auth | introspect subrequest timed out, connection failed, or returned a non-2xx / malformed envelope. Collapses every upstream contract-violation onto this single code. | gateway.md §5.1 |
+| `GATEWAY_NOT_READY` | `503` | `UPSTREAM` | gateway:gateway-ready | GET /gateway/ready aggregated at least one upstream whose /internal/ready probe returned non-200 or timed out. | gateway.md §4.1 |
+
+<!-- AUTO-GENERATED-ERROR-CODE-REGISTRY:END -->
 
 > 表中所有条目的 HTTP 状态码与 `code` 顶层字段严格相等（§6.0）；`message` 短语由写入方自选但不得泄漏内部细节（§6.4）；响应信封的 `requestId` 字段按 §5 契约必填。
 
@@ -395,7 +437,7 @@ export type ErrorCode =
 
 **硬规则**：
 
-- **基础设施前缀 `InfraErrorCode`（`GATEWAY_*` / `INTERNAL_*`）的真源是本节 §6.3.1 注册表**；任何增删必须先改该表再同步 `shared/types/infra.ts`。
+- **基础设施前缀 `InfraErrorCode`（`GATEWAY_*` / `INTERNAL_*`）的真源是 [`../../gateway/error-codes.json`](../../gateway/error-codes.json)**（§6.3.1 表格是该 JSON 的渲染视图）；任何增删必须先改 JSON、再跑 `scripts/generate-error-code-registry.py` 刷新 §6.3.1、同步 `shared/types/infra.ts`，并更新对应插件的 `KNOWN_ERROR_CODES` 表。四处同步由 `scripts/check-contracts.py` 机械兜底。
 - **业务领域前缀（`AUTH_*` / `ANALYSIS_*` / ...）的真源是对应服务的 OpenAPI `details.errorCode` enum**（见 §9）；各服务**独立**维护 `shared/types/<service>/ErrorCode.ts`，长期走 OpenAPI 代码生成。
 - **新增业务前缀时，PR 必须同时**：
   1. 在对应服务的 OpenAPI `details.errorCode` enum 补新枚举值；
@@ -437,7 +479,7 @@ export type ErrorCode =
 
 对 `Content-Type: text/event-stream` 的长连接响应，由于其帧式消费特性，不套用 §6.0 的 JSON 信封。但为避免"每个实现自行发明帧格式"导致前端重连、错误兜底、观测链路散乱，本节给出跨服务的最小硬契约。前端对应消费规则见 [`./frontend.md §4.6`](./frontend.md)。
 
-- **响应头**：`Content-Type: text/event-stream; charset=utf-8`，禁用缓冲（`Cache-Control: no-cache`，`X-Accel-Buffering: no`）；gateway 对 SSE 路由的 timeout 配置见 [`./gateway.md §6.1`](./gateway.md)。
+- **响应头**：`Content-Type: text/event-stream; charset=utf-8`，禁用缓冲（`Cache-Control: no-cache`，`X-Accel-Buffering: no`）；gateway 对 SSE 路由的 timeout 配置见 [`./gateway.md §6.3`](./gateway.md)。
 - **事件体 schema**：每种 `event:` 名下 `data:` 的 JSON schema 必须在服务 OpenAPI 中显式定义（以普通 JSON schema 形式挂在同一接口的响应对象上）。schema 缺失视为契约违反。
 - **事件流级错误**：服务端在**关闭流之前**必须先发送一个专用错误事件帧：
   ```
@@ -449,6 +491,11 @@ export type ErrorCode =
 - **`requestId` 贯穿**：整条 SSE 流共享入站 `X-Request-Id`，后端侧日志以该 id 贯穿；**不在每条 event `data` 里重复写 `requestId` 字段**（除上一条的 error 事件外）。避免客户端误以为每条事件是独立请求。
 - **心跳**：服务端**每 15 秒**发一条 SSE 注释帧 `: keep-alive\n\n`（冒号开头是 SSE 标准的注释语法，客户端忽略但可用于维持 TCP 活性与反向代理不断流）。这是跨服务的硬数值约定——前端按此数值计算 30s 断流阈值（见 [`./frontend.md §4.6`](./frontend.md)）。
 - **流结束语义**：正常结束由服务端明确以 `event: done` + `data: {}` 收尾后再 close；客户端据此区分"正常完成"与"异常中断"。
+- **连接期鉴权边界**（与 session 主动失效的交互）：SSE 流**仅在建立连接的那一次请求**经过 `gateway-auth` introspect 鉴权；一旦连接建立并进入流式响应阶段，**不再**对该连接重新鉴权，也**不会**被 [`./gateway.md §5.3`](./gateway.md) 的 `POST /gateway/internal/invalidate_session` 主动撤销。这是**有意的设计选择**：
+  - *为什么不主动撤销 in-flight SSE*：SSE 是长连接帧流，在 upstream 流式响应阶段去读 `lua_shared_dict` 做每帧鉴权会把热路径开销放大到无法接受；且"流式响应进行到一半强制切断"的兜底路径对前端同样是异常终止，与"让最长寿命自然收尾"相比并无可用性优势。
+  - *该空档的实际收口机制*：由 gateway 侧 Nginx 层对 SSE 路由设定**最大存活时长**（`read_timeout`，当前阶段取值见 [`./gateway.md §6.3`](./gateway.md)）；超过该时长连接被动断开。前端按 §4.6 的重连策略重新发起请求，新连接会走完整 introspect，此时已 invalidate 的 session 会被 gateway 拒绝——用户"被登出"的可感知窗口上界即该最大存活时长。
+  - *业务侧的对应职责*：SSE handler **不得**在流程内缓存"当前用户身份"做后续跨 session 的写入；所有身份引用一律在**连接建立那一次**从 `X-Auth-*` 头读取并固化在本次请求的闭包中。禁止出现"流开到一半去数据库按 userId 反查其他 session 状态"这类访问模式——这会把"连接期身份"扩散成"后续任意时刻的身份"，越过本节边界。
+  - *不承诺的事*：不承诺 SSE 连接在用户 logout 后立刻断开；不承诺流式响应中间帧的 errorCode 能携带"session 已失效"语义（流式通道无鉴权上下文），只承诺下一次新请求会被拒。
 
 ### 6.7 降级模式契约（后端视角）
 
@@ -470,7 +517,7 @@ export type ErrorCode =
 
 **降级的"可用性边界"划分规则**：
 
-- **独立的下游依赖不传染**：conversation 历史浏览只依赖 `pixels_analysis.conversations_*` 表（见 §12.4），不依赖 LLM API；当 LLM 挂时，conversation 读路径**必须**继续可用。服务内部实现若共享了同一个 failure-mode（例如 worker pool 阻塞传染），属于实现缺陷而非契约放宽。
+- **独立的下游依赖不传染**：conversation 历史浏览只依赖 `pixels_analysis.conversations_*` 表（见 §12.5），不依赖 LLM API；当 LLM 挂时，conversation 读路径**必须**继续可用。服务内部实现若共享了同一个 failure-mode（例如 worker pool 阻塞传染），属于实现缺陷而非契约放宽。
 - **粒度就低不就高**：不能因为"某个 backend 数据源不可用"就让整个 `/api/v1/analysis*` 域全部 5xx；只影响命中该 backend 的具体请求。
 - **不承诺"写失败后读仍可见"**：数据库瞬时不可用期间，前序写入是否持久化取决于事务边界，不在降级契约内——任何"写 503 但前端仍显示已创建"的形态都是实现缺陷。
 
@@ -483,54 +530,95 @@ export type ErrorCode =
 
 ---
 
-## 7. 健康检查契约
+## 7. 健康检查契约（三层分工）
 
-### 7.1 `/health` —— 服务自身健康
+本项目用**三条分工明确**的路由承载"健康 / 就绪 / 系统级就绪"三个不同语义，**禁止**把它们混成一条。这个分层是 B1+B2 决策的产物；任何让三者语义趋同的提案（例如"`/health` 里加一个 DB 探测"、"`/internal/ready` 暴露到外部"）都属于硬规则违反。
 
-- 必须暴露。
-- **只判断"自己能响应请求"**：返回 200 + JSON，例如 `{"status":"ok"}`。
-- **禁止**在 `/health` 内级联探测数据库、缓存、LLM、其他服务。
-- **用途**：Docker healthcheck、K8s livenessProbe、compose `depends_on: condition: service_healthy`。
+| 路由 | 作用域 | 判断什么 | 消费方 | 典型失败时是否重启容器 |
+|---|---|---|---|---|
+| 服务自己的 `/health`（§7.1） | **本进程** | 进程能响应 HTTP | Docker `HEALTHCHECK` / K8s `livenessProbe` / compose `service_healthy` | ✅ 是（进程卡死 → 重启可修） |
+| 服务自己的 `/internal/ready`（§7.2） | **本服务 + 直接依赖** | DB 可达、migration 已到 head、必要外部依赖就绪 | **只被** gateway 的 `gateway-ready` 插件消费；外部不可达 | ❌ 否（DB 抖动重启服务不解决问题） |
+| gateway `/gateway/ready`（§7.3） | **全系统聚合** | 聚合所有已注册服务的 `/internal/ready` | 负载均衡摘流 / K8s `readinessProbe` / `scripts/smoke.sh` | ❌ 否 |
 
-**关于"进程存活但 DB 失联"的设计空档（明确选择，非疏漏）**：
+三层之间的**唯一合法链路**：`服务的 /internal/ready → gateway 的 internal location /__ready_probe/<service> → gateway-ready 插件聚合 → /gateway/ready 对外返 200/503`。任何跳过中间层的设计（例如 `/gateway/ready` 直接探 `/health` 而不是 `/internal/ready`）都会让"就绪度"退化到进程级，失去 B1+B2 引入三层的意义。
 
-- "服务启动后 MySQL 临时失联（网络抖动 / 连接池全失活但进程未崩）"这种情形下，`/health` 仍返 200，`/gateway/ready` 聚合也绿——但业务请求会 500。这是**有意留下的空档**。
-- **为什么不让 `/health` 探 DB**：DB 抖动期间级联探活会触发 Docker / K8s 把健康容器判为不健康并重启；而进程本身没问题，重启只会把"局部 DB 抖动"放大成"全服务滚动重启"的事故。经验教训是：healthcheck 的语义必须是"重启能修好吗？"——DB 失联不是重启能修好的事，所以不塞进 `/health`。
-- **该空档由什么覆盖**：业务指标（§10.2 由各服务决定）在 Prometheus 侧用 DB 连接池活跃数 / 查询失败率 / 5xx 率等信号告警；不通过 `/health` / `/gateway/ready` 暴露。
-- **反例（不要做）**：任何"在 `/health` 里 ping 一下 DB 就行了"的提案都是方向性错误——违反本节硬规则，且会把"重启判据"和"业务可用性"两件不同的事混在一起。正确路径是在服务内部独立暴露业务可用性指标，由监控系统而非 healthcheck 负责告警。
+### 7.1 `/health` —— 进程存活
 
-### 7.2 `/ready` —— 当前阶段**不由业务服务承担**
+- **必须暴露**。路由：`GET /health`。
+- **只判断"本进程能响应请求"**：返回 200 + JSON，例如 `{"status":"UP", "service": "<name>", "version": "<ver>"}`。
+- **禁止**在 `/health` 内级联探测数据库、缓存、LLM、其他服务。违反即"重启判据"与"业务可用性"混合，放大故障。
+- **用途**：Docker healthcheck、K8s livenessProbe、compose `depends_on: condition: service_healthy`（针对容器内部），仓库内部**尽量**改用 `condition: service_started`（见 §7.3 与 `docker-compose.yml`）。
+- **失败语义**：`/health` 失败 = 进程本身出问题（routing 栈坏掉、OOM 边缘等），唯一正确处置是重启容器。
 
-**当前阶段**，系统级就绪度（Readiness）由 gateway 的 `/gateway/ready` 统一聚合各服务的 `/health` 得出，**新服务不要自行实现 `/ready`**。接入 Checklist（§12）里也不包含这一项。
+**为什么 `/health` 不探 DB 的简明论据**（这条硬规则是 §7 全部分层的基石）：
 
-- gateway 侧实现与聚合契约：[`./gateway.md §4.1`](./gateway.md)
-- 业务服务只需保证 §7.1 的 `/health` 自探合规即可。
-- **为什么不让服务自己实现 `/ready`**：服务自探的 readiness 在跨服务拓扑上没有上游视角，聚合和故障隔离都需要重新在 gateway 侧再做一遍；与其两层都实现，不如**只在 gateway 侧实现**，服务 `/health` 保持"自己活着"的单一语义。
+- DB 抖动时级联探活会让 Docker / K8s 把进程健康的容器判为不健康并重启；重启解决不了"网络上 MySQL 不可达"，反而把局部故障放大成服务全面重启。
+- 健康检查语义必须是"**重启能修好吗？**"——DB 失联不是重启能修好的事，所以不塞 `/health`；DB 级就绪在 `/internal/ready`（§7.2），业务可用性信号在 Prometheus 指标（§10.2）。
+- 任何 "`/health` 里 ping 一下 DB" 的提案方向性错误，PR 直接拒绝。
 
-> 唯一例外是某个服务本身有**对外可服务**语义且不希望把该语义暴露给 gateway（例如需要对内部调用方返回细粒度 degrade 状态，而不想影响 gateway 的布尔 readiness）。出现此类需求时在本节加例外说明，不走"每个服务都自行 `/ready`"的默认路径。
+### 7.2 `/internal/ready` —— 本服务 + 直接依赖就绪
 
-### 7.3 失败响应
+**每个业务服务必须暴露**（B1+B2 引入）。路由：`GET /internal/ready`。
 
-- `/health` 失败返回 **503**，响应体沿用 §6.2 的错误 schema。
+**路由暴露硬边界**：
+
+- **只经 gateway 的 internal location 访问**：gateway 在 `config.yaml.template` 的 `nginx_config.http_server_configuration_snippet` 里声明 `location = /__ready_probe/<service> { internal; proxy_pass http://<service>:<port>/internal/ready; }`；外部请求**必拒**（nginx `internal;` 指令天然拒绝非子请求访问）。
+- **服务侧不为此路由挂鉴权**（route 自身无 `gateway-auth` 身份注入链路需要消费）；路由的保护边界**完全由 gateway internal 语义承担**——若未来切到非 APISIX 的接入面，需要在本节补等价的"保护措施"描述，**不得**让服务侧用 `X-Internal-Auth` 等 secret 接管。
+- **在服务容器外不可达**：`/internal/*` 前缀**禁止**出现在 gateway 的任何对外 `routes[]` 中；`check-contracts.py` 对此做 grep 断言。
+
+**行为语义**：
+
+- **探 DB 连通性**：对服务自己的 MySQL schema 跑 `SELECT 1`（或等价轻量探针）；**不得**做业务查询（例如 `SELECT COUNT(*) FROM user`），其只会把"就绪度"与"数据状态"耦合。
+- **探 migration 状态**：确认本服务的应用表 migration 已跑到 head（Alembic / Flyway，见 §12）；若检测到 pending migration 即返 503——避免"容器起来了但表结构不对"这类半就绪状态被误判为 ready。
+- **探必要外部依赖**：只探"没有它就无法向用户提供主要功能"的上游；LLM / 第三方 API 这类**可降级**的依赖**不探**（它们的故障走 §6.7 的 `UPSTREAM` 降级契约，而非整体 503）。
+- **不做分级健康**：返回 200 或 503 的布尔决定；若上游"慢但可用"，由 gateway / 监控侧的延迟指标告警，**不在**此路由表达 degraded 中间态。
+
+**响应体形态**（遵循 §6.0 信封）：
+
+- 200 成功：`{"code":200,"message":"ready","requestId":"...","data":{"status":"UP","service":"<name>","version":"<ver>","checks":{"database":{"status":"UP"},"migrations":{"status":"UP","head":"<revision>"}}}}`
+- 503 失败：`{"code":503,"message":"<reason>","requestId":"...","details":{"errorCode":"SERVICE_NOT_READY","category":"UPSTREAM","checks":{"database":{"status":"DOWN","error":"..."}}}}`
+- `details.errorCode = "SERVICE_NOT_READY"` 是本路由**唯一**对外错误码；具体哪类依赖挂了由 `details.checks[key].status` 区分，不为每种依赖另起错误码名——那会让前端 / gateway 聚合端都需要枚举服务的内部依赖列表，违反"契约抽象层"的单向边界。
+
+**性能与并发约束**：
+
+- 被 gateway 的 `ngx.location.capture_multi` 并行调用，单次响应耗时应 ≤ `probes[i].timeout_ms`（当前取值 1000ms，见 [`./gateway.md §4.1`](./gateway.md)）。
+- 探针内部实现**必须**用独立的轻量连接池（或复用现有池但加 connection-leak 保护），**不得**与业务请求共用同一连接槽——就绪探针阻塞业务连接池是经典反模式。
+
+### 7.3 `/gateway/ready` —— 系统级就绪聚合
+
+由 gateway 承担，业务服务**不**实现同名路由。
+
+- gateway 侧实现 + 聚合契约：[`./gateway.md §4.1`](./gateway.md)。
+- **probes 指向**：`/internal/ready`（B1+B2 决定；**不**再指 `/health`）。这让"系统级就绪"具备"DB 可达 / migration 就绪"等深层语义，而不仅是"进程存活"。
+- **聚合语义**：任一服务 `/internal/ready` 非 200 → gateway `/gateway/ready` 返 503 + `details.errorCode="GATEWAY_NOT_READY"`。
+- **消费方硬规则**：
+  - ✅ 负载均衡 / K8s `readinessProbe` / `scripts/smoke.sh` 轮询。
+  - ✅ CI / 冒烟脚本判断"系统是否已就绪可接流量"。
+  - ❌ **禁止**作为 Docker `HEALTHCHECK` / K8s `livenessProbe`（那是 `/gateway/live` / `/health` 的事；readiness 失败不应该触发重启）。
+  - ❌ **禁止**业务代码调用此路由。
 
 ### 7.4 健康与就绪判据矩阵
 
-不同探针对应不同运行时契约，混用是历史上最常见的"本地能跑、生产起不来"源头。下表固化判据对应关系：
+下表固化"什么消费方用什么路由"的对应关系，是 §7.1/§7.2/§7.3 规则的操作投影：
 
 | 判据 | 对应路由 | 判断什么 | 写入方 / 典型消费方 |
 |---|---|---|---|
-| **容器存活** | 服务自己的 `/health`（§7.1） | 进程能响应 HTTP；**不**级联探 DB / LLM | Docker `HEALTHCHECK` / K8s `livenessProbe` |
-| **compose 依赖等待** | 服务自己的 `/health`（§7.1） | 同上；用于 `depends_on: condition: service_healthy` | `docker-compose.yml` |
-| **K8s readiness** | 服务自己的 `/health`（§7.1） | 同上；**不**由业务服务自行实现 `/ready`（§7.2） | K8s `readinessProbe` |
-| **系统级就绪（聚合）** | gateway `/gateway/ready`（[`./gateway.md §4.1`](./gateway.md)） | 聚合各上游 `/health`，任一 503 → 整体 `GATEWAY_NOT_READY` | `scripts/smoke.sh` / 外部健康监控 |
-| **冷启动 schema 存在** | `scripts/smoke.sh` 直连 MySQL 的 `SHOW DATABASES LIKE ...`（§12.3） | 一次性校验 `pixels_auth` / `pixels_analysis` 已被 `initdb.d` 建好 | 仓库冷启动脚本 |
-| **活性（liveness）与就绪（readiness）语义区分** | gateway `/gateway/live`（[`./gateway.md §4.2`](./gateway.md)） | 仅 gateway 自身能响应，不聚合上游 | Docker / K8s liveness |
+| **容器存活（liveness）** | 服务自己的 `/health`（§7.1） | 进程能响应 HTTP；**不**级联探 DB / LLM | Docker `HEALTHCHECK` / K8s `livenessProbe` |
+| **compose 内部依赖等待** | 服务自己的 `/health`（§7.1） | 同上；`docker-compose.yml` 仅用 `depends_on: condition: service_started`（不等 service_healthy） | `docker-compose.yml`（硬规则：不使用 `service_healthy` 做上游等待，见 [`./gateway.md §4.1`](./gateway.md) 单实例部署假设） |
+| **K8s liveness** | 服务自己的 `/health`（§7.1） | 同上 | K8s `livenessProbe` |
+| **K8s readiness** | 服务自己的 `/internal/ready`（§7.2）或 gateway `/gateway/ready`（§7.3） | 服务依赖（DB / migration）就绪；**不**由业务服务自行实现 `/ready` | K8s `readinessProbe` |
+| **本服务 + 直接依赖就绪** | 服务自己的 `/internal/ready`（§7.2） | DB 可达、migration at head、关键外部依赖就绪 | **仅** gateway `gateway-ready` 插件经 internal location 消费 |
+| **系统级就绪（聚合）** | gateway `/gateway/ready`（[`./gateway.md §4.1`](./gateway.md)） | 聚合各上游 `/internal/ready`，任一 503 → 整体 `GATEWAY_NOT_READY` | `scripts/smoke.sh` / 外部健康监控 / 负载均衡摘流 |
+| **冷启动 schema 存在** | `scripts/smoke.sh` 直连 MySQL 的 `SHOW DATABASES LIKE ...`（§12.3） | 一次性校验 `pixels_auth` / `pixels_analysis` 已被 `initdb.d` 建好（兜底；主防线是 migration 启动失败 → 进程 exit 1） | 仓库冷启动脚本 |
+| **Gateway 活性（liveness）** | gateway `/gateway/live`（[`./gateway.md §4.2`](./gateway.md)） | 仅 gateway 自身能响应，不聚合上游 | Docker / K8s liveness |
 
 **硬规则**（禁止违反）：
 
-- ❌ 业务服务**不**在 `/health` 里级联探 DB / LLM（与 §7.1 一致）。
-- ❌ 业务服务**不**自行实现 `/ready`（§7.2）；系统级 readiness 只在 gateway 一层。
-- ❌ 冷启动 schema 缺失的判定**不**塞进任何 `/health` 或 `/gateway/ready`（§12.3），**只**走 `smoke.sh` 一次性直连 MySQL 断言。三件事混成一件会让故障定位成本指数级上升。
+- ❌ 业务服务**不**在 `/health` 里级联探 DB / LLM / 任何外部依赖（§7.1）——破坏"重启可修"语义。
+- ❌ 业务服务的 `/internal/ready` **不**对外暴露（§7.2）——gateway 的 `/__ready_probe/<service>` 是**唯一**合法访问路径。
+- ❌ gateway `gateway-ready` 插件的 `probes[]` **不**指 `/health`（B1+B2 之后一律指 `/internal/ready`）——否则聚合会掉落到"进程级"语义，`/gateway/ready` 绿灯不再代表系统可服务。
+- ❌ `docker-compose.yml` 的 gateway `depends_on` **不**用 `condition: service_healthy`（§7.1 里 `/health` 本来就不反映就绪，等它绿只是等进程起来，用 `service_started` 更诚实且语义更清晰）；真正的上游就绪由 `gateway-ready` 插件运行时聚合。
+- ❌ 冷启动 schema 缺失的判定**不**塞进任何 `/health` / `/internal/ready` / `/gateway/ready`——由 migration 启动失败（§12）作为主防线；`scripts/smoke.sh` 直连 MySQL 做二次校验（§12.3）。三件事混成一件会让故障定位成本指数级上升。
 
 ---
 
@@ -656,6 +744,11 @@ export type ErrorCode =
 | `elapsedMs` | 处理耗时 |
 | `service` | 服务名（`auth-service` / `assistant-service` / ...） |
 
+**关于观测采集管道的长期契约**：
+
+- 上表字段**名称与语义**是**跨观测管道**的长期契约，不随未来是否引入 Loki / OpenTelemetry / ELK 等采集链而变化。任何观测基础设施的接入方案**必须**原样保留这些字段；新增字段是前向兼容的扩展，**改名 / 语义漂移**视为破坏性变更，需专项 PR 并同步更新本节、gateway `access.log` 字段（见 [`./gateway.md §8.2`](./gateway.md)）以及前端 `X-Request-Id` 回显契约（见 [`./frontend.md §4.6`](./frontend.md)）。
+- 当前阶段**不**落地独立的观测采集管道（见 [`../runbooks/observability-roadmap.md`](../runbooks/observability-roadmap.md)）；只做 stdout JSON 结构化日志，由 `docker logs` 或等价手段本地消费。这一选择被显式锁定，**不**在没有重新评估 roadmap 的前提下被单个业务 PR 顺手引入。
+
 ### 10.2 Prometheus 指标维度
 
 每个服务至少暴露以下计数/直方图：
@@ -682,44 +775,81 @@ export type ErrorCode =
 
 ---
 
-## 12. 数据库 schema 所有权与初始化
+## 12. 数据库 schema 所有权与初始化（两层真源）
 
-本节补齐 §2.2"每个服务独占自己的数据库/schema"的初始化与冷启动细节，避免"谁建 schema"这个空档在接入新服务时被反复踩坑。
+本节补齐 §2.2"每个服务独占自己的数据库/schema"的初始化与冷启动细节。**B1+B2 之后，schema 所有权被显式拆为两层**——一层是"逻辑库存在性"（由部署层承担），另一层是"应用表结构"（由服务层通过 migration 工具承担）。这个拆分是所有后续"谁在管表"问题的答案锚点；任何越层行为（服务代码里 `CREATE DATABASE`、初始化 SQL 里建表等）都是硬规则违反。
 
-### 12.1 schema 真源：`db/pixels_rover.sql` + MySQL `initdb.d`
+| 层 | 真源（SSOT） | 何时执行 | 何时不执行 |
+|---|---|---|---|
+| **逻辑库 + 用户授权** | `db/pixels_rover.sql` + MySQL `initdb.d` | MySQL 数据卷**首次**初始化 | 容器重启、`compose down` 后 `up`（卷未删）、升级——**都不跑** |
+| **应用表结构**（各服务自有的表） | 各服务自己的 migration 工具（Alembic / Flyway，§12.2） | 每次服务**启动时**跑 `upgrade head`；失败 → 进程 `exit 1` | 跑业务请求时**不**做懒加载 DDL |
 
-- 所有逻辑库（`pixels_auth` / `pixels_analysis` / 未来新服务的 `pixels_<domain>`）的 `CREATE SCHEMA IF NOT EXISTS` 语句**集中在** `db/pixels_rover.sql`。
-- 该文件通过 `docker-compose.yml` 挂载到 MySQL 容器的 `/docker-entrypoint-initdb.d/01-schema.sql`，在**数据卷首次初始化时**自动执行一次。
-- **重要约束**：`initdb.d` 脚本**只在数据卷首次创建时执行**。MySQL 容器后续重启、`docker compose down` 后再 `up`（数据卷未删）、已有生产实例升级——都**不会再跑**。
-- 对 `db/pixels_rover.sql` 的任何修改必须在 PR 描述里显式说明：
-  1. 该改动对已有实例是否兼容（首次初始化 vs 重放）；
-  2. 附对应的**幂等 migration SQL**（未来接专业迁移工具时的迁移路径）。
-- **约定位置**：schema 增量变更的幂等 migration SQL **统一放 `db/migrations/`** 目录下，文件名形如 `YYYYMMDD_HHMM_<slug>.sql`，每条语句必须自带 `IF NOT EXISTS` / `IF EXISTS` 守护，保证重复执行不产生副作用。**该目录当前尚未存在，首次有实际 migration 需求时按此约定创建**；不要在服务代码里自建"启动时执行一次"的 migration 分支。这一约定是为了未来接入 Flyway / Liquibase / 自研 runner 时**零迁移成本**——runner 只需扫描同一目录。
+### 12.1 逻辑库真源：`db/pixels_rover.sql` + MySQL `initdb.d`
 
-### 12.2 服务侧禁止 `CREATE DATABASE`；schema 缺失即 `FATAL`
-
-- 任一后端服务启动时**必须假设**其依赖的 schema 已存在；若不存在，**启动失败 `FATAL`**，不尝试自建、不走"首次请求懒加载创建"路径。
-- 禁止在服务代码里出现 `CREATE DATABASE` / `CREATE SCHEMA` 语句——schema 所有权属于 `db/pixels_rover.sql`（部署制品），不属于服务（业务制品）。
+- 所有逻辑库（`pixels_auth` / `pixels_analysis` / 未来新服务的 `pixels_<domain>`）的 `CREATE SCHEMA IF NOT EXISTS` 与用户 `GRANT` 语句**集中在** `db/pixels_rover.sql`。
+- 该文件通过 `docker-compose.yml` 挂载到 MySQL 容器的 `/docker-entrypoint-initdb.d/01-schema.sql`，在数据卷首次初始化时自动执行一次。
+- **本文件只写"逻辑库级 DDL + GRANT"，不写任何 `CREATE TABLE`**（硬规则，B1+B2 引入）。任何表结构 DDL 属于 §12.2 各服务自己的 migration 工具；在 `db/pixels_rover.sql` 里写 `CREATE TABLE` 即视为越层，PR 拒绝合并。
 - 理由：
-  - schema 创建权集中在部署层，不与服务版本耦合；
+  1. `initdb.d` 只在卷首次创建时执行一次，表结构变更没有增量语义；
+  2. 本文件是跨服务共享的部署制品，把任一服务的业务表混进来会让服务边界泄漏到部署层；
+  3. 表结构演进的可观测性与回滚能力**只有**在 migration 工具里才能体面地表达（版本号、checksum、应用顺序）。
+- **现有产物**：`pixels_auth.user` / `pixels_auth.auth_session` 等表历史上曾在本文件中定义，B1+B2 PR 将其迁入 `services/auth-service/src/main/resources/db/migration/V1__init_auth_schema.sql`（Flyway）；此后本文件不再持有任何表 DDL。
+
+### 12.2 应用表真源：每服务一套 migration 工具
+
+**每个业务服务**对自己的 schema **拥有**应用表结构，并**必须**通过一套 migration 工具（而非 ORM 的 `create_all` / `ddl-auto=update` 等自动建表机制）管理表的演进。
+
+**语言与工具对应**（B1+B2 锁定，不做选项放宽）：
+
+| 服务语言 | Migration 工具 | 版本目录 | 启动期动作 |
+|---|---|---|---|
+| Java / Spring Boot | **Flyway**（`flyway-core` + `flyway-mysql`） | `src/main/resources/db/migration/V<n>__<slug>.sql` | Spring Boot `FlywayAutoConfiguration` 自动在 `DataSource` 就绪后跑 `migrate`；任一 migration 失败 → `ApplicationContext` 启动失败 → 容器 `exit 1` |
+| Python / FastAPI | **Alembic** | `alembic/versions/<date>_<rev>_<slug>.py` | 容器 entrypoint 在 `uvicorn` 启动**之前**显式跑 `alembic upgrade head`；任一 migration 失败 → 进程 `exit 1` |
+
+**启动期硬规则**：
+
+- ✅ 启动期**必须**跑 `migrate` / `upgrade head`；`checksum` 不匹配、history 缺失、pending 状态都视为 FATAL。
+- ✅ Migration 动作与进程生命周期**串行**：业务 HTTP 端口**不**在 migration 完成之前开始接受请求。对于 Spring Boot，这由 Flyway 自动配置保证（Flyway 在 `DataSource` 之后、`JPA EntityManagerFactory` 之前执行）；对于 FastAPI，必须由 Dockerfile / entrypoint 按 `alembic upgrade head && exec uvicorn ...` 的顺序串联，**禁止**把 `alembic upgrade head` 放进 `lifespan` startup（否则 uvicorn 已 listen，接进来的请求会打在半就绪状态上）。
+- ❌ **禁止**业务代码用 `Base.metadata.create_all()` / `spring.jpa.hibernate.ddl-auto=update` / `Liquibase.update()` 等"启动时对比 ORM 模型同步表结构"的路径——这些路径在生产环境会产生**无法回滚**且**不可审计**的表结构漂移，B1+B2 引入的 Alembic / Flyway 决策就是为了取代它们。发现任何此类代码路径即视为 B1+B2 遗留污染。**唯一例外**：单元测试 / 集成测试里对 ephemeral 测试 DB（SQLite in-memory、每测试用例一次性的容器）用 `create_all()` / `drop_all()` 初始化测试前置状态是允许的——测试的生命周期与生产部署无任何重合，测试不承担"迁移路径可审计"的契约。
+- ❌ **禁止**在 PR 里"顺手"在 db/pixels_rover.sql 加一条 `CREATE TABLE`（§12.1 硬规则）；需要新表就写一条新 migration。
+
+**Migration 文件约束**：
+
+- Flyway：`V<n>__<slug>.sql`，`<n>` 单调递增、不跳号；每个文件是**不可变**产物（一旦合入 main 分支，内容不再修改，需要修正则追加新 migration）；文件内每条语句必须在同一事务内可回滚，若用了 DDL（MySQL 的 DDL 隐式提交）则必须 `IF NOT EXISTS` / `IF EXISTS` 守护。
+- Alembic：`upgrade()` 必须有对应的 `downgrade()`（即便项目短期内不执行回滚——是对"这个 migration 的变更边界清晰可描述"的强约束）；autogenerate 产物 **必须** 经人工审阅（autogenerate 对 index / constraint 变更的识别不完整，直接合入是经典事故源）。
+- 两种工具都**禁止**在 migration 文件里写**业务数据插入**（seed）——seed 走服务启动后的独立代码路径（例如 assistant-service 的 `seed.py`），不与 schema 演进混在同一条链路上。唯一例外是"migration 的内置语义要求写一条 bootstrap 行"（例如新增 NOT NULL 列时先写默认值），这种写入属于 schema 演进而非业务 seed。
+
+**回滚语义**：
+
+- 当前阶段**不做生产级自动回滚**——每条 migration 出故障时由 DBA 手工介入决定回滚 vs 修复前滚。
+- 开发环境可以 `alembic downgrade -1` / `flyway undo`（需要 Teams 版）方便迭代；但两种操作都**不作为生产流程**，PR 不得依赖"生产可以自动回滚"的假设。
+
+### 12.3 服务侧禁止 `CREATE DATABASE`；schema 缺失即 `FATAL`
+
+- 任一后端服务启动时**必须假设**其依赖的逻辑库（§12.1）已存在；若不存在，**启动失败 `FATAL`**，不尝试自建、不走"首次请求懒加载创建"路径。
+- 禁止在服务代码里出现 `CREATE DATABASE` / `CREATE SCHEMA` 语句——逻辑库所有权属于 `db/pixels_rover.sql`（部署制品），不属于服务（业务制品）。
+- 应用表则由 §12.2 的 migration 工具在"库存在"的前提下建立；**禁止** migration 文件里出现 `CREATE DATABASE` / `CREATE SCHEMA`（同样的层级边界约束）。
+- 理由：
+  - 逻辑库创建权集中在部署层，不与服务版本耦合；
   - 服务重启不会因 DBA 回收 `CREATE SCHEMA` 权限而悄悄以异常状态运行；
-  - 多服务共享同一 MySQL 实例时，schema 创建顺序不受服务启动顺序影响。
+  - 多服务共享同一 MySQL 实例时，逻辑库创建顺序不受服务启动顺序影响。
 
-### 12.3 冷启动一次性校验由 `scripts/smoke.sh` 负责
+### 12.4 冷启动一次性校验由 `scripts/smoke.sh` 负责（兜底，非主防线）
 
-- `/health`（§7.1）与 `/gateway/ready`（[`./gateway.md §4.1`](./gateway.md)）均**不级联**探 DB，因此它们也**不反映**"schema 是否已创建"这一冷启动维度。
-- 该维度的校验由仓库的 `scripts/smoke.sh` 在系统就绪判定**之前**承担：起 compose 后，直连 MySQL 跑 `SHOW DATABASES LIKE 'pixels_auth'` / `SHOW DATABASES LIKE 'pixels_analysis'`；任一缺失立即 fail。
-- 新服务接入时，在 `smoke.sh` 追加对其 schema 的 `SHOW DATABASES LIKE` 断言，并同步更新 §12.4 拓扑表。
-- **禁止**把 DB 连通性 / schema 存在性塞进 `/health` 作为"绕道方案"——这会触犯 §7.1 的硬规则，并把"冷启动一次性问题"和"持续就绪度"两件事混成一件。
+- B1+B2 之后，"schema 是否已创建 / migration 是否到 head"的**主防线**是各服务启动期的 migration 动作失败 → 容器 `exit 1`（§12.2）。
+- `scripts/smoke.sh` 的角色降级为**冷启动一次性兜底校验**：起 compose 后、系统就绪判定之前，直连 MySQL 跑 `SHOW DATABASES LIKE 'pixels_auth'` / `SHOW DATABASES LIKE 'pixels_analysis'` 验证逻辑库存在；任一缺失立即 fail。
+- 这一层兜底**不探表结构细节**——migration head 的检测属于服务内部维度，由 `/internal/ready`（§7.2）在运行期持续表达。
+- 新服务接入时，在 `smoke.sh` 追加对其逻辑库的 `SHOW DATABASES LIKE` 断言，并同步更新 §12.5 拓扑表。
+- **禁止**把 DB 连通性 / schema 存在性 / migration 状态塞进 `/health` 作为"绕道方案"——这会触犯 §7.1 的硬规则，并把"冷启动一次性问题"和"持续就绪度"两件事混成一件。
 
-### 12.4 服务与数据边界拓扑表
+### 12.5 服务与数据边界拓扑表
 
 新增服务时**必须**在下表追加一行。本表是"接入时双方应达成的共同理解"的显式清单，PR review 以本表为 diff 点。
 
-| 服务 | 数据库 schema | 对外领域前缀 | 身份来源 | 依赖 |
-|---|---|---|---|---|
-| `auth-service` | `pixels_auth` | `/api/v1/auth/*` | 用户面接口：`X-Auth-*`；internal 接口：`X-Internal-Auth` | MySQL（自有 schema） |
-| `assistant-service` | `pixels_analysis` | `/api/v1/analysis*`、`/api/v1/conversations*`、`/api/v1/semantic*`、`/api/v1/analysis/backends*` | `X-Auth-*` | MySQL（自有 schema）、LLM provider、用户配置的业务数据源 |
+| 服务 | 数据库 schema | Migration 工具 | 对外领域前缀 | 身份来源 | 依赖 |
+|---|---|---|---|---|---|
+| `auth-service` | `pixels_auth` | Flyway（`src/main/resources/db/migration/`） | `/api/v1/auth/*` | 用户面接口：`X-Auth-*`；internal 接口：`X-Internal-Auth` | MySQL（自有 schema） |
+| `assistant-service` | `pixels_analysis` | Alembic（`alembic/versions/`） | `/api/v1/analysis*`、`/api/v1/conversations*`、`/api/v1/semantic*`、`/api/v1/analysis/backends*` | `X-Auth-*` | MySQL（自有 schema）、LLM provider、用户配置的业务数据源 |
 
 **关于 `assistant-service` 的多领域合并现状（当前形态说明，非未来承诺）**：
 
@@ -755,6 +885,8 @@ export type ErrorCode =
 
 - 两套密钥材料变量**互斥存在**——`HS256` 部署中若发现 `JWT_PRIVATE_KEY_PATH` 被设置，视为配置遗留污染，启动 `FATAL`；`RS256` 部署中若发现 `JWT_SECRET` 被设置，同样 `FATAL`。交叉设置是"切换算法时没清干净"的典型漂移形态，必须在启动期捕获。
 - `JWT_PUBLIC_KEYS_PATH` / `all-public-keys.json` / `<kid>-public-keys.json` 等"向下游分发多公钥合并产物"**在 gateway-centric 架构下不再存在**（见 [`../design/jwt-rotation.md §1.2`](../design/jwt-rotation.md)）；若代码中仍存在读取该变量的分支或 compose 中仍挂载该文件，视为 JWKS 下线未完成的中间态。多公钥并存改为 auth-service 内部枚举密钥目录（如 `/jwt-keys/*-public.pem`）实现，**不**通过环境变量暴露合并产物路径。
+- **`auth-service` 单实例部署假设**：当前阶段 auth-service **只部署单实例**（包括 dev 与 prod 两套 profile 均如此）；密钥材料以 bind-mount 方式注入单一进程。任何"横向扩容到多实例"的提案**必须**先在 [`../design/jwt-rotation.md §6`](../design/jwt-rotation.md) 重新评估密钥分发方案——配置分发阶段 A 的隐含前提正是单实例；多实例需要重新选择阶段 A 的"配置管理平面同步公钥集合"或引入阶段 B 的 JWKS 拉取机制，不在"本期默认路径"内。该单实例假设亦与 [`./gateway.md §5.3.3`](./gateway.md) 的 gateway 单实例假设**成对存在**——两者任一放松都需要联动评估。
+- **生产密钥 provisioning**：RS256 密钥对的生成、交付、部署流程见 [`../runbooks/jwt-key-provisioning.md`](../runbooks/jwt-key-provisioning.md)（runbook）。dev 环境可继续使用 compose 内的 `jwt-keygen` 一次性初始化容器；prod 环境**禁止**依赖 `jwt-keygen` 产生密钥（密钥必须来自受控 provisioning 流程，不由 compose stack 自动生成）。
 
 **`assistant-service`** / 其他纯消费身份头的业务服务：
 
@@ -808,6 +940,9 @@ export type ErrorCode =
 | 日志级别（默认） | `DEBUG` / `INFO` | `INFO` / `WARN`（结构化日志必填字段见 §10.1 不因环境变化） | 各服务自行决定 | §10.1 |
 | APISIX 部署形态 | Standalone YAML（与生产一致） | Standalone YAML | 本项目两个环境都用 Standalone；未来不切 etcd 除非触发 [`./gateway.md §1.2`](./gateway.md) 信号 | [`./gateway.md §1.2`](./gateway.md) |
 | `/gateway/ready` probe `timeout_ms` | 1000ms（宽松） | 1000ms（与 dev 一致，不按 env 切换） | 硬写在 `apisix.yaml`，不走 env | [`./gateway.md §4.1`](./gateway.md) |
+| `/gateway/ready` probe URI | `/internal/ready`（B1+B2 后，**不是** `/health`） | 同左 | 硬写在 `apisix.yaml` 的 `gateway-ready` 插件 `probes[].uri` | §7.3 / [`./gateway.md §4.1`](./gateway.md) |
+| 应用表 migration 执行策略 | 服务启动期自动跑 `migrate` / `upgrade head`，失败 → `exit 1` | 同左（dev/prod 行为完全一致） | Spring Boot Flyway auto-config（Java）/ Dockerfile entrypoint `alembic upgrade head && exec uvicorn ...`（Python） | §12.2 |
+| compose `depends_on` 条件 | `condition: service_started`（不等 `service_healthy`） | 同左（生产编排如切 K8s 时由 `readinessProbe` 承担，不换回 `service_healthy`） | `docker-compose.yml` 硬写 | §7.4 / §2.1 |
 
 **使用方式**：
 
@@ -825,7 +960,9 @@ export type ErrorCode =
 
 - [ ] 选定领域前缀 `/api/v1/<domain>*`
 - [ ] 规划独占数据库 schema（`pixels_<domain>`）
-- [ ] 实现 `/health`（只探自己）
+- [ ] 实现 `/health`（**只探自己进程**，不级联探 DB / LLM / 任何外部依赖；§7.1）
+- [ ] 实现 `/internal/ready`（探本服务 DB 可达 + migration at head + 关键外部依赖；只被 gateway internal location 消费，外部不可达；§7.2）
+- [ ] 选定 migration 工具（Java → Flyway；Python → Alembic）并创建 `V1__init_<domain>_schema.sql` / `0001_initial.py`；启动期自动跑 `upgrade head`，失败 → `exit 1`（§12.2）
 - [ ] 从 `X-Auth-*` 头读身份，禁止自己做 AuthN
 - [ ] 统一错误响应 schema（见 §6.2）
 - [ ] 透传 `X-Request-Id`
@@ -838,18 +975,21 @@ export type ErrorCode =
 参见 [`./gateway.md §7`](./gateway.md)：
 - [ ] 在 `apisix.yaml` 声明 upstream
 - [ ] 声明 route 与 `gateway-auth` 插件
+- [ ] 在 `config.yaml.template` 的 `http_server_configuration_snippet` 追加 `/__ready_probe/<service>` internal location（`proxy_pass` 到 `http://<service>:<port>/internal/ready`）
+- [ ] 在 `apisix.yaml` 的 `gateway-ready` 插件 `probes[]` 追加一条，`timeout_ms` 与 internal location `proxy_*_timeout` 数值一致
 - [ ] 配置 `limit-count` / timeout
 - [ ] SSE / 长连接路由单独声明超时
 
 ### 14.3 基础设施
 
 - [ ] `docker-compose.yml` 只 `expose` 内部端口
-- [ ] 声明独立数据库 schema 的初始化脚本
+- [ ] 在 `db/pixels_rover.sql` 追加 `CREATE SCHEMA IF NOT EXISTS pixels_<domain>` 与 `GRANT`；**不**在此文件建表（§12.1 硬规则）
+- [ ] gateway 对新服务的 `depends_on` 使用 `condition: service_started`（不用 `service_healthy`，§7.4）
 - [ ] 不引入对 `auth-service` / `assistant-service` 数据库的直接依赖
 
 ### 14.4 文档
 
-- [ ] 在本文档 §12.4 的服务拓扑表补记新服务的拥有关系、数据边界、对外 API 面；在 [`./gateway.md §6.1`](./gateway.md) 路由前缀表补记新领域前缀
+- [ ] 在本文档 §12.5 的服务拓扑表补记新服务的拥有关系、数据边界、对外 API 面、migration 工具；在 [`./gateway.md §6.1`](./gateway.md) 路由前缀表补记新领域前缀
 - [ ] 不需要为内部实现写项目级文档——那是服务团队内部的事
 
 ---

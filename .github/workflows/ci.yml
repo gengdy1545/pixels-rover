@@ -95,3 +95,37 @@ jobs:
 
       - name: Run tests
         run: pytest -v --tb=short
+
+  # ---------------------------------------------------------------
+  # Cross-layer contract drift detector (todolist §15.2).
+  # Runs scripts/check-contracts.py, which mechanically enforces:
+  #   * gateway/error-codes.json is the single source of truth for
+  #     GATEWAY_* / INTERNAL_* error codes, and every consumer (Lua
+  #     plugins, frontend InfraErrorCode union, backend.md §6.3.1
+  #     rendered view) stays in sync;
+  #   * gateway/apisix.yaml route declarations carry the required
+  #     gateway-auth fields and respect priority / namespace rules;
+  #   * lua_shared_dict declarations meet the sizing and access
+  #     contract (gateway.md §5.3.2);
+  #   * gateway-ready probes[] and the internal locations in
+  #     config.yaml.template's http_server_configuration_snippet
+  #     stay in agreement (gateway.md §4.1).
+  # Any failure here blocks merge — the script exits non-zero on
+  # any drift and its stdout already identifies the offending file.
+  # ---------------------------------------------------------------
+  contracts:
+    name: Cross-layer contracts (check-contracts.py)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependency
+        run: pip install pyyaml
+
+      - name: Run contract drift detector
+        run: python3 scripts/check-contracts.py

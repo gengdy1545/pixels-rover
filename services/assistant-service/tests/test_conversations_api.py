@@ -81,4 +81,7 @@ async def test_analysis_requires_thread_id(async_client):
         json={"question": "What is the total revenue?"},
         headers=auth_header(token),
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["details"]["errorCode"] == "ANALYSIS_INVALID_ARGUMENT"
+    assert body["details"]["category"] == "USER_INPUT"

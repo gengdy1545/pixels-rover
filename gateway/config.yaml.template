@@ -1,35 +1,110 @@
+# APISIX boot configuration (Standalone YAML mode).
+#
+# Scope (see docs/development/gateway.md §1.2):
+#   * deployment.role = data_plane + config_provider = yaml. No etcd,
+#     no Admin API, no bootstrap.sh. All routes/upstreams/plugins live
+#     in gateway/apisix.yaml and are reloaded only on process restart.
+#   * entrypoint.sh renders this template to /usr/local/apisix/conf/config.yaml
+#     at container start via envsubst. Currently no ${VAR} placeholders
+#     are referenced here (secrets that used to live in the admin_key
+#     block are gone with the Admin API), but the render step stays in
+#     place so adding one is a one-line diff in entrypoint.sh.
+
 apisix:
   node_listen: 9080
   enable_ipv6: false
+  # Enable custom plugin directory so gateway-auth.lua / gateway-ready.lua
+  # are picked up at boot. APISIX loads from /usr/local/apisix/apisix/plugins
+  # by convention; custom plugins MUST be COPY'd there in the Dockerfile,
+  # NOT loaded via extra_lua_path tricks (which skip plugin-loader init).
+  extra_lua_path: "/usr/local/apisix/?.lua"
 
 deployment:
-  role: traditional
-  role_traditional:
-    config_provider: etcd
-  admin:
-    admin_listen:
-      ip: 0.0.0.0
-      port: 9180
-    allow_admin:
-      - 0.0.0.0/0
-    admin_key:
-      - name: admin
-        key: ${APISIX_ADMIN_API_KEY}
-        role: admin
-  etcd:
-    host:
-      - http://etcd:2379
-    prefix: /apisix
-    timeout: 30
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
 
 nginx_config:
   error_log: /dev/stderr
-  http_configuration_snippet: |
-    lua_shared_dict gateway_auth_cache 10m;
+  error_log_level: warn
 
+  # `http { ... }` block directives. Shared dicts MUST live here — the
+  # `server { ... }` context has no lua_shared_dict directive.
+  #
+  # Capacity rationale (docs/development/gateway.md §5.3.2):
+  #   * gateway_auth_cache   32m  — primary introspection cache
+  #                                  (tokenHash -> {active, userId, email,
+  #                                  sessionId, ...}). Sized for ~10k
+  #                                  concurrent active users × 4x safety
+  #                                  headroom.
+  #   * gateway_auth_session_index   16m — reverse index sess:<id> ->
+  #                                          tokenHash (single-value).
+  #   * gateway_auth_user_index      16m — reverse index user:<uid>:<hash>
+  #                                          -> "1" (key-per-token, no JSON
+  #                                          array value — RMW is banned
+  #                                          on shared_dict values).
+  #
+  # Reverse indices are declared here *now* (this PR) but not written to
+  # yet; gateway-auth.lua starts populating them only when the A1+A3
+  # follow-up lands POST /gateway/internal/invalidate_session and raises
+  # positive_cache_ttl to 30. Until that PR, all gateway-auth routes in
+  # apisix.yaml keep positive_cache_ttl <= 5 so the §5.3 bidirectional
+  # invariant holds (scripts/check-contracts.py enforces it).
+  #
+  # Sizing hard rules (enforced by scripts/check-contracts.py):
+  #   * every dict >= 8m;
+  #   * Lua code touching these dicts uses only get / set / delete /
+  #     get_keys — safe_set / safe_add / incr are forbidden because they
+  #     disable LRU eviction (nginx "no memory" errors instead).
+  http_configuration_snippet: |
+    lua_shared_dict gateway_auth_cache         32m;
+    lua_shared_dict gateway_auth_session_index 16m;
+    lua_shared_dict gateway_auth_user_index    16m;
+
+  # `server { ... }` block directives. Internal locations for
+  # /__ready_probe/<service> live here so that the gateway-ready
+  # plugin's ngx.location.capture_multi (see gateway.md §4.1) can
+  # resolve them as subrequests WITHIN the same server context.
+  #
+  # Hard rules (gateway.md §4.1):
+  #   * `internal;` makes these locations unreachable from outside
+  #     the gateway process; external requests to /__ready_probe/*
+  #     get 404.
+  #   * proxy_*_timeout values MUST match probes[i].timeout_ms in
+  #     apisix.yaml's gateway-ready plugin config. If you bump one,
+  #     bump the other; scripts/check-gateway-config.py will
+  #     mechanically enforce this in a later PR.
+  #   * proxy_pass targets MUST be /internal/ready (NOT /health).
+  #     /health is process-only liveness; aggregating /health would
+  #     make /gateway/ready green even while MySQL is unreachable.
+  http_server_configuration_snippet: |
+    location = /__ready_probe/auth {
+      internal;
+      proxy_connect_timeout 1s;
+      proxy_send_timeout    1s;
+      proxy_read_timeout    1s;
+      proxy_pass http://auth-service:8081/internal/ready;
+    }
+    location = /__ready_probe/assistant {
+      internal;
+      proxy_connect_timeout 1s;
+      proxy_send_timeout    1s;
+      proxy_read_timeout    1s;
+      proxy_pass http://assistant-service:8090/internal/ready;
+    }
+
+# Plugin allow-list. APISIX 3.x loads plugins lazily, but the
+# plugin must appear here for its schema to be registered. Order
+# influences phase-same priority ties; keep gateway-auth before
+# plugins that depend on request headers it sets (e.g. proxy-rewrite).
 plugins:
-  - proxy-rewrite
-  - cors
-  - request-id
-  - prometheus
+  # Custom plugins
   - gateway-auth
+  - gateway-ready
+  # Built-ins used by apisix.yaml
+  - cors
+  - proxy-rewrite
+  - request-id
+  - response-rewrite
+  - serverless-pre-function
+  - prometheus

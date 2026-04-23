@@ -116,6 +116,14 @@ public class SecurityConfig
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/health",
+                                // /internal/ready is consumed only by the gateway via an
+                                // nginx `internal;` location (gateway.md §4.1 / backend.md §7.2).
+                                // It carries no X-Auth-* headers because gateway-auth does not run
+                                // on internal locations; therefore it MUST bypass
+                                // IdentityHeaderValidationFilter rather than 500-ing on missing
+                                // identity. External exposure is prevented at the gateway layer,
+                                // not here.
+                                "/internal/ready",
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/captcha",

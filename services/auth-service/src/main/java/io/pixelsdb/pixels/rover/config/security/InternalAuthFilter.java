@@ -17,6 +17,7 @@ package io.pixelsdb.pixels.rover.config.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.pixelsdb.pixels.rover.config.common.ApiResponse;
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
 import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import jakarta.servlet.FilterChain;
@@ -87,10 +88,11 @@ public class InternalAuthFilter extends OncePerRequestFilter
     {
         response.setStatus(HttpStatus.ERROR);
         response.setContentType("application/json;charset=UTF-8");
-        ApiResponse<?> body = ApiResponse.errorWithCode(
+        ApiResponse<?> body = ApiResponse.error(
                 HttpStatus.ERROR,
                 "Internal authentication failed",
-                ErrorCodeName.INTERNAL_AUTH_FAILED);
+                ErrorCodeName.INTERNAL_AUTH_FAILED,
+                ErrorCategory.INTERNAL);
         response.getWriter().write(OBJECT_MAPPER.writeValueAsString(body));
     }
 }

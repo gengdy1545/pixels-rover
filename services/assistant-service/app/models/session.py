@@ -11,6 +11,16 @@ class AnalysisSession(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer)
     thread_id: Mapped[str] = mapped_column(String(36), index=True)
+    # Auth session id at the time this analysis was submitted (gateway
+    # header X-Auth-Session-Id; see backend.md §3.1 / §7.2 and todolist
+    # decision A1 / "A1 加固 2"). Recorded on create; currently NOT
+    # consumed by any business logic — it is a zero-cost prerequisite
+    # for a future "invalidate_session broadcasts active-stream close to
+    # assistant-service" path. Nullable because older rows from before
+    # this column was added will have NULL, and some callers (tests,
+    # internal tooling) legitimately hit this service without the
+    # gateway in the path.
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     question: Mapped[str] = mapped_column(Text)
     backend_id: Mapped[str] = mapped_column(String(128))
     schema_name: Mapped[str | None] = mapped_column(String(128), nullable=True)

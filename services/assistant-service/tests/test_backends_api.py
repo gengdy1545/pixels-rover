@@ -77,6 +77,9 @@ async def test_list_columns(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_list_backends_without_auth(async_client: AsyncClient):
-    """GET /api/v1/analysis/backends without auth should return 401."""
+    """GET /api/v1/analysis/backends without gateway identity must surface GATEWAY_IDENTITY_MISSING."""
     resp = await async_client.get("/api/v1/analysis/backends")
-    assert resp.status_code == 401
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"
+    assert body["details"]["category"] == "INTERNAL"

@@ -1,15 +1,18 @@
+"""Unit tests for :mod:`app.auth` identity extraction.
+
+Per ``backend.md §3.3`` + ``§6.3.1``, missing / malformed gateway identity
+headers must surface as ``500 + details.errorCode="GATEWAY_IDENTITY_MISSING"``
+(category ``INTERNAL``) — **not** 401/403 — because the gateway is the sole
+issuer of these headers and their absence indicates an access-plane fault.
+"""
+
 import unittest
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.auth import get_current_user
-from app.error_codes import (
-    AUTHENTICATION_REQUIRED,
-    AUTHENTICATION_REQUIRED_NAME,
-    INVALID_TOKEN,
-    INVALID_TOKEN_NAME,
-)
+from app.error_codes import GATEWAY_IDENTITY_MISSING, ErrorCategory
 
 
 def make_request(headers: dict[str, str]) -> Request:
@@ -24,13 +27,16 @@ def make_request(headers: dict[str, str]) -> Request:
 
 
 class AuthTestCase(unittest.TestCase):
+    def _assert_gateway_missing(self, exc: HTTPException) -> None:
+        self.assertEqual(exc.status_code, 500)
+        self.assertEqual(exc.detail["errorCode"], GATEWAY_IDENTITY_MISSING)
+        self.assertEqual(exc.detail["category"], ErrorCategory.INTERNAL.value)
+
     def test_requires_gateway_identity_headers(self):
         with self.assertRaises(HTTPException) as context:
             get_current_user(make_request({}))
 
-        self.assertEqual(context.exception.status_code, 401)
-        self.assertEqual(context.exception.detail["code"], AUTHENTICATION_REQUIRED)
-        self.assertEqual(context.exception.detail["errorCode"], AUTHENTICATION_REQUIRED_NAME)
+        self._assert_gateway_missing(context.exception)
 
     def test_accepts_valid_gateway_headers(self):
         current_user = get_current_user(
@@ -58,9 +64,7 @@ class AuthTestCase(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(context.exception.status_code, 401)
-        self.assertEqual(context.exception.detail["code"], INVALID_TOKEN)
-        self.assertEqual(context.exception.detail["errorCode"], INVALID_TOKEN_NAME)
+        self._assert_gateway_missing(context.exception)
 
     def test_rejects_blank_email(self):
         with self.assertRaises(HTTPException) as context:
@@ -73,9 +77,7 @@ class AuthTestCase(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(context.exception.status_code, 401)
-        self.assertEqual(context.exception.detail["code"], INVALID_TOKEN)
-        self.assertEqual(context.exception.detail["errorCode"], INVALID_TOKEN_NAME)
+        self._assert_gateway_missing(context.exception)
 
 
 if __name__ == "__main__":

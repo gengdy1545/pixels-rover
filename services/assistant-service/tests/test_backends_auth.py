@@ -1,11 +1,11 @@
 """
 Interface-level authentication tests for the Backends API (/api/v1/analysis/backends).
 
-Covers:
-- All endpoints require authentication (router-level dependency)
-- Invalid gateway identity headers are rejected
-- Valid tokens grant access to backend listing and metadata
-- Unified error response format
+Per ``backend.md §3.3`` + ``§6.3.1``, assistant-service never does token
+validation itself — identity arrives via the gateway-injected ``X-Auth-*``
+headers. Missing / malformed headers therefore produce
+``500 + details.errorCode="GATEWAY_IDENTITY_MISSING"`` (category ``INTERNAL``),
+not 401/403.
 """
 
 import pytest
@@ -20,6 +20,19 @@ from tests.conftest import (
 pytestmark = pytest.mark.asyncio
 
 
+GATEWAY_MISSING_STATUS = 500
+GATEWAY_MISSING_ERROR_CODE = "GATEWAY_IDENTITY_MISSING"
+GATEWAY_MISSING_CATEGORY = "INTERNAL"
+
+
+def _assert_gateway_identity_missing(resp) -> None:
+    assert resp.status_code == GATEWAY_MISSING_STATUS
+    body = resp.json()
+    assert body["code"] == GATEWAY_MISSING_STATUS
+    assert body["details"]["errorCode"] == GATEWAY_MISSING_ERROR_CODE
+    assert body["details"]["category"] == GATEWAY_MISSING_CATEGORY
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/analysis/backends — List backends
 # ---------------------------------------------------------------------------
@@ -28,51 +41,40 @@ pytestmark = pytest.mark.asyncio
 class TestListBackendsAuth:
     """Auth tests for GET /api/v1/analysis/backends."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get("/api/v1/analysis/backends")
-        assert resp.status_code == 401
-        body = resp.json()
-        assert body["code"] == 40100
-        assert body["errorCode"] == "AUTHENTICATION_REQUIRED"
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_invalid_token(self, async_client):
+    async def test_rejects_invalid_identity(self, async_client):
         resp = await async_client.get(
             "/api/v1/analysis/backends",
             headers=auth_header("invalid-jwt-token"),
         )
-        assert resp.status_code == 401
-        body = resp.json()
-        assert body["code"] == 40102
-        assert body["errorCode"] == "INVALID_TOKEN"
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_expired_token(self, async_client):
+    async def test_rejects_expired_identity(self, async_client):
         token = make_expired_token()
         resp = await async_client.get(
             "/api/v1/analysis/backends",
             headers=auth_header(token),
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_refresh_token(self, async_client):
+    async def test_rejects_refresh_shaped_identity(self, async_client):
         token = make_refresh_token()
         resp = await async_client.get(
             "/api/v1/analysis/backends",
             headers=auth_header(token),
         )
-        assert resp.status_code == 401
-        body = resp.json()
-        assert body["code"] == 40102
-        assert body["errorCode"] == "INVALID_TOKEN"
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_wrong_issuer(self, async_client):
+    async def test_rejects_wrong_issuer_identity(self, async_client):
         token = make_access_token(issuer="evil-issuer")
         resp = await async_client.get(
             "/api/v1/analysis/backends",
             headers=auth_header(token),
         )
-        assert resp.status_code == 401
-        body = resp.json()
-        assert body["code"] == 40102
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()
@@ -102,9 +104,9 @@ class TestListBackendsAuth:
 class TestListSchemasAuth:
     """Auth tests for GET /api/v1/analysis/backends/{backend_id}/schemas."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get("/api/v1/analysis/backends/mock-backend/schemas")
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()
@@ -127,9 +129,9 @@ class TestListSchemasAuth:
 class TestListTablesAuth:
     """Auth tests for GET /api/v1/analysis/backends/{backend_id}/schemas/{schema}/tables."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get("/api/v1/analysis/backends/mock-backend/schemas/test_schema/tables")
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()
@@ -152,11 +154,11 @@ class TestListTablesAuth:
 class TestListColumnsAuth:
     """Auth tests for columns endpoint."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get(
             "/api/v1/analysis/backends/mock-backend/schemas/test_schema/tables/test_table/columns"
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()

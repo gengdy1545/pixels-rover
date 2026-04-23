@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pixels-rover.local/gateway/error-codes.schema.json",
+  "title": "Gateway infrastructure-prefix error code registry",
+  "description": "Formal schema for gateway/error-codes.json. Validates the DSL that gateway/error-codes.json must conform to. The registry itself is the single source of truth for GATEWAY_* / INTERNAL_* codes and is consumed by scripts/generate-error-code-registry.py (renders backend.md §6.3.1), scripts/check-contracts.py (cross-layer drift assertions), and the gateway-auth / gateway-ready Lua plugins' init-time self-checks.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["codes"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "codes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^(GATEWAY|INTERNAL)_[A-Z][A-Z0-9_]*$",
+        "description": "Keys MUST be SCREAMING_SNAKE_CASE infra-prefix error codes. Business-domain codes (AUTH_*, ANALYSIS_*, ...) are explicitly disallowed here — they live in per-service OpenAPI details.errorCode enums (backend.md §6.3 namespace split)."
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["httpStatus", "category", "writtenBy", "trigger", "retryable", "docAnchor"],
+        "properties": {
+          "httpStatus": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599,
+            "description": "The HTTP status emitted when this code fires. MUST equal the top-level `code` in the §6.0 envelope (backend.md §6.0)."
+          },
+          "category": {
+            "type": "string",
+            "enum": ["USER_INPUT", "AUTH", "RATE_LIMIT", "UPSTREAM", "INTERNAL"],
+            "description": "The §6.3.2 second-tier dispatch category. Frontend falls back to this when errorCode is unknown."
+          },
+          "writtenBy": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Which component emits this code. Suggested formats: `gateway:<plugin-name>`, `business-service`, `business-service:<filter-name>`. Purely informational — not machine-checked."
+          },
+          "trigger": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable triggering condition, rendered into backend.md §6.3.1's `触发条件` column."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Whether a generic client-side retry has a chance of succeeding. Consumed by frontend `api_error` mapping and scripts/check-contracts.py cross-check with `category`."
+          },
+          "retryGuidance": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional machine-readable note on what a client SHOULD do before retrying. Only meaningful when `retryable` is true."
+          },
+          "docAnchor": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The authoritative documentation anchor (e.g. `gateway.md §5.1`). Rendered into the §6.3.1 `文档锚点` column verbatim."
+          }
+        },
+        "allOf": [
+          {
+            "description": "retryGuidance MUST only be present when retryable is true. A guidance string on a non-retryable code is a contract smell — the client shouldn't be told `retry once` for a code that can never succeed on retry.",
+            "if": { "properties": { "retryable": { "const": false } } },
+            "then": { "not": { "required": ["retryGuidance"] } }
+          }
+        ]
+      }
+    }
+  }
+}

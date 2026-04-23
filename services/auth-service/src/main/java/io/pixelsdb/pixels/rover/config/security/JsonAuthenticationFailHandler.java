@@ -17,7 +17,8 @@ package io.pixelsdb.pixels.rover.config.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.pixelsdb.pixels.rover.config.common.ApiResponse;
-import io.pixelsdb.pixels.rover.constant.ErrorCode;
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,7 +29,8 @@ import org.springframework.security.web.authentication.AuthenticationFailureHand
 import java.io.IOException;
 
 /**
- * Authentication failure handler that returns unified error response.
+ * Authentication failure handler that returns the unified {@link ApiResponse} envelope with
+ * {@code details.errorCode="AUTH_INVALID_CREDENTIALS"} + {@code details.category="AUTH"}.
  *
  * @author pixels
  */
@@ -39,7 +41,10 @@ public class JsonAuthenticationFailHandler implements AuthenticationFailureHandl
             HttpServletRequest request, HttpServletResponse response, AuthenticationException exception)
             throws IOException, ServletException
     {
-        ApiResponse<?> result = ApiResponse.error(ErrorCode.INVALID_CREDENTIALS, "Wrong username or password");
+        ApiResponse<?> result = ApiResponse.error(HttpStatus.UNAUTHORIZED,
+                "Wrong username or password",
+                ErrorCodeName.AUTH_INVALID_CREDENTIALS,
+                ErrorCategory.AUTH);
 
         response.setContentType("application/json;charset=UTF-8");
         response.setStatus(HttpStatus.UNAUTHORIZED);

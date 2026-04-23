@@ -47,7 +47,7 @@ warn_if_gateway_missing() {
         return 0
     fi
 
-    if ! curl -fsS "http://localhost:80/gateway/health" >/dev/null 2>&1; then
+    if ! curl -fsS "http://localhost:80/gateway/live" >/dev/null 2>&1; then
         log_warn "Gateway is not reachable at http://localhost:80."
         log_warn "Frontend /api requests will fail until APISIX is running."
         log_warn "Use 'docker compose up --build' for the full topology."

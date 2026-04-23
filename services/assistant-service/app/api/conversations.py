@@ -10,10 +10,11 @@ from app.auth import AuthenticatedUser, get_current_user
 from app.database import get_db
 from app.dependencies import get_backend_registry
 from app.error_codes import (
-    INVALID_ARGUMENT,
-    INVALID_ARGUMENT_NAME,
-    RESOURCE_NOT_FOUND,
-    RESOURCE_NOT_FOUND_NAME,
+    ANALYSIS_BACKEND_NOT_FOUND,
+    ANALYSIS_INVALID_ARGUMENT,
+    ANALYSIS_SCHEMA_UNAVAILABLE,
+    ANALYSIS_THREAD_NOT_FOUND,
+    ErrorCategory,
 )
 from app.models.conversation import ConversationThread
 from app.models.session import AnalysisSession, AnalysisStepRecord
@@ -41,8 +42,8 @@ async def _get_owned_thread(db: AsyncSession, thread_id: str, user_id: int) -> C
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "message": "Conversation thread not found",
-                "code": RESOURCE_NOT_FOUND,
-                "errorCode": RESOURCE_NOT_FOUND_NAME,
+                "errorCode": ANALYSIS_THREAD_NOT_FOUND,
+                "category": ErrorCategory.USER_INPUT.value,
             },
         )
     return thread
@@ -121,8 +122,8 @@ async def create_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "message": f"Backend '{request.backend_id}' not found",
-                "code": RESOURCE_NOT_FOUND,
-                "errorCode": RESOURCE_NOT_FOUND_NAME,
+                "errorCode": ANALYSIS_BACKEND_NOT_FOUND,
+                "category": ErrorCategory.USER_INPUT.value,
             },
         ) from exc
 
@@ -133,8 +134,8 @@ async def create_conversation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "message": f"Schema '{request.schema_name}' is not available on backend '{request.backend_id}'",
-                    "code": INVALID_ARGUMENT,
-                    "errorCode": INVALID_ARGUMENT_NAME,
+                    "errorCode": ANALYSIS_SCHEMA_UNAVAILABLE,
+                    "category": ErrorCategory.USER_INPUT.value,
                 },
             )
 
@@ -225,8 +226,8 @@ async def update_conversation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "message": "Title cannot be blank",
-                    "code": INVALID_ARGUMENT,
-                    "errorCode": INVALID_ARGUMENT_NAME,
+                    "errorCode": ANALYSIS_INVALID_ARGUMENT,
+                    "category": ErrorCategory.USER_INPUT.value,
                 },
             )
         thread.title = title
@@ -237,8 +238,8 @@ async def update_conversation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "message": "Status must be either 'active' or 'archived'",
-                    "code": INVALID_ARGUMENT,
-                    "errorCode": INVALID_ARGUMENT_NAME,
+                    "errorCode": ANALYSIS_INVALID_ARGUMENT,
+                    "category": ErrorCategory.USER_INPUT.value,
                 },
             )
         thread.status = request.status

@@ -61,7 +61,12 @@ class AnalysisService:
         backend_id: str,
         schema_name: str | None = None,
         model_profile: str | None = None,
+        auth_session_id: str | None = None,
     ) -> AsyncGenerator[dict, None]:
+        # auth_session_id comes from the gateway-injected X-Auth-Session-Id
+        # header (see app/auth.py and backend.md §3.1). Persisted on create
+        # only; no consumption yet — see session.py docstring for the A1
+        #加固 2 rationale.
         session_id = str(uuid.uuid4())
         ctx = RunContext(envelope)
 
@@ -69,6 +74,7 @@ class AnalysisService:
             id=session_id,
             user_id=user_id,
             thread_id=thread_id,
+            session_id=auth_session_id,
             question=question,
             backend_id=backend_id,
             schema_name=schema_name,

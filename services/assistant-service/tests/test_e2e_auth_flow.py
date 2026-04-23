@@ -37,7 +37,8 @@ class TestGatewayHeaderJourney:
                 resp = await async_client.get(path)
             else:
                 resp = await async_client.post(path, json={"question": "test", "threadId": "missing-thread"})
-            assert resp.status_code == 401
+            assert resp.status_code == 500, f"{method} {path} should emit GATEWAY_IDENTITY_MISSING"
+            assert resp.json()["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"
 
     async def test_authenticated_user_can_access_read_endpoints(self, async_client):
         headers = gateway_identity_headers(user_id=1, email="e2e-user@pixelsdb.io", session_id="sess-1")
@@ -78,20 +79,32 @@ class TestGatewayHeaderJourney:
 
 
 class TestRequestIdPropagation:
-    async def test_request_id_in_success_response(self, async_client):
+    """X-Request-Id contract (gateway.md §7.5 / §7.6 + backend.md §5):
+
+    - inbound header is consumed for logging / body-envelope propagation,
+    - gateway is the sole writer of the outbound header,
+    - business service MUST NOT write X-Request-Id to the response.
+
+    These tests assert only the service-side half: body carries requestId,
+    response header is absent. Header presence is covered by gateway-level
+    smoke (scripts/smoke.sh §7.6).
+    """
+
+    async def test_request_id_in_success_response_body(self, async_client):
         resp = await async_client.get(
             "/api/v1/analysis/backends",
             headers={**gateway_identity_headers(user_id=1, email="a@b.com"), "X-Request-Id": "e2e-req-001"},
         )
         assert resp.status_code == 200
-        assert resp.headers.get("X-Request-Id") == "e2e-req-001"
+        assert resp.headers.get("X-Request-Id") is None
         assert resp.json()["requestId"] == "e2e-req-001"
 
-    async def test_request_id_in_error_response(self, async_client):
+    async def test_request_id_in_error_response_body(self, async_client):
         resp = await async_client.get(
             "/api/v1/analysis/backends",
             headers={"X-Request-Id": "e2e-req-err-001"},
         )
-        assert resp.status_code == 401
-        assert resp.headers.get("X-Request-Id") == "e2e-req-err-001"
+        assert resp.status_code == 500
+        assert resp.headers.get("X-Request-Id") is None
         assert resp.json()["requestId"] == "e2e-req-err-001"
+        assert resp.json()["details"]["errorCode"] == "GATEWAY_IDENTITY_MISSING"

@@ -118,8 +118,10 @@ Then open:
 
 `db/pixels_rover.sql` initializes the final-state MySQL layout:
 
-- `pixels_auth`: `user`, `auth_session`
-- `pixels_analysis`: schema only, application tables are auto-created by `assistant-service` on startup
+- `pixels_auth`: logical database owned by `auth-service`; application tables managed by Flyway migrations under `services/auth-service/src/main/resources/db/migration/`
+- `pixels_analysis`: logical database owned by `assistant-service`; application tables managed by Alembic migrations under `services/assistant-service/alembic/versions/`
+
+`db/pixels_rover.sql` only creates the logical databases + grants; it runs once on MySQL volume init. Application-table schemas live with each service and are applied on service startup (Flyway in the Spring Boot lifecycle, Alembic via the assistant-service container entrypoint). See `docs/development/backend.md §12` for the full contract.
 
 ### Environment
 
@@ -130,7 +132,6 @@ LLM_MODEL=gpt-4o-mini
 LLM_API_KEY=sk-your-api-key-here
 MYSQL_ROOT_PASSWORD=rootpassword
 MYSQL_PASSWORD=password
-APISIX_ADMIN_API_KEY=change-me-admin-key
 INTERNAL_INTROSPECTION_SECRET=change-me
 ```
 

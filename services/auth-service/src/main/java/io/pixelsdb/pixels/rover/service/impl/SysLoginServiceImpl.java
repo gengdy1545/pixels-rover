@@ -16,8 +16,10 @@
 package io.pixelsdb.pixels.rover.service.impl;
 
 import com.google.code.kaptcha.Producer;
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+import io.pixelsdb.pixels.rover.config.common.ErrorCodeName;
 import io.pixelsdb.pixels.rover.config.security.PixelsUserDetails;
-import io.pixelsdb.pixels.rover.constant.ErrorCode;
+import io.pixelsdb.pixels.rover.constant.HttpStatus;
 import io.pixelsdb.pixels.rover.exception.ServiceException;
 import io.pixelsdb.pixels.rover.mapper.UserRepository;
 import io.pixelsdb.pixels.rover.model.User;
@@ -85,7 +87,9 @@ public class SysLoginServiceImpl implements SysLoginService
         Object principal = authentication.getPrincipal();
         if (!(principal instanceof PixelsUserDetails))
         {
-            throw new ServiceException("Authenticated principal is invalid", ErrorCode.INTERNAL_ERROR);
+            throw new ServiceException(HttpStatus.ERROR,
+                    "Authenticated principal is invalid",
+                    ErrorCodeName.AUTH_INVALID_PRINCIPAL, ErrorCategory.INTERNAL);
         }
         PixelsUserDetails userDetails = (PixelsUserDetails) principal;
         Long userId = userDetails.getId();
@@ -128,7 +132,9 @@ public class SysLoginServiceImpl implements SysLoginService
         }
         catch (Exception e)
         {
-            throw new ServiceException("Failed to generate captcha", ErrorCode.INTERNAL_ERROR);
+            throw new ServiceException(HttpStatus.ERROR,
+                    "Failed to generate captcha",
+                    ErrorCodeName.AUTH_CAPTCHA_GENERATION_FAILED, ErrorCategory.INTERNAL);
         }
     }
 
@@ -163,12 +169,16 @@ public class SysLoginServiceImpl implements SysLoginService
     {
         if (userId == null)
         {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ServiceException(HttpStatus.NOT_FOUND,
+                    "User not found",
+                    ErrorCodeName.AUTH_USER_NOT_FOUND, ErrorCategory.USER_INPUT);
         }
         User user = userRepository.findById(userId.longValue());
         if (user == null)
         {
-            throw new ServiceException("User not found", ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ServiceException(HttpStatus.NOT_FOUND,
+                    "User not found",
+                    ErrorCodeName.AUTH_USER_NOT_FOUND, ErrorCategory.USER_INPUT);
         }
     }
 
@@ -183,7 +193,9 @@ public class SysLoginServiceImpl implements SysLoginService
         String storedCaptcha = captchaStore.remove(captchaKey);
         if (storedCaptcha == null || !storedCaptcha.equals(captcha))
         {
-            throw new ServiceException("Verification code error", ErrorCode.INVALID_ARGUMENT);
+            throw new ServiceException(HttpStatus.BAD_REQUEST,
+                    "Verification code error",
+                    ErrorCodeName.AUTH_CAPTCHA_INVALID, ErrorCategory.USER_INPUT);
         }
     }
 }

@@ -1,11 +1,9 @@
 """
 Interface-level authentication tests for the Semantic API (/api/v1/semantic).
 
-Covers:
-- All endpoints require authentication (router-level dependency)
-- Invalid gateway identity headers are rejected
-- Valid tokens grant access to semantic CRUD operations
-- Unified error response format
+Per ``backend.md §3.3`` + ``§6.3.1``, missing / malformed gateway identity
+headers surface as ``500 + details.errorCode="GATEWAY_IDENTITY_MISSING"``
+(category ``INTERNAL``), not 401/403.
 """
 
 import pytest
@@ -20,6 +18,18 @@ from tests.conftest import (
 pytestmark = pytest.mark.asyncio
 
 
+GATEWAY_MISSING_STATUS = 500
+GATEWAY_MISSING_ERROR_CODE = "GATEWAY_IDENTITY_MISSING"
+
+
+def _assert_gateway_identity_missing(resp) -> None:
+    assert resp.status_code == GATEWAY_MISSING_STATUS
+    body = resp.json()
+    assert body["code"] == GATEWAY_MISSING_STATUS
+    assert body["details"]["errorCode"] == GATEWAY_MISSING_ERROR_CODE
+    assert body["details"]["category"] == "INTERNAL"
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/semantic/metrics — List metrics
 # ---------------------------------------------------------------------------
@@ -28,37 +38,32 @@ pytestmark = pytest.mark.asyncio
 class TestListMetricsAuth:
     """Auth tests for GET /api/v1/semantic/metrics."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get("/api/v1/semantic/metrics")
-        assert resp.status_code == 401
-        body = resp.json()
-        assert body["code"] == 40100
-        assert body["errorCode"] == "AUTHENTICATION_REQUIRED"
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_invalid_token(self, async_client):
+    async def test_rejects_invalid_identity(self, async_client):
         resp = await async_client.get(
             "/api/v1/semantic/metrics",
             headers=auth_header("bad-token"),
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_expired_token(self, async_client):
+    async def test_rejects_expired_identity(self, async_client):
         token = make_expired_token()
         resp = await async_client.get(
             "/api/v1/semantic/metrics",
             headers=auth_header(token),
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_refresh_token(self, async_client):
+    async def test_rejects_refresh_shaped_identity(self, async_client):
         token = make_refresh_token()
         resp = await async_client.get(
             "/api/v1/semantic/metrics",
             headers=auth_header(token),
         )
-        assert resp.status_code == 401
-        body = resp.json()
-        assert body["code"] == 40102
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()
@@ -91,20 +96,20 @@ class TestCreateMetricAuth:
         "data_type": "DOUBLE",
     }
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.post(
             "/api/v1/semantic/metrics",
             json=self.METRIC_PAYLOAD,
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
-    async def test_returns_401_with_invalid_token(self, async_client):
+    async def test_rejects_invalid_identity(self, async_client):
         resp = await async_client.post(
             "/api/v1/semantic/metrics",
             json=self.METRIC_PAYLOAD,
             headers=auth_header("invalid"),
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token_and_creates_metric(self, async_client):
         token = make_access_token()
@@ -127,9 +132,9 @@ class TestCreateMetricAuth:
 class TestListDimensionsAuth:
     """Auth tests for GET /api/v1/semantic/dimensions."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get("/api/v1/semantic/dimensions")
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()
@@ -160,12 +165,12 @@ class TestCreateDimensionAuth:
         "backend_id": "mock-backend",
     }
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.post(
             "/api/v1/semantic/dimensions",
             json=self.DIMENSION_PAYLOAD,
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token_and_creates_dimension(self, async_client):
         token = make_access_token()
@@ -188,9 +193,9 @@ class TestCreateDimensionAuth:
 class TestListSynonymsAuth:
     """Auth tests for GET /api/v1/semantic/synonyms."""
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.get("/api/v1/semantic/synonyms")
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token(self, async_client):
         token = make_access_token()
@@ -218,12 +223,12 @@ class TestCreateSynonymAuth:
         "entity_type": "metric",
     }
 
-    async def test_returns_401_without_token(self, async_client):
+    async def test_rejects_missing_identity(self, async_client):
         resp = await async_client.post(
             "/api/v1/semantic/synonyms",
             json=self.SYNONYM_PAYLOAD,
         )
-        assert resp.status_code == 401
+        _assert_gateway_identity_missing(resp)
 
     async def test_accepts_valid_token_and_creates_synonym(self, async_client):
         token = make_access_token()
@@ -236,4 +241,3 @@ class TestCreateSynonymAuth:
         body = resp.json()
         assert body["code"] == 200
         assert body["data"]["term"] == "revenue"
-

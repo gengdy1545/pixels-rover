@@ -1,5 +1,9 @@
-/// <reference types="vitest" />
-import { defineConfig } from 'vite';
+/// <reference types="vitest/config" />
+// `defineConfig` must come from `vitest/config` (not `vite`) once vitest 4
+// moved the `test` block out of vite's own UserConfig -- otherwise tsc -b
+// fails with "test does not exist in type UserConfigExport", blocking the
+// production `npm run build` path. Keeping `vite`'s own plugin imports.
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({

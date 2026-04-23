@@ -19,10 +19,10 @@ from app.models.conversation import ConversationThread
 from app.models.session import AnalysisSession, AnalysisStepRecord
 from app.dependencies import get_analysis_service
 from app.error_codes import (
-    RESOURCE_CONFLICT,
-    RESOURCE_CONFLICT_NAME,
-    RESOURCE_NOT_FOUND,
-    RESOURCE_NOT_FOUND_NAME,
+    ANALYSIS_SESSION_NOT_FOUND,
+    ANALYSIS_THREAD_ARCHIVED,
+    ANALYSIS_THREAD_NOT_FOUND,
+    ErrorCategory,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,8 +63,8 @@ async def submit_analysis(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "message": "Conversation thread not found",
-                "code": RESOURCE_NOT_FOUND,
-                "errorCode": RESOURCE_NOT_FOUND_NAME,
+                "errorCode": ANALYSIS_THREAD_NOT_FOUND,
+                "category": ErrorCategory.USER_INPUT.value,
             },
         )
     if thread.status != "active":
@@ -72,8 +72,8 @@ async def submit_analysis(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "message": "Archived conversations cannot accept new analysis runs",
-                "code": RESOURCE_CONFLICT,
-                "errorCode": RESOURCE_CONFLICT_NAME,
+                "errorCode": ANALYSIS_THREAD_ARCHIVED,
+                "category": ErrorCategory.USER_INPUT.value,
             },
         )
 
@@ -97,6 +97,7 @@ async def submit_analysis(
                 backend_id=thread.backend_id,
                 schema_name=thread.schema_name,
                 model_profile=thread.model_profile,
+                auth_session_id=current_user.session_id,
             ):
                 # Track session_id from the first status_change event
                 if session_id is None and event.get("event") == SSEEventType.STATUS_CHANGE.value:
@@ -193,8 +194,8 @@ async def get_analysis_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "message": "Session not found",
-                "code": RESOURCE_NOT_FOUND,
-                "errorCode": RESOURCE_NOT_FOUND_NAME,
+                "errorCode": ANALYSIS_SESSION_NOT_FOUND,
+                "category": ErrorCategory.USER_INPUT.value,
             },
         )
     if session.user_id != current_user.user_id:
@@ -202,8 +203,8 @@ async def get_analysis_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "message": "Session not found",
-                "code": RESOURCE_NOT_FOUND,
-                "errorCode": RESOURCE_NOT_FOUND_NAME,
+                "errorCode": ANALYSIS_SESSION_NOT_FOUND,
+                "category": ErrorCategory.USER_INPUT.value,
             },
         )
 

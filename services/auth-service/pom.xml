@@ -132,6 +132,21 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Flyway: application-table migration SSOT for pixels_auth schema.
+		     See docs/development/backend.md §12.2. Spring Boot's
+		     FlywayAutoConfiguration runs `migrate` after the DataSource bean
+		     is ready and before JPA EntityManagerFactory initialization, so
+		     starting the service with mismatched schema state fails fast
+		     during ApplicationContext bring-up (i.e. container exits 1). -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-mysql</artifactId>
+		</dependency>
+
 		<!-- captcha -->
 		<dependency>
 			<groupId>pro.fessional</groupId>

@@ -15,51 +15,48 @@
  */
 package io.pixelsdb.pixels.rover.exception;
 
+import io.pixelsdb.pixels.rover.config.common.ErrorCategory;
+
 /**
- * 业务异常
- * 
- * @author zhxypjxt
+ * Business exception whose fields drive the unified {@code ApiResponse} envelope (see
+ * {@code backend.md §6.0 / §6.3}).
+ *
+ * <p>The previous {@code Integer code} field (5-digit business code) has been retired together
+ * with the top-level {@code errorCode} on the envelope; call sites now supply the final
+ * SCREAMING_SNAKE_CASE {@code errorCode}, the coarse {@link ErrorCategory}, and the HTTP status
+ * code directly.</p>
  */
 public final class ServiceException extends RuntimeException
 {
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
-    /**
-     * 错误码
-     */
-    private Integer code;
-
-    /**
-     * 错误提示
-     */
+    private final int httpStatus;
+    private final String errorCode;
+    private final ErrorCategory category;
     private String message;
-
-    /**
-     * 错误明细，内部调试错误
-     */
     private String detailMessage;
 
-    /**
-     * 空构造方法，避免反序列化问题
-     */
-    public ServiceException()
+    public ServiceException(int httpStatus, String message, String errorCode, ErrorCategory category)
     {
-    }
-
-    public ServiceException(String message)
-    {
+        this.httpStatus = httpStatus;
         this.message = message;
+        this.errorCode = errorCode;
+        this.category = category;
     }
 
-    public ServiceException(String message, Integer code)
+    public int getHttpStatus()
     {
-        this.message = message;
-        this.code = code;
+        return httpStatus;
     }
 
-    public String getDetailMessage()
+    public String getErrorCode()
     {
-        return detailMessage;
+        return errorCode;
+    }
+
+    public ErrorCategory getCategory()
+    {
+        return category;
     }
 
     @Override
@@ -68,15 +65,15 @@ public final class ServiceException extends RuntimeException
         return message;
     }
 
-    public Integer getCode()
-    {
-        return code;
-    }
-
     public ServiceException setMessage(String message)
     {
         this.message = message;
         return this;
+    }
+
+    public String getDetailMessage()
+    {
+        return detailMessage;
     }
 
     public ServiceException setDetailMessage(String detailMessage)

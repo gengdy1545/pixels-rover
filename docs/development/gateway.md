@@ -174,14 +174,14 @@ gateway/
   - 语义："网关进程自己还在响应"。
 
 - **`/gateway/ready`（Readiness，系统级聚合信号）**
-  - 由这个路由主动去探每个已注册业务服务的 `/health`。
+  - 由这个路由主动去探每个已注册业务服务的 **`/internal/ready`**（B1+B2 决定；**不是** `/health`——`/health` 只反映进程存活，不包含 DB 可达 / migration 到 head 等运行时依赖就绪信号，把它作为聚合源会让 `/gateway/ready` 绿灯丧失系统级就绪语义）。
   - **用途**：负载均衡摘流、K8s readinessProbe、`docker compose up` 冒烟判据（由 `scripts/smoke.sh` 作为系统级就绪信号轮询）。
-  - 语义："上游就绪 = 可以对外服务"。
+  - 语义："上游就绪 = 可以对外服务"（含进程存活 + DB 可达 + migration at head + 关键依赖就绪）。
   - **绝对不能作为容器重启判据**。
 
-  **实现形态（独立插件 + 声明式 probe 清单）**：聚合逻辑落成独立 APISIX 自定义插件 [`gateway-ready`](../../gateway/custom/apisix/plugins/gateway-ready.lua)，挂在 `/gateway/ready` 这一条路由上。插件在 `access` 阶段用 `ngx.location.capture_multi` 并行 sub-request 到每条内部 location（每条 internal location `proxy_pass` 到一个 upstream 的 `/health`），汇总后直接写响应体并短路 upstream。
+  **实现形态（独立插件 + 声明式 probe 清单）**：聚合逻辑落成独立 APISIX 自定义插件 [`gateway-ready`](../../gateway/custom/apisix/plugins/gateway-ready.lua)，挂在 `/gateway/ready` 这一条路由上。插件在 `access` 阶段用 `ngx.location.capture_multi` 并行 sub-request 到每条内部 location（每条 internal location `proxy_pass` 到一个 upstream 的 `/internal/ready`），汇总后直接写响应体并短路 upstream。
 
-  probe 清单作为**插件实例配置**声明在路由上，不是硬编码到插件里：
+  probe 清单作为**插件实例配置**声明在路由上，不是硬编码到插件里。**`probes[i].uri` 必须指向 internal location（例如 `/__ready_probe/auth`），该 internal location 内部 `proxy_pass` 到对应服务的 `/internal/ready`——不是服务的 `/health`，也不是服务的业务路由。**
 
   ```yaml
   # apisix.yaml 片段（Standalone YAML 模式）
@@ -212,7 +212,7 @@ gateway/
 
   **具体挂点（硬规则，避免歧义）**：internal location 必须声明在 **`config.yaml.template` 的 `nginx_config.http_server_configuration_snippet`**（或等价的 APISIX `apisix.nginx_config.http_server_configuration_snippet`）字段下——即 APISIX 的 `server { ... }` 块内部、与 APISIX 自身的 `location /` 同级。不要写进 `http_configuration_snippet`（那是 `http { ... }` 顶层，`internal;` 指令与 `proxy_pass` 无法就近在 server 上下文生效），也不要单开独立 `server { ... }` 块（`ngx.location.capture_multi` 只在同一 server 内部定位子请求，跨 server 的 sub-request 会打回 APISIX 的主路由表而不是 internal location，导致绕路 + 可能命中兜底路由）。
 
-  **形态示例**（按 `<service>` 填充；`proxy_*_timeout` 与对应 `probes[i].timeout_ms` 数值相等）：
+  **形态示例**（按 `<service>` 填充；`proxy_*_timeout` 与对应 `probes[i].timeout_ms` 数值相等；`proxy_pass` 指向服务的 `/internal/ready`，**不是** `/health`）：
 
   ```yaml
   # config.yaml.template 片段
@@ -224,14 +224,14 @@ gateway/
           proxy_connect_timeout 1s;
           proxy_send_timeout    1s;
           proxy_read_timeout    1s;
-          proxy_pass http://auth-service:8081/health;
+          proxy_pass http://auth-service:8081/internal/ready;
         }
         location = /__ready_probe/assistant {
           internal;
           proxy_connect_timeout 1s;
           proxy_send_timeout    1s;
           proxy_read_timeout    1s;
-          proxy_pass http://assistant-service:8082/health;
+          proxy_pass http://assistant-service:8090/internal/ready;
         }
   ```
 
@@ -246,9 +246,16 @@ gateway/
   - **预算守恒约束**：`Σ 各 probe timeout_ms ≤ total_timeout_ms`。违反即预算失真——某条 probe 超时后下一条仍会继续探测，`/gateway/ready` 的整体响应延迟会超过 `total_timeout_ms`。PR review 阶段由 reviewer 以该不等式作为**可机械验证**的判据；未来由 `scripts/check-gateway-config.py` 自动断言。
   - 不允许引入"整体硬截断"（例如 gateway-ready 插件内部 spawn 计时器到点 `ngx.exit`）作为绕过手段——该路径会与 `ngx.location.capture_multi` 的响应聚合语义冲突，产生半收集状态。
 
-  **不做的事**：不并联探数据库、不并联探第三方、不做分级健康（degraded/warning），只做"每个上游 `/health` 是否 200"的布尔 AND。数据库/第三方的降级由各业务服务自己的 `/health` 决定。
+  **不做的事**：不做分级健康（degraded/warning），只做"每个上游 `/internal/ready` 是否 200"的布尔 AND。可降级依赖（LLM / 第三方 API）**不**进入 `/internal/ready` 判据，因此也**不**反映在本路由——这些依赖的故障走 [`./backend.md §6.7`](./backend.md) 的 `UPSTREAM` 降级契约，由业务路由在 per-request 维度上表达，而不是把"就绪度"拉平。
 
-  **聚合语义的局限性（刻意选择）**：由于 [`./backend.md §7.1`](./backend.md) 硬规则要求 `/health` **不级联**探 DB/缓存/LLM/第三方，`/gateway/ready` 也就**不**反映"数据库连通性 / schema 已初始化 / LLM provider 可达"等更深层的就绪状态；它只表达**"各上游进程存活且 `/health` 返 200"**这一层。冷启动阶段的 "`pixels_auth` / `pixels_analysis` schema 是否已创建"、"必填环境变量是否注入" 等一次性校验由仓库的 `scripts/smoke.sh` 直接连 MySQL / 直接读配置完成，**不**塞进本路由。任何"把 DB 可达性/配置检查塞进 `/gateway/ready`"的提案都应先检查是否属于"冷启动一次性验证"而非"持续就绪度"，前者永远应走 smoke / 运维脚本。
+  **聚合语义的边界（B1+B2 后的新语义）**：
+
+  - `/gateway/ready` 表达**"每个上游进程存活 + DB 可达 + migration 到 head + 关键依赖就绪"**——DB 可达与 migration 状态是 B1+B2 后**已经包含**的信号（由各服务的 `/internal/ready` 在 probe 内部探测，见 [`./backend.md §7.2`](./backend.md)）。
+  - 以下维度**仍然不**反映在本路由，属于 smoke / 监控侧的事：
+    - **冷启动一次性**：`pixels_auth` / `pixels_analysis` 等**逻辑库**是否已被 `initdb.d` 建好（由 `scripts/smoke.sh` 直连 MySQL `SHOW DATABASES LIKE` 做一次性兜底校验）；必填环境变量是否注入（由各服务 / gateway 启动期硬校验在 [`./backend.md §13.1`](./backend.md) 完成，失败即进程 `exit 1`）。
+    - **可降级依赖**：LLM provider / 第三方 API 的可达性不进入 `/internal/ready` 判据（它们允许 per-request 降级，不应影响全系统就绪度）。
+    - **数据状态**：表里有没有特定数据、数据有没有过期、seed 是否到位等——这些是业务可用性维度，不是就绪度维度。
+  - 任何"把 X 塞进 `/gateway/ready`"的提案，先判断 X 属于哪一类：持续依赖（DB / migration） → 走 `/internal/ready`；冷启动一次性 → 走 smoke；可降级依赖 → 走业务路径的 `UPSTREAM` 降级；数据状态 → 走业务指标 / 告警。跨类混用会让就绪度信号失真。
 
 ### 4.2 Docker 容器健康检查必须用 `/gateway/live`
 
@@ -257,7 +264,7 @@ healthcheck:
   test: ["CMD", "curl", "-fsS", "http://localhost:9080/gateway/live"]
 ```
 
-**反例（当前代码的问题）**：把 `/gateway/health` 通过 `proxy-rewrite` 转给 auth-service。这会让"auth-service 抖动"误判为"gateway 不健康"，触发不必要的 gateway 重启，并把故障放大到"两个服务同时看起来都挂了"。
+**历史反例（已修正）**：在 B1+B2 / Standalone YAML PR 之前，compose 的 gateway healthcheck 曾指向 `/gateway/health`（通过 `proxy-rewrite` 转给 auth-service `/health`）。这个形态会让"auth-service 抖动"误判为"gateway 不健康"，触发不必要的 gateway 重启，并把故障放大到"两个服务同时看起来都挂了"。B1+B2 之后，`/gateway/health` 路由**整个移除**——gateway 的 Docker / K8s liveness 由 `/gateway/live`（不探 upstream）承担；系统级就绪信号由 `/gateway/ready`（聚合 `/internal/ready`）承担；两件事路由分离不再混用。
 
 ### 4.3 upstream 健康检查与此分开
 
@@ -293,6 +300,8 @@ APISIX 对 upstream 节点的健康检查（`checks.active`）是网关内部的
   | `503` | introspect 调用失败或返回不完整 | `GATEWAY_INTROSPECT_UNAVAILABLE` | `"Authentication service unavailable"` |
 
   这三个 errorCode 与 `GATEWAY_IDENTITY_MISSING`（backend.md §3.3）同族，统一使用基础设施前缀 **`GATEWAY_*`**——它表达的是"接入面基础设施故障/判定"，不属于任何业务领域。与之对应，`INTERNAL_AUTH_FAILED`（backend.md §8.6）使用 `INTERNAL_*` 前缀，表达的是"跨服务内部通信基础设施故障"。业务领域前缀（`AUTH_*` / `ANALYSIS_*` 等）与基础设施前缀在命名空间上严格互不重叠（见 backend.md §6.3）。
+
+  **真源定位**：本节所列 `GATEWAY_*` / `INTERNAL_*` 错误码的**代码真源**是 [`../../gateway/error-codes.json`](../../gateway/error-codes.json)，`backend.md §6.3.1` 是其**渲染视图**。`gateway-auth` / `gateway-ready` 插件在启动（`_M.init()` 阶段）会从 `/usr/local/apisix/conf/error-codes.json` 读入 JSON 并与本插件声明的 `KNOWN_ERROR_CODES` 表做一次性交叉比对——缺任一 errorCode 的注册即触发 `error(...)` 使插件加载失败，`gateway-auth` 保护的路由整体 fail-closed。CI 侧由 `scripts/check-contracts.py` 兜底：Lua 字面量 ⊆ 插件 `KNOWN_ERROR_CODES` ⊆ JSON = 前端 `InfraErrorCode` union，四处任一漂移即 fail。
 
 ### 5.2 路由配置参数
 
@@ -423,8 +432,14 @@ Double-submit CSRF 校验能成立的前提是 **`XSRF-TOKEN` cookie 对 JS 可�
 | `gateway_auth_session_index` | `sess:<sessionId>` | `<sha256(token)>`（单值） | sessionId → tokenHash 反查 |
 | `gateway_auth_user_index` | `user:<userId>:<sha256(token)>` | `1`（标记值；存在即表示该用户持有此 tokenHash） | userId → tokenHash 反查；**每个 tokenHash 独立成 key**，不对"一个数组 value"做 read-modify-write |
 
-**写入时机**：`gateway-auth` 每次 introspect 成功后，除了写主缓存，**同步更新**两个反向索引（`sessionId` 与 `userId` 取自 introspect 响应）。索引的 TTL 与主缓存同步（`positive_cache_ttl`），过期后反向索引条目一起被动失效，不用额外 GC。
+**写入时机（硬规则）**：`gateway-auth` 每次 introspect 成功后，除了写主缓存，**必须在同一 introspect 处理协程内同步更新**两个反向索引（`sessionId` 与 `userId` 取自 introspect 响应）。索引的 TTL 与主缓存同步（`positive_cache_ttl`），过期后反向索引条目一起被动失效，不用额外 GC。
 
+"同步更新"的精确含义（禁止任一条放松）：
+
+- 三次写入（主缓存 `gateway_auth_cache:set` + `gateway_auth_session_index:set` + `gateway_auth_user_index:set`）**必须**发生在同一次 introspect 的 Lua 处理流程中，在当前请求 `access` / `rewrite` 阶段返回**之前**完成。
+- ❌ **禁止**用 `ngx.timer.at` / `ngx.timer.every` / 后台 worker / 任何异步补写方案把反向索引写入推迟到下一个事件循环。异步补写会形成一个"主缓存已命中但反向索引尚未就绪"的窗口，在该窗口内到达的 `invalidate_session` 请求会按 `sessionId` / `userId` 维度**查不到** token 而静默无效——这正是 §5.3 要排除的安全漏洞。
+- ❌ **禁止**"先写主缓存，反向索引等下次 introspect 再补"的懒惰策略。每次 introspect 都必须维护全部三张 dict 的完整性。
+- **部分失败 = 整体失败**：若三次 `set` 中任一返回 `lua_shared_dict` 满（`no memory` 错误），**必须**回滚已写入的条目（`delete` 之前写入的 key）并让当前 introspect 请求以 `GATEWAY_INTROSPECT_UNAVAILABLE` 失败；不允许"主缓存写成功但反向索引放弃"的跛脚状态。该行为与 §5.3 的 `positive_cache_ttl > 5 ⇒ invalidate 必须存在` 联动不变量配套，共同构成"主动失效路径可信"的前提。
 - 具体写入调用使用 `gateway_auth_user_index:set(key, "1", ttl)`（或 `add`，让并发重复写入幂等）；**禁止**使用 "`get → decode → push → encode → set`" 这种 read-modify-write 序列。
 
 **清除逻辑**：
@@ -461,6 +476,18 @@ nginx_config:
 - **短 TTL 退化**：把 `positive_cache_ttl` 压回 ≈ 2s 接受 auth-service 压力——只适合过渡期紧急方案。
 
 当前阶段锁定"单实例 + 本地 dict"路径，`gateway.md §1.2` 的"触发重新评估的信号"第一条（多实例集群同步）即本节的重新评估入口。本节设计**不得**在未回到 §1.2 做选型决策前被扩展为跨实例形态。
+
+#### 5.3.4 本接口与 SSE 长连接的作用边界
+
+`POST /gateway/internal/invalidate_session` **不会**中断已经建立的 SSE 长连接。该范围由以下硬规则锁定，业务侧与前端侧不得基于"invalidate 应该能切断 SSE"做任何假设：
+
+- **作用面**：本接口只清除 `gateway_auth_cache` / `gateway_auth_session_index` / `gateway_auth_user_index` 中的条目，**影响的是"下一次进入 `gateway-auth` 插件的请求"**——包括新的普通 HTTP 请求、SSE 重连、以及 refresh_token 换发请求。
+- **不作用面**：已进入 upstream 流式响应阶段的 SSE 连接。APISIX / Nginx 在把响应转为流式之后不会重新进入 `gateway-auth` 的 `access` 阶段；在流中插入"每帧复查缓存"既不是 APISIX 的标准扩展点，也会把热路径开销放大到无法接受。因此 **in-flight 的 SSE 流持续到其自然终点**（`event: done` / 下游服务主动结束 / Nginx `read_timeout` 断开 / TCP 断开）中最先发生的那个为止。
+- **收口机制**：in-flight SSE 的最大可感知"仍然有效"窗口 = 该 SSE 路由的 `read_timeout` 上限（见 [`./gateway.md §6.3`](./gateway.md) 超时约定；SSE 路由需为此目的显式设置有上界的 `read_timeout`，禁止设为 `0`/"无限")。该时间到达后连接被动断开，前端重连命中 `gateway-auth` 时已 invalidate 的身份会被拒绝。
+- **前端契约对齐**：前端侧不得把"logout 触发 SSE 立刻断开"写入 UX 承诺；logout 之后 SSE 的"尚未断开"状态在最大 `read_timeout` 窗口内属于预期行为，见 [`./frontend.md §4.6`](./frontend.md) 对应条目。
+- **业务侧契约对齐**：后端 SSE handler 实现中"连接期身份固化"的硬规则见 [`./backend.md §6.6`](./backend.md)——严禁在 SSE 流过程中用 `X-Auth-User-Id` 反查数据库做跨 session 写入，避免把"一次鉴权"放大成"一直信任"。
+
+该边界**不是**漏洞而是**有意的作用面收窄**：在 gateway-centric 架构下，"连接建立时鉴权一次"是 SSE 的标准语义；若未来出现必须"立刻切断 in-flight 流"的合规要求，需先回到 §5.3.3 重新评估 gateway 是否要承担每帧鉴权，属于架构级决策，不走单 PR 改动。
 
 ### 5.4 禁止事项
 
@@ -499,7 +526,9 @@ nginx_config:
 ### 6.3 超时
 
 - 默认业务 upstream 超时：connect ≤ 2s、send ≤ 5s、read ≤ 30s。
-- **SSE / 长轮询路由必须单独声明**：read 超时至少 10 分钟，或设置为 0 (无限)；同时在 upstream 层禁用响应缓冲。
+- **SSE / 长轮询路由必须单独声明**：read 超时**必须是具体上界（建议区间 10–30 分钟，当前阶段基线 = 15 分钟）**，同时在 upstream 层禁用响应缓冲。
+  - ❌ **禁止**把 SSE 路由的 `read_timeout` 设为 `0` / 无限 / 超过 30 分钟。原因：该 `read_timeout` 是 [§5.3.4](#534-本接口与-sse-长连接的作用边界) in-flight SSE 面对 session 主动失效的**收口机制**——上界过大或无上界会让"用户 logout 后连接仍有效"窗口拉到不可接受长度。调大此值需联动评估 §5.3.4 的窗口语义，不走单 PR 改动。
+  - 前端对应重连策略与此数值成对（见 [`./frontend.md §4.6`](./frontend.md)），两层修改必须同 PR。
 - LLM 相关路由读超时可以更长，但必须**显式写出**，禁止依赖默认值。
 
 ### 6.4 CORS
@@ -608,8 +637,13 @@ nginx_config:
    ```
 5. **在服务实现里消费身份头**：读 `X-Auth-User-Id` / `X-Auth-User-Email`，**禁止重新验 JWT**。
 6. **补 request-id 透传**：日志里带 `X-Request-Id`，让跨服务链路能对齐。
-7. **补健康检查与系统就绪聚合**：服务实现 `/health`（只探自身，不级联，见 [`./backend.md §7.1`](./backend.md)）。**同时必须**在 gateway 侧两处各追加一条 probe：（a）`config.yaml.template` 的 nginx http 段里新增一个 `/__ready_probe/<service>` 的 **internal location**（`internal;` 指令 + `proxy_pass` 到该服务的 `/health`，且 `proxy_connect_timeout` / `proxy_read_timeout` 与下一步的 `timeout_ms` 对齐）；（b）`apisix.yaml` 中 `/gateway/ready` 路由上 `gateway-ready` 插件的 `probes[]` 数组追加一条 `{ name, uri: "/__ready_probe/<service>", timeout_ms }`（见 §4.1）。**不存在"不聚合"选项**——任何新业务服务都纳入系统就绪聚合，否则 `/gateway/ready` 的"全部 200"语义在新服务上线后立刻失真。
-8. **同步更新 development 文档**：在本文档 §6.1 前缀表追加新领域前缀；在 [`./backend.md §12.4`](./backend.md) 的服务拓扑表追加新服务的拥有关系、数据边界、对外 API 面。
+7. **补健康检查与系统就绪聚合**（B1+B2 三层模型）：
+   - 服务实现 `/health`（**只探本进程**，不级联，见 [`./backend.md §7.1`](./backend.md)）与 `/internal/ready`（探 DB 可达 + migration at head + 关键依赖，见 [`./backend.md §7.2`](./backend.md)）。
+   - **同时必须**在 gateway 侧两处各追加一条 probe：
+     - (a) `config.yaml.template` 的 `nginx_config.http_server_configuration_snippet` 里新增一个 `/__ready_probe/<service>` 的 **internal location**（`internal;` 指令 + `proxy_pass` 到**该服务的 `/internal/ready`**，**不是** `/health`；`proxy_connect_timeout` / `proxy_send_timeout` / `proxy_read_timeout` 与下一步的 `timeout_ms` 对齐）；
+     - (b) `apisix.yaml` 中 `/gateway/ready` 路由上 `gateway-ready` 插件的 `probes[]` 数组追加一条 `{ name, uri: "/__ready_probe/<service>", timeout_ms }`（见 §4.1）。
+   - **不存在"不聚合"选项**——任何新业务服务都纳入系统就绪聚合，否则 `/gateway/ready` 的"全部 200"语义在新服务上线后立刻失真。
+8. **同步更新 development 文档**：在本文档 §6.1 前缀表追加新领域前缀；在 [`./backend.md §12.5`](./backend.md) 的服务拓扑表追加新服务的拥有关系、数据边界、对外 API 面、migration 工具。
 
 ---
 
@@ -694,7 +728,7 @@ nginx_config:
 - **不让网关查业务库、执行业务规则、理解业务 schema**。
 - **不让后端服务各自实现 CORS、JWT 解析、CSRF 校验**——这三件事网关已做。
 - **不让 `/gateway/live` 依赖任何 upstream**。
-- **不把 `INTERNAL_INTROSPECTION_SECRET`、`APISIX_ADMIN_API_KEY` 等任何 secret 的默认占位值带进非开发环境**——启动期硬校验必须在占位值（如 `change-me`）或空值时 fail fast。
+- **不把 `INTERNAL_INTROSPECTION_SECRET` 等任何 secret 的默认占位值带进非开发环境**——启动期硬校验必须在占位值（如 `change-me`）或空值时 fail fast。Standalone YAML 模式下已**不再存在** `APISIX_ADMIN_API_KEY`（Admin API 整体移除），若再在 env / compose / docs 中出现该变量名需拒绝合并。
 - **不引入 OPA / 外部策略引擎**（在出现真实复杂策略需求之前）。
 
 ---

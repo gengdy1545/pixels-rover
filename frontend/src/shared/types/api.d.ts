@@ -1,29 +1,18 @@
-// Unified API response type
-export interface ApiResponse<T = unknown> {
-  code: number;
-  message: string;
-  data?: T;
-  errorCode?: string;
-  requestId?: string;
-  apiVersion?: string;
-}
-
-// Stable cross-service error codes
-export type ErrorCode =
-  | 'INVALID_ARGUMENT'
-  | 'AUTHENTICATION_REQUIRED'
-  | 'INVALID_CREDENTIALS'
-  | 'INVALID_TOKEN'
-  | 'INVALID_TOKEN_TYPE'
-  | 'ACCESS_DENIED'
-  | 'RESOURCE_NOT_FOUND'
-  | 'METHOD_NOT_ALLOWED'
-  | 'RESOURCE_CONFLICT'
-  | 'DEPENDENCY_ERROR'
-  | 'INTERNAL_ERROR';
-
-// Pagination
-export interface PageParams {
-  page: number;
-  pageSize: number;
-}
+/**
+ * Back-compat facade for code that still imports from `../types/api`.
+ *
+ * The real definitions moved to `./common` (alongside `./infra`,
+ * `./auth/ErrorCode`, `./analysis/ErrorCode`) to implement the
+ * backend.md §6.3.2 merge point. New code SHOULD import from `./common`
+ * directly; this file exists only to avoid a mass-rename churn in the same
+ * PR that shipped the envelope refactor.
+ */
+export type {
+  ApiResponse,
+  ApiSuccessResponse,
+  ApiErrorResponse,
+  ApiErrorDetails,
+  ErrorCode,
+  ErrorCategory,
+  PageParams,
+} from './common';

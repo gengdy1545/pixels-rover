@@ -14,8 +14,22 @@ local core = require("apisix.core")
 local http = require("resty.http")
 local random = require("resty.random")
 local stringx = require("resty.string")
+local error_code_registry = require("apisix.plugins.error_code_registry")
 
 local plugin_name = "gateway-auth"
+
+-- Every GATEWAY_* / INTERNAL_* errorCode this plugin may emit. Kept as an
+-- explicit list (not scraped from source) because (a) Lua has no AST-stable
+-- grep, (b) this is the ground truth scripts/check-contracts.py also
+-- cross-verifies against both the plugin source and gateway/error-codes.json,
+-- forming a closed three-way loop: source literals ⊆ KNOWN ⊆ registry.
+-- Adding a new errorCode to the plugin MUST also add it here AND to
+-- gateway/error-codes.json; missing either entry fails plugin init.
+local KNOWN_ERROR_CODES = {
+    "GATEWAY_AUTH_REQUIRED",
+    "GATEWAY_CSRF_INVALID",
+    "GATEWAY_INTROSPECT_UNAVAILABLE",
+}
 
 local schema = {
     type = "object",
@@ -143,7 +157,14 @@ local function should_skip_csrf(method)
     return is_safe_method(method)
 end
 
-local function write_error(status, request_id, message)
+-- Unified failure envelope (backend.md §6.0):
+--   top-level `code` MUST equal the HTTP status; `details.errorCode` and
+--   `details.category` are **both** mandatory on non-2xx responses. Call sites
+--   are responsible for passing error_code/category from §6.3.1's registry —
+--   this function intentionally does not default them, because a silent
+--   fallback would let a new failure branch ship with a missing errorCode and
+--   degrade the frontend's §6.3.2 two-tier dispatch to the generic 5xx path.
+local function write_error(status, request_id, message, error_code, category)
     ngx.status = status
     ngx.header["Content-Type"] = "application/json; charset=utf-8"
     ngx.header["X-Request-Id"] = request_id
@@ -151,6 +172,10 @@ local function write_error(status, request_id, message)
         code = status,
         message = message,
         requestId = request_id,
+        details = {
+            errorCode = error_code,
+            category = category,
+        },
     }))
     return ngx.exit(status)
 end
@@ -273,10 +298,21 @@ local function apply_csrf(conf, request_id)
     local csrf_cookie = get_cookie_value("XSRF-TOKEN")
     local csrf_header = get_header("X-XSRF-TOKEN")
     if not csrf_cookie or not csrf_header or csrf_cookie ~= csrf_header then
-        return write_error(403, request_id, "CSRF validation failed")
+        return write_error(403, request_id, "CSRF validation failed",
+            "GATEWAY_CSRF_INVALID", "AUTH")
     end
 
     return nil
+end
+
+-- init() runs once per worker when APISIX's plugin loader initialises this
+-- plugin. We use it to assert the error-code registry is present, parseable,
+-- and superset of the literals the plugin may emit. A failure here crashes
+-- plugin load, which is the desired fail-closed behaviour: if the registry
+-- has drifted from the plugin source, auth-protected routes refuse to serve
+-- rather than emit an unregistered errorCode.
+function _M.init()
+    error_code_registry.assert_registered(plugin_name, KNOWN_ERROR_CODES)
 end
 
 function _M.check_schema(conf)
@@ -305,20 +341,27 @@ function _M.access(conf, ctx)
     -- present on the request is ignored here.
     local token = access_cookie
     if not token then
-        return write_error(401, request_id, "Authentication required")
+        return write_error(401, request_id, "Authentication required",
+            "GATEWAY_AUTH_REQUIRED", "AUTH")
     end
 
     local payload, err = introspect(conf, token, request_id)
     if err then
-        return write_error(503, request_id, "Authentication service unavailable")
+        return write_error(503, request_id, "Authentication service unavailable",
+            "GATEWAY_INTROSPECT_UNAVAILABLE", "UPSTREAM")
     end
 
     if not payload.active then
-        return write_error(401, request_id, "Authentication required")
+        return write_error(401, request_id, "Authentication required",
+            "GATEWAY_AUTH_REQUIRED", "AUTH")
     end
 
     if not payload.userId or not payload.email then
-        return write_error(503, request_id, "Authentication service returned incomplete identity")
+        -- From the gateway's POV this is indistinguishable from an upstream
+        -- contract violation, so we collapse it onto GATEWAY_INTROSPECT_UNAVAILABLE
+        -- rather than minting a new errorCode. See §6.3.1 registry.
+        return write_error(503, request_id, "Authentication service returned incomplete identity",
+            "GATEWAY_INTROSPECT_UNAVAILABLE", "UPSTREAM")
     end
 
     ngx.req.set_header("X-Auth-User-Id", tostring(payload.userId))
@@ -329,5 +372,19 @@ function _M.access(conf, ctx)
         ngx.req.clear_header("X-Auth-Session-Id")
     end
 end
+
+-- Exposed strictly for unit tests (gateway/tests/spec/gateway_auth_spec.lua).
+-- Not part of the plugin's public API; do NOT consume these from other plugins
+-- or from APISIX core — if you need any of these, promote them to a real
+-- sibling module with a documented contract instead.
+_M._private = {
+    write_error = write_error,
+    is_safe_method = is_safe_method,
+    should_skip_csrf = should_skip_csrf,
+    should_retry = should_retry,
+    apply_csrf = apply_csrf,
+    ensure_request_id = ensure_request_id,
+    clear_identity_headers = clear_identity_headers,
+}
 
 return _M

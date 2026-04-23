@@ -1,6 +1,8 @@
-import type { ApiResponse } from '../types/api';
+import type { ApiErrorResponse } from '../types/common';
 import type { SSECallbacks, SSEConnection, SSEEventName, SSEEventMap } from '../types/sse';
 import { buildCommonHeaders, refreshAccessToken } from './client';
+import { apiErrorFromEnvelope } from './apiError';
+import type { ApiError } from './apiError';
 
 // ════════════════════════════════════════
 // SSE Stream Client
@@ -149,15 +151,23 @@ function dispatchEvent(
   }
 }
 
-async function extractHttpError(response: Response): Promise<Error> {
-  let message = `HTTP ${response.status}: ${response.statusText}`;
+/**
+ * Materialize an ApiError from a failed SSE open. We preserve the same
+ * ApiError contract the axios client uses, so page-level `catch (e)` blocks
+ * can dispatch uniformly on `e.details.errorCode` / `e.details.category`
+ * regardless of whether the failure came from a regular request or an SSE
+ * stream open.
+ */
+async function extractHttpError(response: Response): Promise<ApiError> {
+  const fallback = `HTTP ${response.status}: ${response.statusText}`;
+  let body: Partial<ApiErrorResponse> | undefined;
   try {
-    const payload = (await response.json()) as ApiResponse;
-    message = payload.message || message;
+    body = (await response.json()) as Partial<ApiErrorResponse>;
   } catch {
-    // Keep the default HTTP message when the body is not JSON.
+    // Non-JSON body -- leave body undefined; apiErrorFromEnvelope will
+    // fall back to the HTTP reason phrase.
   }
-  return new Error(message);
+  return apiErrorFromEnvelope(response.status, body, fallback);
 }
 
 /**

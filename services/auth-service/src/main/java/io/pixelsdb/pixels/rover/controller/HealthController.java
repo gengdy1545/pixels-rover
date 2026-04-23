@@ -15,66 +15,39 @@
  */
 package io.pixelsdb.pixels.rover.controller;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Health check endpoint for the auth service.
+ * Process-level liveness endpoint for auth-service.
  * <p>
- * This endpoint is publicly accessible (no authentication required)
- * and is intended for use by container orchestration, load balancers,
- * and monitoring systems.
+ * Contract (docs/development/backend.md §7.1): this endpoint MUST only
+ * report "the JVM is up and able to respond to HTTP". It MUST NOT probe
+ * the database, cache, or any external dependency — those belong to
+ * {@link InternalReadyController} ({@code /internal/ready}).
+ * <p>
+ * Consumers: Docker {@code HEALTHCHECK}, Kubernetes {@code livenessProbe},
+ * docker-compose {@code depends_on: condition: service_started}. A failure
+ * here means the process is wedged and a restart may help; DB failures
+ * are deliberately invisible to this endpoint because restarting auth-service
+ * will not fix MySQL being down.
  *
  * @author pixels
  */
 @RestController
 public class HealthController
 {
-    private static final Logger log = LoggerFactory.getLogger(HealthController.class);
-
-    private final DataSource dataSource;
-
-    public HealthController(DataSource dataSource)
-    {
-        this.dataSource = dataSource;
-    }
-
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health()
     {
         Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "UP");
         result.put("service", "auth-service");
         result.put("version", "0.1.0");
-
-        Map<String, Object> checks = new LinkedHashMap<>();
-
-        // Database connectivity check
-        try (Connection conn = dataSource.getConnection())
-        {
-            boolean valid = conn.isValid(3);
-            checks.put("database", Map.of("status", valid ? "UP" : "DOWN"));
-        }
-        catch (Exception e)
-        {
-            log.warn("Health check: database connection failed: {}", e.getMessage());
-            checks.put("database", Map.of("status", "DOWN", "error", e.getMessage()));
-        }
-
-        result.put("checks", checks);
-
-        boolean allUp = checks.values().stream()
-                .allMatch(v -> v instanceof Map && "UP".equals(((Map<?, ?>) v).get("status")));
-        result.put("status", allUp ? "UP" : "DOWN");
-
-        int httpStatus = allUp ? 200 : 503;
-        return ResponseEntity.status(httpStatus).body(result);
+        return ResponseEntity.ok(result);
     }
 }

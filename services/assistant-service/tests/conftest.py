@@ -18,14 +18,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import StaticPool
 
-from app.api_response import api_error
+from app.api_response import api_error, api_unknown_error
 from app.config import Settings
-from app.error_codes import INTERNAL_ERROR, resolve_error_code_name
+from app.error_codes import ANALYSIS_INVALID_ARGUMENT, ErrorCategory
 from app.request_id import REQUEST_ID_HEADER, clear_request_id, ensure_request_id, set_request_id
 from app.schemas.backend import BackendCapability, ColumnInfo, QueryResult, TableInfo
 from app.storage.base import StorageBackend
@@ -315,7 +317,11 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
 
     app = FastAPI(title="Test App", lifespan=noop_lifespan)
 
-    # --- Request-ID middleware (same as production) ---
+    # --- Request-ID middleware (same as production; see app/main.py) ---
+    # The middleware is consume-only: gateway is the sole writer of the
+    # outbound X-Request-Id header (gateway.md §7.5). The test harness
+    # mirrors that invariant so contract tests catch any regression that
+    # re-introduces response-side writes.
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
         request_id = ensure_request_id(request.headers.get(REQUEST_ID_HEADER))
@@ -325,41 +331,75 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
             response = await call_next(request)
         finally:
             clear_request_id()
-        response.headers[REQUEST_ID_HEADER] = request_id
         return response
 
-    # --- Exception handlers (same as production) ---
+    # --- Exception handlers (same as production, see app/main.py) ---
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        # Contract: pydantic/FastAPI validation failures surface as 400 + USER_INPUT,
+        # matching app.main.validation_exception_handler. Without this override the
+        # test app would fall back to FastAPI's built-in 422 response and break
+        # the tests that assert the unified envelope shape.
+        return JSONResponse(
+            status_code=400,
+            content=api_error(
+                http_status=400,
+                message="Request validation failed",
+                error_code=ANALYSIS_INVALID_ARGUMENT,
+                category=ErrorCategory.USER_INPUT,
+                extras={"errors": exc.errors()},
+            ),
+        )
+
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail, "code": exc.status_code}
-        code = detail.get("code", exc.status_code)
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        error_code = detail.get("errorCode") if isinstance(detail, dict) else None
+        category_raw = detail.get("category") if isinstance(detail, dict) else None
+        message = detail.get("message", "Request failed") if isinstance(detail, dict) else str(exc.detail)
+        extras = None
+        if isinstance(detail, dict):
+            extras = {
+                k: v for k, v in detail.items()
+                if k not in ("message", "errorCode", "category")
+            } or None
+
+        if not error_code or not category_raw:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=api_unknown_error(http_status=exc.status_code, message=message),
+            )
+
+        try:
+            category = ErrorCategory(category_raw)
+        except ValueError:
+            category = ErrorCategory.INTERNAL
+
         return JSONResponse(
             status_code=exc.status_code,
             content=api_error(
-                code=code,
-                message=detail.get("message", "Request failed"),
-                error_code=detail.get("errorCode") or resolve_error_code_name(code),
+                http_status=exc.status_code,
+                message=message,
+                error_code=error_code,
+                category=category,
+                extras=extras,
             ),
-            headers={REQUEST_ID_HEADER: getattr(request.state, "request_id", "")},
         )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         return JSONResponse(
             status_code=500,
-            content=api_error(
-                code=INTERNAL_ERROR,
-                message="Internal server error",
-                error_code=resolve_error_code_name(INTERNAL_ERROR),
-            ),
-            headers={REQUEST_ID_HEADER: getattr(request.state, "request_id", "")},
+            content=api_unknown_error(http_status=500, message="Internal server error"),
         )
 
     # --- Routers ---
+    # Mirror the production registration order from main.py: backends_router first
+    # so `/api/v1/analysis/backends` wins over analysis_router's `/{session_id}`.
+    app.include_router(backends_router)
     app.include_router(analysis_router)
     app.include_router(conversations_router)
     app.include_router(semantic_router)
-    app.include_router(backends_router)
 
     @app.get("/health")
     async def health():
@@ -413,17 +453,55 @@ async def mock_backend_registry():
     return registry
 
 
+def _build_shared_memory_engine():
+    """Create a per-test SQLite engine whose state is reliably shared across
+    every connection taken from the pool.
+
+    History:
+    - Using ``sqlite+aiosqlite://`` (anonymous in-memory) gave each aiosqlite
+      connection its own private DB → "no such table" whenever the router
+      opened a new connection.
+    - ``StaticPool`` alone was not sufficient for aiosqlite because each
+      async operation may dispatch to the worker thread in a way that does
+      not preserve the shared in-memory handle reliably.
+    - Named in-memory via ``file::memory:?cache=shared&uri=true`` works with
+      aiosqlite *and* lets multiple connections see the same tables.
+    """
+    import uuid as _uuid
+
+    shared_name = f"memdb_{_uuid.uuid4().hex}"
+    url = f"sqlite+aiosqlite:///file:{shared_name}?mode=memory&cache=shared&uri=true"
+    return create_async_engine(
+        url,
+        echo=False,
+        connect_args={"check_same_thread": False, "uri": True},
+        poolclass=StaticPool,
+    )
+
+
+def _import_all_models() -> None:
+    """Force-import every ORM model module so SQLAlchemy's Base.metadata is
+    fully populated before we call ``create_all``. Without this, models
+    imported later (e.g. transitively via routers inside ``create_test_app``)
+    are missing from the metadata when we create tables, and the first
+    INSERT blows up with "no such table"."""
+    import app.models.conversation  # noqa: F401
+    import app.models.session  # noqa: F401
+    import app.models.semantic  # noqa: F401
+
+
 @pytest_asyncio.fixture
 async def async_client(test_settings, mock_backend_registry) -> AsyncGenerator[AsyncClient, None]:
     """
     Provide an httpx AsyncClient wired to a fresh FastAPI app with:
-    - In-memory SQLite database
+    - In-memory SQLite database (shared across connections via StaticPool)
     - Overridden settings (test JWT secret)
     - Mock backend registry (no real DuckDB / Pixels)
     """
     from app.database import Base
+    _import_all_models()
 
-    engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+    engine = _build_shared_memory_engine()
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
@@ -446,8 +524,9 @@ async def async_client_rs256(test_settings_rs256, mock_backend_registry) -> Asyn
     Same as async_client but configured for RS256 JWT verification.
     """
     from app.database import Base
+    _import_all_models()
 
-    engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+    engine = _build_shared_memory_engine()
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
