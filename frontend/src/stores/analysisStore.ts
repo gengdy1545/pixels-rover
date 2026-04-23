@@ -1,3 +1,27 @@
+/**
+ * analysis feature 的客户端 in-flight state（Stage 2 §12 拆分后）。
+ *
+ * 收紧历史：旧版 store 同时承担了三种状态：
+ *   1. SSE 驱动的 in-flight 分析状态（task / plan / steps / status /
+ *      summary / warnings / error / isLoading / _connection）——由
+ *      `startAnalysis` 打开 SSE 流，`handleSSEEvent` 在事件回调里推
+ *      reducer；
+ *   2. 单一场历史会话的只读回放（`restoreSession`）——从 conversation
+ *      detail 的 history[0] 读出已完成分析数据，灌进 in-flight 形状
+ *      以共用同一套渲染；
+ *   3. 语义元数据缓存（`availableMetrics` + `loadMetrics`）——GET
+ *      `/api/v1/semantic/metrics` 的纯服务端快照。
+ *
+ * 第 3 类 Stage 2 迁到 TanStack Query（`features/semantic/`
+ * `useSemanticMetricsQuery`）；这里只保留第 1 + 第 2 类——它们是**非 GET**
+ * 的流式事件驱动 UI 状态，TanStack 处理不好、也不该强塞进去（TanStack
+ * 的 query 是"幂等纯 GET"语义模型，SSE 事件流不是）。
+ *
+ * 注意：`_connection` 持有底下 SSE 客户端的 abort handle，是纯客户端副作
+ * 用句柄，绝不能序列化或跨刷新持久化；任何把它搬进 TanStack 或 URL 的
+ * 尝试都是误解。
+ */
+
 import { create } from 'zustand';
 import type {
   AnalysisTask,
@@ -11,11 +35,10 @@ import type {
   SSEStepCompletedData,
   SSEStepFailedData,
   SSEErrorData,
-  SemanticMetric,
 } from '../shared/types/analysis';
 import type { SSEEventName, SSEConnection } from '../shared/types/sse';
 import type { ConversationHistoryItem } from '../shared/types/conversation';
-import { submitAnalysis, getSemanticMetrics } from '../shared/api';
+import { submitAnalysis } from '../shared/api';
 
 interface AnalysisState {
   threadId: string | null;
@@ -28,7 +51,6 @@ interface AnalysisState {
   warnings: string[];
   error: string | null;
   isLoading: boolean;
-  availableMetrics: SemanticMetric[];
   /** Active SSE connection handle for user cancellation. */
   _connection: SSEConnection | null;
 
@@ -38,7 +60,6 @@ interface AnalysisState {
   prepareThread: (threadId: string | null) => void;
   restoreSession: (session: ConversationHistoryItem | null, threadId: string | null) => void;
   reset: () => void;
-  loadMetrics: () => Promise<void>;
 }
 
 const initialState = {
@@ -57,10 +78,8 @@ const initialState = {
 
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   ...initialState,
-  availableMetrics: [],
 
   startAnalysis: (question: string, threadId: string) => {
-    // Cancel any existing connection
     get()._connection?.abort();
 
     set({
@@ -68,7 +87,6 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       threadId,
       isLoading: true,
       status: 'received',
-      availableMetrics: get().availableMetrics,
     });
 
     const connection = submitAnalysis(
@@ -202,7 +220,6 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     set({
       ...initialState,
       threadId,
-      availableMetrics: get().availableMetrics,
     });
   },
 
@@ -223,20 +240,10 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       summary: session.summary || null,
       warnings: session.warnings || [],
       error: session.error || null,
-      availableMetrics: get().availableMetrics,
     });
   },
 
   reset: () => {
-    set({ ...initialState, threadId: get().threadId, availableMetrics: get().availableMetrics });
-  },
-
-  loadMetrics: async () => {
-    try {
-      const metrics = await getSemanticMetrics();
-      set({ availableMetrics: metrics });
-    } catch {
-      // silently fail
-    }
+    set({ ...initialState, threadId: get().threadId });
   },
 }));

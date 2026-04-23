@@ -1,10 +1,14 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { message, Spin } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import AppHeader from '../../components/Header';
 import { useAnalysisStore } from '../../stores/analysisStore';
-import { useConversationStore } from '../../stores/conversationStore';
+import {
+  useThreadsQuery,
+  useConversationQuery,
+  useCreateConversationMutation,
+} from '../../features/conversation';
 import { useSchemaStore } from '../../stores/schemaStore';
 import './index.css';
 
@@ -16,40 +20,49 @@ const Home: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<string>('analysis');
   const currentThreadId = searchParams.get('threadId');
-  const {
-    threads,
-    currentThread,
-    isCreating,
-    loadThreads,
-    loadConversation,
-    createThread,
-    clearCurrent,
-  } = useConversationStore();
+
+  // 服务端快照全部走 TanStack Query（Stage 2 §12 拆分）：
+  //   - threads 列表 → useThreadsQuery
+  //   - 某 thread 的详情 → useConversationQuery(currentThreadId)
+  // 之前 conversationStore 里还会顺手缓存"currentThread 对象"用于
+  // Analysis 头部展示；这里改为从 threads 列表 find——TanStack 已经
+  // 保证 list 与 detail 的缓存一致性，不需要额外中间 state。
+  const { data: threads = [] } = useThreadsQuery();
+  const { data: conversationDetail, error: conversationError } =
+    useConversationQuery(currentThreadId);
+
+  const createConversationMutation = useCreateConversationMutation();
   const { prepareThread, restoreSession } = useAnalysisStore();
 
-  useEffect(() => {
-    loadThreads().catch(() => {
-      // Keep the page usable even if the thread list cannot be fetched.
-    });
-  }, [loadThreads]);
+  const currentThread = useMemo(
+    () =>
+      conversationDetail?.thread ??
+      threads.find((t) => t.threadId === currentThreadId) ??
+      null,
+    [conversationDetail, threads, currentThreadId],
+  );
 
   useEffect(() => {
     if (!currentThreadId) {
-      clearCurrent();
       prepareThread(null);
       return;
     }
+    if (conversationDetail) {
+      restoreSession(
+        conversationDetail.history[0] || null,
+        conversationDetail.thread.threadId,
+      );
+    }
+  }, [currentThreadId, conversationDetail, prepareThread, restoreSession]);
 
-    loadConversation(currentThreadId)
-      .then((detail) => restoreSession(detail.history[0] || null, detail.thread.threadId))
-      .catch(() => {
-        clearCurrent();
-        prepareThread(null);
-        const nextParams = new URLSearchParams(searchParams);
-        nextParams.delete('threadId');
-        setSearchParams(nextParams, { replace: true });
-      });
-  }, [clearCurrent, currentThreadId, loadConversation, prepareThread, restoreSession, searchParams, setSearchParams]);
+  useEffect(() => {
+    if (currentThreadId && conversationError) {
+      prepareThread(null);
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('threadId');
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [currentThreadId, conversationError, prepareThread, searchParams, setSearchParams]);
 
   const handleMenuSelect = (key: string) => {
     if (key === 'schemas' || key === 'analysis') {
@@ -74,7 +87,7 @@ const Home: React.FC = () => {
     }
 
     try {
-      const thread = await createThread({
+      const thread = await createConversationMutation.mutateAsync({
         backendId: selectedBackend,
         schemaName: selectedSchema || undefined,
         title: selectedSchema ? `${selectedSchema} 对话` : undefined,
@@ -109,7 +122,7 @@ const Home: React.FC = () => {
         collapsed={collapsed}
         threads={threads}
         currentThreadId={currentThreadId}
-        creatingThread={isCreating}
+        creatingThread={createConversationMutation.isPending}
       />
       <div className="home-main">
         <AppHeader collapsed={collapsed} onToggleCollapse={() => setCollapsed(!collapsed)} />

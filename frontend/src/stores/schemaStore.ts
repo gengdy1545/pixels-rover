@@ -1,85 +1,33 @@
+/**
+ * schema feature 的**纯客户端 UI state**——当前选中的 backend / schema。
+ *
+ * 收紧历史（Stage 2 `.notes/todolist.md §12`）：原先这个 store 既装了选
+ * 中态也装了 `backends` / `schemas` / `tables` / `columns` 四组服务端快
+ * 照；这些快照已经全数迁到 TanStack Query（`features/schema/` 下的 hooks
+ * + query-key 工厂）。这里只剩"用户当前在 UI 上点了哪个 backend / schema"
+ * 这种**不跨刷新持久、不共享上游契约**的前端瞬时状态，继续 zustand。
+ *
+ * 刻意不把"首次加载后自动选中 `backends[0]` / `schemas[0]`"这条副作用
+ * 搬进来——它曾经跟服务端请求耦合在同一个 action 里。现在 backends /
+ * schemas 走 `useBackendsQuery` / `useSchemasQuery`，副作用的正确承载点
+ * 是消费组件的 `useEffect`（`Sidebar` 里兜底），而不是这一层 store。
+ * store 层如果继续塞副作用，就会把 "TanStack 的数据到位" 和 "store 的
+ * 选中态被赋值" 重新耦合起来，等同于把快照状态变相搬回来。
+ */
+
 import { create } from 'zustand';
-import { metadataApi } from '../shared/api';
-import type { BackendInfo, TableInfo, ColumnInfo } from '../shared/types/analysis';
 
-interface SchemaState {
-  backends: BackendInfo[];
+interface SchemaUIState {
   selectedBackend: string | null;
-  schemas: string[];
   selectedSchema: string | null;
-  tables: Record<string, TableInfo[]>;
-  columns: Record<string, ColumnInfo[]>;
-
-  loadBackends: () => Promise<void>;
-  selectBackend: (backendId: string) => Promise<void>;
-  setSelectedSchema: (schema: string) => void;
-  loadTables: (schema: string) => Promise<void>;
-  loadColumns: (schema: string, table: string) => Promise<void>;
+  setSelectedBackend: (backendId: string | null) => void;
+  setSelectedSchema: (schemaName: string | null) => void;
 }
 
-export const useSchemaStore = create<SchemaState>((set, get) => ({
-  backends: [],
+export const useSchemaStore = create<SchemaUIState>((set) => ({
   selectedBackend: null,
-  schemas: [],
   selectedSchema: null,
-  tables: {},
-  columns: {},
-
-  loadBackends: async () => {
-    try {
-      const backends = await metadataApi.getBackends();
-      set({ backends });
-      if (backends.length > 0 && !get().selectedBackend) {
-        await get().selectBackend(backends[0].backend_id);
-      }
-    } catch {
-      // silently fail
-    }
-  },
-
-  selectBackend: async (backendId: string) => {
-    set({ selectedBackend: backendId, schemas: [], selectedSchema: null, tables: {} });
-    try {
-      const schemas = await metadataApi.getSchemas(backendId);
-      set({ schemas });
-      if (schemas.length > 0) {
-        set({ selectedSchema: schemas[0] });
-      }
-    } catch {
-      // silently fail
-    }
-  },
-
-  setSelectedSchema: (schema: string) => {
-    set({ selectedSchema: schema });
-  },
-
-  loadTables: async (schema: string) => {
-    const backendId = get().selectedBackend;
-    if (!backendId) return;
-    if (get().tables[schema]) return;
-    try {
-      const tables = await metadataApi.getTables(backendId, schema);
-      set((state) => ({
-        tables: { ...state.tables, [schema]: tables },
-      }));
-    } catch {
-      // silently fail
-    }
-  },
-
-  loadColumns: async (schema: string, table: string) => {
-    const backendId = get().selectedBackend;
-    if (!backendId) return;
-    const key = `${schema}.${table}`;
-    if (get().columns[key]) return;
-    try {
-      const columns = await metadataApi.getColumns(backendId, schema, table);
-      set((state) => ({
-        columns: { ...state.columns, [key]: columns },
-      }));
-    } catch {
-      // silently fail
-    }
-  },
+  setSelectedBackend: (backendId) =>
+    set({ selectedBackend: backendId, selectedSchema: null }),
+  setSelectedSchema: (schemaName) => set({ selectedSchema: schemaName }),
 }));

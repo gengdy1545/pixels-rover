@@ -12,6 +12,7 @@ import PlanTimeline from '../../components/PlanTimeline';
 import StepDetail from '../../components/StepDetail';
 import SummaryCard from '../../components/SummaryCard';
 import { useAnalysisStore } from '../../stores/analysisStore';
+import { useSemanticMetricsQuery } from '../../features/semantic';
 import type { SessionStatus } from '../../shared/types/analysis';
 import type { ConversationThread } from '../../shared/types/conversation';
 import './index.css';
@@ -49,17 +50,13 @@ const Analysis: React.FC<AnalysisProps> = ({ currentThread, onCreateConversation
     warnings,
     error,
     isLoading,
-    availableMetrics,
     startAnalysis,
     reset,
-    loadMetrics,
   } = useAnalysisStore();
 
-  const resultRef = useRef<HTMLDivElement>(null);
+  const { data: availableMetrics = [] } = useSemanticMetricsQuery();
 
-  useEffect(() => {
-    loadMetrics();
-  }, []);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (status === 'completed' || status === 'partial' || status === 'failed') {
