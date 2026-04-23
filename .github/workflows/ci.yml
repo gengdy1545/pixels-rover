@@ -129,3 +129,48 @@ jobs:
 
       - name: Run contract drift detector
         run: python3 scripts/check-contracts.py
+
+  # ---------------------------------------------------------------
+  # Contract-layer smoke test (todolist §15.1).
+  # Boots the full stack via docker compose (dev overlay supplies
+  # throw-away dev secrets + jwt-keygen init container so CI doesn't
+  # need real keys), waits on /gateway/ready, and asserts:
+  #   * /api/internal/* and /gateway/internal/* are externally 404
+  #     (no route declared — prevents leakage regression);
+  #   * /api/v1/{auth,analysis}/openapi.json reachable + parseable,
+  #     and their GATEWAY_*/INTERNAL_* errorCode enum values are a
+  #     subset of gateway/error-codes.json keys (C4 assertion tail);
+  #   * legacy /api/v1/{chat,query,metadata}/* return 404;
+  #   * gateway global response-rewrite injects X-Request-Id on
+  #     both happy-path and 404 responses;
+  #   * register -> login -> gateway-auth -> auth introspect ->
+  #     X-Auth-* injection chain returns a proper envelope.
+  # This is the only CI stage that exercises the full data plane,
+  # so it runs last and blocks merge on failure.
+  # ---------------------------------------------------------------
+  smoke:
+    name: Contract smoke (scripts/smoke.sh)
+    runs-on: ubuntu-latest
+    needs: [contracts]
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install runtime dependencies (jq)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run scripts/smoke.sh
+        env:
+          # Port 80 would need root on GitHub runners; 9080 matches
+          # the APISIX default and is free on ubuntu-latest.
+          GATEWAY_PORT: "9080"
+          SMOKE_GATEWAY_PORT: "9080"
+          # The runner's MySQL (if any) is not bound on 13306, so
+          # this avoids the "port already in use" path.
+          MYSQL_PORT: "13306"
+          # Budget generously: cold docker build + Flyway/Alembic
+          # bootstrap + jwt-keygen can take ~3-4 minutes on a
+          # fresh runner.
+          SMOKE_READY_TIMEOUT_SEC: "480"
+        run: bash scripts/smoke.sh

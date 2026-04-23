@@ -122,10 +122,6 @@ _REQUIRED_ENV_CONSUMERS = (
     / "io" / "pixelsdb" / "pixels" / "rover" / "bootstrap"
     / "RequiredEnvValidator.java",
     REPO_ROOT / "services" / "assistant-service" / "app" / "required_env.py",
-    # smoke.sh is a future §15.1 PR. Until then we still expect this
-    # script to declare the intent by grepping for the path once it
-    # exists — the check below tolerates a missing file with a clear
-    # "pending: §15.1" message rather than failing the gate.
     REPO_ROOT / "scripts" / "smoke.sh",
 )
 
@@ -1266,13 +1262,6 @@ def check_required_env_consumers() -> CheckResult:
     needle = "config/required-env.yaml"
     for path in _REQUIRED_ENV_CONSUMERS:
         if not path.exists():
-            # smoke.sh is the known "future PR" case. Tolerate its absence
-            # with an explicit message instead of silently skipping —
-            # that way "oh I forgot to add smoke.sh as a consumer" still
-            # surfaces, while "oh smoke.sh hasn't been written yet" doesn't
-            # block PRs for unrelated §14 work.
-            if path.name == "smoke.sh":
-                continue
             result.failures.append(
                 f"consumer file missing: {path.relative_to(REPO_ROOT)}"
             )
