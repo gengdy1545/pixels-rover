@@ -529,6 +529,11 @@ nginx_config:
 - **SSE / 长轮询路由必须单独声明**：read 超时**必须是具体上界（建议区间 10–30 分钟，当前阶段基线 = 15 分钟）**，同时在 upstream 层禁用响应缓冲。
   - ❌ **禁止**把 SSE 路由的 `read_timeout` 设为 `0` / 无限 / 超过 30 分钟。原因：该 `read_timeout` 是 [§5.3.4](#534-本接口与-sse-长连接的作用边界) in-flight SSE 面对 session 主动失效的**收口机制**——上界过大或无上界会让"用户 logout 后连接仍有效"窗口拉到不可接受长度。调大此值需联动评估 §5.3.4 的窗口语义，不走单 PR 改动。
   - 前端对应重连策略与此数值成对（见 [`./frontend.md §4.6`](./frontend.md)），两层修改必须同 PR。
+- **SSE 路由的最小硬模板**（`apisix.yaml` 中每条 SSE route 必须三件套同时满足，缺一不可，否则 `scripts/check-contracts.py sse-routes-explicit-timeout-and-buffering` 断言失败）：
+  1. **`timeout.read` 显式声明 ∈ [600, 1800] 秒**——上界 = §5.3.4 的安全窗口；下界 = 业务侧 LLM 长任务的合理下限，避免被默认 30s 截断。
+  2. **`plugins.proxy-control.request_buffering: false`**——关掉 nginx 请求体缓冲。SSE submit 请求体本身小，此项主要是把"未来出现 long-upload-then-stream 模式"的安全网先垫好；同时也把"这是 SSE 路由"这一意图留在 yaml 一面、可被脚本扫描。
+  3. **响应缓冲由 upstream 用 `X-Accel-Buffering: no` 响应头按响应级关闭**——APISIX Standalone YAML 不暴露 `proxy_buffering off` 一等字段，nginx 读到该 header 会自动对该响应禁用 `proxy_buffering`，这是 nginx 官方支持的逐响应开关。后端 SSE handler 必须返回该响应头（参见 [`./backend.md §6.6`](./backend.md)）。**反过来——网关侧不应再用 `serverless-pre-function` 之类的 hack 去强行设 `ngx.var.upstream_no_buffering`**，规避两套机制并存。
+  - 新增 SSE 路由时**两处同改**：（a）`apisix.yaml` 按上述模板声明；（b）`scripts/check-contracts.py` 的 `_SSE_ROUTE_IDS` 元组追加该 route id。任一漏改即被 CI 拦下。
 - LLM 相关路由读超时可以更长，但必须**显式写出**，禁止依赖默认值。
 
 ### 6.4 CORS

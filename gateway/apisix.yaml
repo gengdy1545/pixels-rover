@@ -200,13 +200,40 @@ routes:
     upstream_id: assistant-service
 
   # ------------------------------------------------------------------
-  # Assistant-service — analysis (submit + detail)
+  # Assistant-service — analysis submit (SSE).
+  #
+  # SSE route contract (gateway.md §6.3 + §5.3.4):
+  #   * `timeout.read = 900` (15 min baseline; ≤ 30 min hard cap per
+  #     §6.3) — this read timeout is ALSO the upper bound for the
+  #     "user logged out but in-flight SSE still alive" window
+  #     (§5.3.4); `invalidate_session` does NOT kill in-flight SSE,
+  #     so the read_timeout doubles as the security collapse window.
+  #     Raising this value requires re-evaluating §5.3.4 — not a
+  #     single-PR change.
+  #   * `proxy-control.request_buffering = false` — disable nginx
+  #     request body buffering. Strictly speaking SSE submit body is
+  #     small (a JSON question), but we set it for documented intent
+  #     so future "long upload then SSE" patterns inherit the right
+  #     baseline.
+  #   * Response-side `proxy_buffering` is disabled per-response by
+  #     the upstream sending `X-Accel-Buffering: no`
+  #     (services/assistant-service/app/api/analysis.py). We rely on
+  #     the upstream-driven signal rather than route-level config
+  #     because APISIX standalone YAML doesn't expose
+  #     `proxy_buffering off` as a first-class field; the upstream
+  #     header is the canonical nginx mechanism.
+  # check-contracts.py `sse-routes-explicit-timeout-and-buffering`
+  # enforces these as machine assertions.
   # ------------------------------------------------------------------
   - id: analysis-submit
     name: analysis-submit
     uri: /api/v1/analysis
     methods: [POST, OPTIONS]
     priority: 880
+    timeout:
+      connect: 5
+      send: 60
+      read: 900
     plugins:
       gateway-auth:
         require_auth: true
@@ -216,7 +243,13 @@ routes:
         negative_cache_ttl: 5
         introspect_timeout_ms: 800
         introspect_total_budget_ms: 1500
+      proxy-control:
+        request_buffering: false
     upstream_id: assistant-service
+
+  # ------------------------------------------------------------------
+  # Assistant-service — analysis detail (non-SSE GET; default timeouts)
+  # ------------------------------------------------------------------
 
   - id: analysis-detail
     name: analysis-detail

@@ -566,6 +566,97 @@ def check_positive_cache_invalidate_linkage() -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
+# SSE route hardening (A1)
+# ---------------------------------------------------------------------------
+
+# Known SSE route ids in apisix.yaml. Each entry MUST satisfy the contract
+# documented in gateway/apisix.yaml above the route declaration AND in
+# gateway.md §6.3 / §5.3.4:
+#
+#   * timeout.read in [_SSE_READ_TIMEOUT_MIN_S, _SSE_READ_TIMEOUT_MAX_S]
+#     — 10 min lower bound to keep long-running LLM analyses alive;
+#       30 min upper bound because the read_timeout doubles as the
+#       in-flight session-invalidation collapse window (§5.3.4).
+#   * proxy-control plugin with request_buffering: false.
+#
+# Adding a new SSE route: append the route id here AND mirror the
+# template in apisix.yaml. The check below will fail loudly if either
+# half drifts.
+_SSE_ROUTE_IDS: tuple[str, ...] = ("analysis-submit",)
+_SSE_READ_TIMEOUT_MIN_S = 600   # 10 min
+_SSE_READ_TIMEOUT_MAX_S = 1800  # 30 min hard cap (gateway.md §6.3)
+
+
+@register_check(
+    "sse-routes-explicit-timeout-and-buffering",
+    "Each known SSE route in apisix.yaml declares an explicit read "
+    "timeout in [600, 1800]s and disables request buffering "
+    "(gateway.md §6.3 + §5.3.4 collapse-window rule).",
+)
+def check_sse_route_hardening() -> CheckResult:
+    result = CheckResult(
+        "sse-routes-explicit-timeout-and-buffering",
+        "SSE routes: explicit read_timeout + request_buffering off",
+    )
+    apisix = _load_apisix_yaml()
+    routes_by_id: dict[str, dict] = {}
+    for r in apisix.get("routes") or []:
+        rid = r.get("id")
+        if isinstance(rid, str):
+            routes_by_id[rid] = r
+
+    for rid in _SSE_ROUTE_IDS:
+        route = routes_by_id.get(rid)
+        if route is None:
+            result.failures.append(
+                f"SSE route id {rid!r} listed in _SSE_ROUTE_IDS but missing "
+                "from apisix.yaml — either restore the route or remove the "
+                "registry entry"
+            )
+            continue
+
+        timeout = route.get("timeout")
+        if not isinstance(timeout, dict) or "read" not in timeout:
+            result.failures.append(
+                f"route {rid}: missing explicit `timeout.read` — SSE routes "
+                "must NOT inherit the default 30s; declare an upper bound "
+                "in [600, 1800] seconds (gateway.md §6.3)"
+            )
+        else:
+            read = timeout.get("read")
+            if not isinstance(read, int):
+                result.failures.append(
+                    f"route {rid}: timeout.read must be an integer (seconds), "
+                    f"got {read!r}"
+                )
+            elif not (_SSE_READ_TIMEOUT_MIN_S <= read <= _SSE_READ_TIMEOUT_MAX_S):
+                result.failures.append(
+                    f"route {rid}: timeout.read = {read}s outside allowed "
+                    f"window [{_SSE_READ_TIMEOUT_MIN_S}, "
+                    f"{_SSE_READ_TIMEOUT_MAX_S}]s — "
+                    "below the lower bound truncates legitimate long "
+                    "analyses; above the upper bound enlarges the §5.3.4 "
+                    "session-invalidation collapse window beyond policy"
+                )
+
+        plugins = route.get("plugins") or {}
+        proxy_control = plugins.get("proxy-control")
+        if not isinstance(proxy_control, dict):
+            result.failures.append(
+                f"route {rid}: missing `proxy-control` plugin — SSE routes "
+                "must declare `proxy-control: { request_buffering: false }` "
+                "to disable nginx request buffering"
+            )
+        elif proxy_control.get("request_buffering") is not False:
+            result.failures.append(
+                f"route {rid}: proxy-control.request_buffering must be "
+                f"explicitly `false`, got {proxy_control.get('request_buffering')!r}"
+            )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # gateway-ready probes[] ↔ internal locations (B1+B2)
 # ---------------------------------------------------------------------------
 
