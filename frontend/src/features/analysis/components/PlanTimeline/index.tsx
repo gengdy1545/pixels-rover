@@ -7,7 +7,7 @@ import {
   ClockCircleOutlined,
   MinusCircleOutlined,
 } from '@ant-design/icons';
-import type { PlanStep, StepStatus } from '../../shared/types/analysis';
+import type { PlanStep, StepStatus } from '../../../../shared/types/analysis';
 
 interface PlanTimelineProps {
   steps: PlanStep[];

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Input, Button, Tag, Space } from 'antd';
 import { SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import type { SemanticMetric } from '../../shared/types/analysis';
+import type { SemanticMetric } from '../../../../shared/types/analysis';
 import './index.css';
 
 interface AnalysisInputProps {

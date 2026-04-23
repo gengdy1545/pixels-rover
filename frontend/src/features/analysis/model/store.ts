@@ -1,5 +1,6 @@
 /**
- * analysis feature 的客户端 in-flight state（Stage 2 §12 拆分后）。
+ * analysis feature 的客户端 in-flight state（Stage 3 §10 PR-4 从
+ * `stores/analysisStore.ts` 迁入；Stage 2 §12 已经先做过一轮职责收紧）。
  *
  * 收紧历史：旧版 store 同时承担了三种状态：
  *   1. SSE 驱动的 in-flight 分析状态（task / plan / steps / status /
@@ -12,7 +13,7 @@
  *   3. 语义元数据缓存（`availableMetrics` + `loadMetrics`）——GET
  *      `/api/v1/semantic/metrics` 的纯服务端快照。
  *
- * 第 3 类 Stage 2 迁到 TanStack Query（`features/semantic/`
+ * 第 3 类 Stage 2 已迁到 TanStack Query（`features/semantic/`
  * `useSemanticMetricsQuery`）；这里只保留第 1 + 第 2 类——它们是**非 GET**
  * 的流式事件驱动 UI 状态，TanStack 处理不好、也不该强塞进去（TanStack
  * 的 query 是"幂等纯 GET"语义模型，SSE 事件流不是）。
@@ -20,6 +21,10 @@
  * 注意：`_connection` 持有底下 SSE 客户端的 abort handle，是纯客户端副作
  * 用句柄，绝不能序列化或跨刷新持久化；任何把它搬进 TanStack 或 URL 的
  * 尝试都是误解。
+ *
+ * import 边界：`submitAnalysis` 来自同 feature 的 `services/analysisApi`，
+ * 不再走 `shared/api` barrel——Stage 3 §10 PR-4 把 analysis endpoint
+ * 收回 feature 私有，shared/api 只剩通用 HTTP / SSE 基础设施。
  */
 
 import { create } from 'zustand';
@@ -35,10 +40,10 @@ import type {
   SSEStepCompletedData,
   SSEStepFailedData,
   SSEErrorData,
-} from '../shared/types/analysis';
-import type { SSEEventName, SSEConnection } from '../shared/types/sse';
-import type { ConversationHistoryItem } from '../shared/types/conversation';
-import { submitAnalysis } from '../shared/api';
+} from '../../../shared/types/analysis';
+import type { SSEEventName, SSEConnection } from '../../../shared/types/sse';
+import type { ConversationHistoryItem } from '../../../shared/types/conversation';
+import { submitAnalysis } from '../services/analysisApi';
 
 interface AnalysisState {
   threadId: string | null;

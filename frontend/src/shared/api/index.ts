@@ -1,20 +1,25 @@
 // ════════════════════════════════════════
-// Unified API Client — single entry point for all API modules
+// shared/api barrel — 通用 HTTP / SSE 基础设施唯一入口（PR-4 终态）。
 // ════════════════════════════════════════
-
-// API modules
 //
-// 当前仅 `analysis` 模块还住在 shared/api/modules——主要原因是 SSE 客户端
-// 与 analysis endpoint 紧耦合（`submitAnalysis` 直接消费 `openSSEStream`），
-// PR-4 会把 analysis pages / components / SSE-orchestrator 一起搬进
-// `features/analysis/`，届时这一行也跟着撤下，shared/api 退回纯通用层
-// （axios 实例 + envelope 解包 + 401 重放队列 + 通用 SSE）。
+// 这一层只放"任何 feature 都会复用的 HTTP/SSE 基础能力"：
+//   - axios 实例 + envelope 解包 + 401 重放队列（client.ts）
+//   - 通用 SSE 客户端（sse.ts）
+//   - `ApiError` 结构化异常（apiError.ts）
+//   - HTTP / SSE / envelope 的类型 re-export
 //
-// 已迁的（不要再从这里 re-export）：
-//   - `authApi`           → `features/auth/services/authApi.ts`         （Stage 3 §10 PR-2）
-//   - `conversationApi`   → `features/conversation/services/conversationApi.ts` （Stage 3 §10 PR-3）
-//   - `metadataApi`       → `features/schema/services/metadataApi.ts`   （Stage 3 §10 PR-3）
-export { submitAnalysis, getAnalysisResult, getSemanticMetrics, getSemanticDimensions } from './modules/analysis';
+// 业务 endpoint 不再住在这里。它们按 feature 归属下沉到各自的
+// services/，由该 feature 的 hook 独占调用：
+//   - `authApi`         → `features/auth/services/authApi.ts`         （Stage 3 §10 PR-2）
+//   - `conversationApi` → `features/conversation/services/conversationApi.ts` （Stage 3 §10 PR-3）
+//   - `metadataApi`     → `features/schema/services/metadataApi.ts`   （Stage 3 §10 PR-3）
+//   - `submitAnalysis` / `getAnalysisResult`
+//                       → `features/analysis/services/analysisApi.ts` （Stage 3 §10 PR-4）
+//   - `getSemanticMetrics` / `getSemanticDimensions`
+//                       → `features/semantic/services/semanticApi.ts` （Stage 3 §10 PR-4）
+//
+// 不要再往这里加业务 endpoint：会反向破坏 lint-0（feature 边界）和 PR-4
+// 之后形成的"shared/api 纯基础设施"约束。
 
 // SSE client
 export { openSSEStream } from './sse';

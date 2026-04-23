@@ -1,3 +1,25 @@
+/**
+ * Analysis 页——analysis feature 的顶层视图（Stage 3 §10 PR-4 从
+ * `pages/Analysis/` 迁入）。
+ *
+ * 这一层只负责"把 in-flight store 状态拼成可视化布局"：状态从
+ * `useAnalysisStore` 拿、可用指标列表从 `features/semantic` 的
+ * `useSemanticMetricsQuery` 拿、各子卡片是 feature 自有 components。
+ *
+ * 受 Home 编排：
+ *   - `currentThread` 来自 Home（URL → useThreadsQuery 派生）；为空时
+ *     渲染"先建对话"占位 + 调 `onCreateConversation` 回调；
+ *   - SSE 编排不在这里——`startAnalysis` 把 SSE 生命周期收在 store 里，
+ *     这里只 dispatch 一个用户问题。
+ *
+ * 为什么 Analysis 留在 `features/analysis/components/Analysis/` 而不进
+ * `app/pages/`：Login / Register / Reports 的迁位都是同一规则——单
+ * feature 的页面随 feature 走；只有跨 feature shell（Home）才挂在
+ * `pages/` 顶层。barrel 只暴露 lazy-wrapped 的 `Analysis`，让 Home
+ * 继续通过 `React.lazy(() => import('@/features/analysis'))` 实现 chunk
+ * 分割。
+ */
+
 import React, { useEffect, useRef } from 'react';
 import { Button, Empty, Spin, Space, Typography } from 'antd';
 import {
@@ -6,15 +28,15 @@ import {
   ExclamationCircleFilled,
   InfoCircleFilled,
 } from '@ant-design/icons';
-import AnalysisInput from '../../components/AnalysisInput';
-import TaskCard from '../../components/TaskCard';
-import PlanTimeline from '../../components/PlanTimeline';
-import StepDetail from '../../components/StepDetail';
-import SummaryCard from '../../components/SummaryCard';
-import { useAnalysisStore } from '../../stores/analysisStore';
-import { useSemanticMetricsQuery } from '../../features/semantic';
-import type { SessionStatus } from '../../shared/types/analysis';
-import type { ConversationThread } from '../../shared/types/conversation';
+import AnalysisInput from '../AnalysisInput';
+import TaskCard from '../TaskCard';
+import PlanTimeline from '../PlanTimeline';
+import StepDetail from '../StepDetail';
+import SummaryCard from '../SummaryCard';
+import { useAnalysisStore } from '../../model/store';
+import { useSemanticMetricsQuery } from '../../../semantic';
+import type { SessionStatus } from '../../../../shared/types/analysis';
+import type { ConversationThread } from '../../../../shared/types/conversation';
 import './index.css';
 
 const { Text, Title } = Typography;

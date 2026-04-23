@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import { AppHeader } from '../../features/auth';
 import { Reports } from '../../features/report';
-import { useAnalysisStore } from '../../stores/analysisStore';
+import { Analysis, useAnalysisStore } from '../../features/analysis';
 import {
   useThreadsQuery,
   useConversationQuery,
@@ -12,8 +12,6 @@ import {
 } from '../../features/conversation';
 import { useSchemaStore } from '../../stores/schemaStore';
 import './index.css';
-
-const Analysis = React.lazy(() => import('../Analysis'));
 
 const Home: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, Descriptions, Tag, Progress } from 'antd';
 import { AimOutlined } from '@ant-design/icons';
-import type { AnalysisTask } from '../../shared/types/analysis';
+import type { AnalysisTask } from '../../../../shared/types/analysis';
 
 interface TaskCardProps {
   task: AnalysisTask;

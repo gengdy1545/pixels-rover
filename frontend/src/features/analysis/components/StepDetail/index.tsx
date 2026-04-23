@@ -3,7 +3,7 @@ import { Collapse, Table, Tag, Empty } from 'antd';
 import { CodeOutlined, TableOutlined } from '@ant-design/icons';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
-import type { PlanStep } from '../../shared/types/analysis';
+import type { PlanStep } from '../../../../shared/types/analysis';
 
 interface StepDetailProps {
   steps: PlanStep[];
