@@ -2,7 +2,7 @@
 
 > 本文件是**运维可执行 runbook**——描述 Pixels Rover 在生产环境如何生成、交付、部署 `auth-service` 使用的 RS256 JWT 密钥对。设计沿革与密钥模型定义见 [`../design/jwt-rotation.md`](../design/jwt-rotation.md)；与 dev 文档的硬约束对齐见 [`../development/backend.md §13.1`](../development/backend.md)。
 >
-> **适用边界**：本文件只覆盖**生产环境**的密钥 provisioning。dev 环境（本地 `docker compose up`）继续使用 `docker-compose.yml` 中的 `jwt-keygen` 一次性初始化容器，不走本 runbook。
+> **适用边界**：本文件只覆盖**生产环境**的密钥 provisioning。dev 环境**走 `docker-compose.dev.yml` override**（`docker compose -f docker-compose.yml -f docker-compose.dev.yml up`），由 override 里的 `jwt-keygen` 一次性初始化容器把密钥写入临时 named volume。生产 `docker-compose.yml` 本身**不含** `jwt-keygen`、**不含** `jwt-keys` named volume —— 这是 §14 / B5 的硬边界，见 §4.2。
 
 ## 1. 架构前提（复核）
 
@@ -80,41 +80,52 @@ chmod 644 2026-prod-a-public.pem
 
 ### 4.2 生产节点的 bind-mount 布局
 
-在生产节点上选定一个**只对 docker daemon + 运维账号可读**的目录作为卷源（例如 `/opt/pixels-rover/jwt-keys/`），将上一节交付的所有 `.pem` 文件放入该目录。
+在生产节点上选定一个**只对 docker daemon + 运维账号可读**的目录作为卷源，将上一节交付的所有 `.pem` 文件放入该目录。仓库里默认指向的是**项目根目录下的 `keys/jwt/`**（见 `docker-compose.yml`：`./keys/jwt:/jwt-keys:ro`）；如果生产节点上你想用 `/opt/pixels-rover/jwt-keys/` 这种路径，要么软链接 `keys/jwt` 过去，要么在生产节点用环境变量 / compose override 覆盖源路径（不要直接改在仓库的 `docker-compose.yml` 里，那是生产基线）。
 
-`docker-compose.yml` 在生产上**不使用** dev 默认的 `jwt-keys` named volume + `jwt-keygen` init 容器组合；改为 bind mount 宿主目录到 `auth-service` 容器的 `/jwt-keys`：
+§14 起 `docker-compose.yml` 本身**已删除** `jwt-keygen` init 容器 + `jwt-keys` named volume ——生产编排就是 `docker-compose.yml`，无需再维护一份"去掉 dev 项"的 `docker-compose.prod.yml`。同时 auth-service 已经在 compose 里 bind-mount 好 `./keys/jwt:/jwt-keys:ro`，只要你在主机 `keys/jwt/` 下面放好密钥即可：
 
-```yaml
-# docker-compose.prod.yml 或等价生产编排
-services:
-  auth-service:
-    volumes:
-      - /opt/pixels-rover/jwt-keys:/jwt-keys:ro
-    environment:
-      JWT_ALGORITHM: RS256
-      JWT_ACTIVE_KID: 2026-prod-a
-      JWT_PRIVATE_KEY_PATH: /jwt-keys/2026-prod-a-private.pem
-      JWT_PUBLIC_KEY_PATH: /jwt-keys/2026-prod-a-public.pem
-      JWT_PUBLIC_KEYS_DIRECTORY: /jwt-keys
-  # 注意：生产编排里 **必须移除** dev 默认的 jwt-keygen service。保留该 init 容器 =
-  # 让生产自动生成密钥，违反受控 provisioning 原则。
+```bash
+# 生产节点（一次性）
+mkdir -p /srv/pixels-rover/keys/jwt
+# 按 §4.1 把受控工作站上的 pem 文件传进去
+chmod 700 /srv/pixels-rover/keys/jwt
+chmod 600 /srv/pixels-rover/keys/jwt/2026-prod-a-private.pem
+
+# 把 /srv/pixels-rover/keys 软链进代码库根目录（或直接把代码检出到 /srv/pixels-rover/）
+ln -s /srv/pixels-rover/keys "$REPO/keys"
 ```
+
+对应的 `.env`（§14 格式，所有必填项无默认值，见 `config/required-env.yaml`）：
+
+```ini
+JWT_ALGORITHM=RS256
+JWT_ACTIVE_KID=2026-prod-a
+JWT_PRIVATE_KEY_PATH=/jwt-keys/2026-prod-a-private.pem
+JWT_PUBLIC_KEY_PATH=/jwt-keys/2026-prod-a-public.pem
+# JWT_SECRET 必须留空（RS256 部署下出现非空即 FATAL，见下）。
+```
+
+`JWT_PUBLIC_KEYS_DIRECTORY` 在 `docker-compose.yml` 里被硬编码成 `/jwt-keys`，轮换时不需要在 `.env` 里管。
 
 硬约束：
 
-- ❌ **禁止**在生产编排里保留 `jwt-keygen` 容器 —— 即便它只在 volume 为空时跑一次，也会在运维人员第一次手滑删除卷之后自动"重新生成"一套全新密钥，瞬间把所有现存 JWT 打成无效。
+- ❌ **禁止**在生产编排里保留 `jwt-keygen` 容器 —— 即便它只在 volume 为空时跑一次，也会在运维人员第一次手滑删除卷之后自动"重新生成"一套全新密钥，瞬间把所有现存 JWT 打成无效。这是 §14 从 `docker-compose.yml` 删掉该服务的首要理由；`docker-compose.dev.yml` override 里的 `jwt-keygen` 只用于本地 dev 循环，**禁止**在生产加载该 override。
 - ❌ **禁止**把宿主目录挂载成 `:rw`（读写）到 auth-service 容器 —— auth-service 进程对密钥目录只有读需求。
 - ❌ **禁止**把同一 bind mount 同时挂载到 `gateway` / `assistant-service` 等其他容器（见 §1 架构前提）。
+- ❌ **禁止**在生产节点上 `docker compose -f ... -f docker-compose.dev.yml up` —— dev override 包含若干"方便 dev 走通但不安全"的兜底（dev-grade introspection secret、CSP=development、OpenAPI public 等）。
 
 ### 4.3 启动期自检
 
-auth-service 启动时会按 `backend.md §13.1` 做以下硬校验——任一失败 **FATAL 退出**，不要"先忍一下"启动：
+auth-service 启动时由 `io.pixelsdb.pixels.rover.bootstrap.RequiredEnvValidator`（§14 / `backend.md §13.1`）按 `config/required-env.yaml` 的 `services.auth-service` 块做以下硬校验——任一失败 **FATAL 退出**，不要"先忍一下"启动：
 
-1. `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` 文件存在且可读；
-2. 两个文件构成合法密钥对（启动期做一次 sign → verify 自测）；
-3. `JWT_PUBLIC_KEYS_DIRECTORY` 下所有 `*-public.pem` 可枚举、可解析；
-4. `JWT_ACTIVE_KID` 对应的公私钥对在上述目录中确实存在；
-5. `JWT_SECRET` **未**在环境中设置（RS256 部署下 HS256 变量出现即视为配置漂移，FATAL）。
+1. `JWT_ALGORITHM ∈ {HS256, RS256}`；
+2. `JWT_ALGORITHM=RS256` 时：`JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` 文件存在、可读、是合法 PEM；
+3. 用 (2) 中两文件构成的密钥对做一次 sign → verify 自测——任一步失败就是密钥对不匹配，**禁止**启动；
+4. `JWT_ACTIVE_KID` 非空且非占位值（`default-hmac` / `dev-rsa-1` / `<set-me>` 均被 `forbidden_values` 拦住）；
+5. `JWT_SECRET` **必须为空**（RS256 部署下 HS256 变量出现即 `forbidden_when: JWT_ALGORITHM=RS256` 触发 FATAL）；
+6. `INTERNAL_INTROSPECTION_SECRET` 非空、≥ 16 UTF-8 字节、非 `"change-me"` 占位。
+
+以上规则由 `config/required-env.yaml` 声明、由 Java Validator + `gateway/validate-required-env.py` + `services/assistant-service/app/required_env.py` 三个消费者在启动期实际校验，`scripts/check-contracts.py` 的 `required-env-yaml-consumers-registered` 断言保证五处消费点与 SSOT 一致。
 
 启动成功后日志应打印（**不**打印密钥内容，只打印元信息）：
 

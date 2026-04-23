@@ -1,0 +1,57 @@
+# JSON Schema (expressed as YAML) for config/required-env.yaml.
+#
+# This schema is enforced by scripts/check-contracts.py's
+# `required-env-yaml-conforms-to-schema` check. Adding a new DSL field
+# is therefore a TWO-line change (schema here + documentation in
+# required-env.yaml header) — making every extension visible to review.
+#
+# NOTE: This is not a full JSON-Schema draft-07 document. We only use
+# the subset the checker supports: type, required, additionalProperties,
+# patternProperties, items, enum, minLength, minimum, pattern. Keep the
+# checker (`_validate_required_env_schema`) in sync if you add a feature.
+$schema: "http://json-schema.org/draft-07/schema#"
+title: Pixels Rover required-env DSL
+type: object
+required: [services]
+additionalProperties: false
+properties:
+  services:
+    type: object
+    additionalProperties:
+      type: array
+      items:
+        type: object
+        required: [name, description]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          description:
+            type: string
+            minLength: 1
+          required:
+            type: boolean
+          required_when:
+            type: string
+            pattern: "^[A-Z][A-Z0-9_]*=.+$"
+          forbidden_when:
+            type: string
+            pattern: "^[A-Z][A-Z0-9_]*=.+$"
+          enum:
+            type: array
+            items:
+              type: string
+          forbidden_values:
+            type: array
+            items:
+              type: string
+          min_utf8_bytes:
+            type: integer
+            minimum: 1
+          file_must_exist:
+            type: boolean
+          env_example:
+            type: string
+          sensitive:
+            type: boolean

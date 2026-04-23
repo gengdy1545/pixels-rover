@@ -82,11 +82,17 @@ public class JwtTokenProvider
     private final long accessTokenExpirationMs;
     private final long refreshTokenExpirationMs;
 
+    // §14: inline @Value defaults for security-sensitive fields were removed
+    // along with the defaults in application.properties. The authoritative
+    // fail-fast contract lives in config/required-env.yaml and is enforced by
+    // RequiredEnvValidator at startup; the empty fallback here only exists so
+    // @WebMvcTest / @SpringBootTest contexts (which skip the validator) can
+    // still instantiate the bean for unrelated wiring.
     public JwtTokenProvider(
-            @Value("${jwt.secret:cGl4ZWxzZGItcm92ZXItand0LXNlY3JldC1rZXktMjAyNC1taW5pbXVtLTI1Ni1iaXRz}") String secret,
-            @Value("${jwt.algorithm:HS256}") String algorithm,
+            @Value("${jwt.secret:}") String secret,
+            @Value("${jwt.algorithm:}") String algorithm,
             @Value("${jwt.issuer:pixels-rover-auth-service}") String issuer,
-            @Value("${jwt.active-kid:default-hmac}") String activeKid,
+            @Value("${jwt.active-kid:}") String activeKid,
             @Value("${jwt.private-key-pem:}") String privateKeyPem,
             @Value("${jwt.private-key-path:}") String privateKeyPath,
             @Value("${jwt.public-key-pem:}") String publicKeyPem,

@@ -15,6 +15,7 @@
  */
 package io.pixelsdb.pixels.rover;
 
+import io.pixelsdb.pixels.rover.bootstrap.RequiredEnvValidator;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -23,6 +24,14 @@ public class PixelsRoverApplication
 {
 	public static void main(String[] args)
 	{
-		SpringApplication.run(PixelsRoverApplication.class, args);
+		// RequiredEnvValidator (§14) is intentionally attached ONLY here —
+		// Spring's test infrastructure creates its own SpringApplication
+		// without invoking main(), so @SpringBootTest / @WebMvcTest contexts
+		// skip the validator and continue to load on empty-default
+		// placeholders. Production boot (container ENTRYPOINT → main) always
+		// engages the validator against config/required-env.yaml.
+		SpringApplication app = new SpringApplication(PixelsRoverApplication.class);
+		app.addListeners(new RequiredEnvValidator());
+		app.run(args);
 	}
 }

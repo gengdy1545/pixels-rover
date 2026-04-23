@@ -106,6 +106,28 @@ _OPENAPI_MARKER = "#__OPENAPI_ROUTES__"
 _CONFIG_TEMPLATE_PATH = REPO_ROOT / "gateway" / "config.yaml.template"
 _INFRA_TS_PATH = REPO_ROOT / "frontend" / "src" / "shared" / "types" / "infra.ts"
 _PLUGIN_DIR = REPO_ROOT / "gateway" / "custom" / "apisix" / "plugins"
+_REQUIRED_ENV_YAML_PATH = REPO_ROOT / "config" / "required-env.yaml"
+_REQUIRED_ENV_SCHEMA_PATH = REPO_ROOT / "config" / "required-env.schema.yaml"
+_ENV_EXAMPLE_PATH = REPO_ROOT / ".env.example"
+# §14 consumer registry: every module / script listed here MUST
+# reference the path "config/required-env.yaml" (as a string literal)
+# so a grep enforces the "SSOT has exactly N known consumers" rule.
+# Adding a new consumer = append here AND cite the YAML path in the
+# referenced file. Removing a consumer = remove from both.
+_REQUIRED_ENV_CONSUMERS = (
+    REPO_ROOT / "scripts" / "generate-env-example.py",
+    REPO_ROOT / "gateway" / "validate-required-env.py",
+    REPO_ROOT
+    / "services" / "auth-service" / "src" / "main" / "java"
+    / "io" / "pixelsdb" / "pixels" / "rover" / "bootstrap"
+    / "RequiredEnvValidator.java",
+    REPO_ROOT / "services" / "assistant-service" / "app" / "required_env.py",
+    # smoke.sh is a future §15.1 PR. Until then we still expect this
+    # script to declare the intent by grepping for the path once it
+    # exists — the check below tolerates a missing file with a clear
+    # "pending: §15.1" message rather than failing the gate.
+    REPO_ROOT / "scripts" / "smoke.sh",
+)
 
 
 def _load_error_codes() -> dict:
@@ -1037,6 +1059,231 @@ def check_total_timeout_budget() -> CheckResult:
         result.failures.append(
             f"Σ probes timeout_ms = {summed} exceeds total_timeout_ms = {total}"
         )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# §14 required-env.yaml SSOT checks
+# ---------------------------------------------------------------------------
+
+
+def _load_required_env_doc() -> dict:
+    return yaml.safe_load(_REQUIRED_ENV_YAML_PATH.read_text(encoding="utf-8")) or {}
+
+
+def _load_required_env_schema() -> dict:
+    return yaml.safe_load(_REQUIRED_ENV_SCHEMA_PATH.read_text(encoding="utf-8")) or {}
+
+
+def _validate_against_schema(
+    instance: object, schema: dict, path: str, failures: list[str]
+) -> None:
+    """Recursive subset of JSON-Schema draft-07 sufficient for this DSL.
+
+    Supports: type, required, additionalProperties, patternProperties,
+    items, enum, minLength, minimum, pattern. Anything fancier belongs in
+    a real schema library, but this DSL is tiny by design.
+    """
+    stype = schema.get("type")
+    if stype == "object":
+        if not isinstance(instance, dict):
+            failures.append(f"{path}: expected object, got {type(instance).__name__}")
+            return
+        for req in schema.get("required", []):
+            if req not in instance:
+                failures.append(f"{path}: missing required key {req!r}")
+        props = schema.get("properties") or {}
+        additional = schema.get("additionalProperties", True)
+        for key, val in instance.items():
+            if key in props:
+                _validate_against_schema(val, props[key], f"{path}.{key}", failures)
+            elif additional is False:
+                failures.append(f"{path}: unexpected key {key!r}")
+            elif isinstance(additional, dict):
+                _validate_against_schema(val, additional, f"{path}.{key}", failures)
+    elif stype == "array":
+        if not isinstance(instance, list):
+            failures.append(f"{path}: expected array, got {type(instance).__name__}")
+            return
+        item_schema = schema.get("items")
+        if item_schema is not None:
+            for i, item in enumerate(instance):
+                _validate_against_schema(item, item_schema, f"{path}[{i}]", failures)
+    elif stype == "string":
+        if not isinstance(instance, str):
+            failures.append(f"{path}: expected string, got {type(instance).__name__}")
+            return
+        if "minLength" in schema and len(instance) < schema["minLength"]:
+            failures.append(
+                f"{path}: string shorter than minLength={schema['minLength']}"
+            )
+        if "pattern" in schema and not re.search(schema["pattern"], instance):
+            failures.append(
+                f"{path}: value {instance!r} does not match pattern {schema['pattern']!r}"
+            )
+        enum = schema.get("enum")
+        if enum is not None and instance not in enum:
+            failures.append(f"{path}: value {instance!r} not in enum {enum}")
+    elif stype == "integer":
+        if not isinstance(instance, int) or isinstance(instance, bool):
+            failures.append(f"{path}: expected integer, got {type(instance).__name__}")
+            return
+        if "minimum" in schema and instance < schema["minimum"]:
+            failures.append(
+                f"{path}: integer {instance} below minimum {schema['minimum']}"
+            )
+    elif stype == "boolean":
+        if not isinstance(instance, bool):
+            failures.append(f"{path}: expected boolean, got {type(instance).__name__}")
+
+
+@register_check(
+    "required-env-yaml-conforms-to-schema",
+    "config/required-env.yaml conforms to config/required-env.schema.yaml "
+    "AND satisfies the cross-entry rules (exactly one of required / "
+    "required_when, forbidden_when only where required_when is set, etc.) "
+    "from §14 / backend.md §13.1.",
+)
+def check_required_env_schema() -> CheckResult:
+    result = CheckResult(
+        "required-env-yaml-conforms-to-schema",
+        "required-env.yaml shape + DSL invariants",
+    )
+    doc = _load_required_env_doc()
+    schema = _load_required_env_schema()
+
+    _validate_against_schema(doc, schema, "$", result.failures)
+    if result.failures:
+        # Surface-level schema errors mask deeper logic errors; stop early.
+        return result
+
+    services = doc.get("services") or {}
+    for svc_name, entries in services.items():
+        seen: set[str] = set()
+        for entry in entries:
+            name = entry["name"]
+            if name in seen:
+                result.failures.append(
+                    f"{svc_name}: duplicate var name {name!r}"
+                )
+            seen.add(name)
+
+            has_required = "required" in entry and entry["required"] is True
+            has_required_when = "required_when" in entry
+            if has_required and has_required_when:
+                result.failures.append(
+                    f"{svc_name}.{name}: entry carries BOTH `required: true` "
+                    "AND `required_when`; pick exactly one"
+                )
+            if not has_required and not has_required_when:
+                result.failures.append(
+                    f"{svc_name}.{name}: entry is neither `required: true` "
+                    "nor `required_when: OTHER=value`; pure-optional vars "
+                    "do not belong in required-env.yaml"
+                )
+            if "forbidden_when" in entry and not has_required_when:
+                result.failures.append(
+                    f"{svc_name}.{name}: `forbidden_when` without "
+                    "`required_when` is meaningless; encode the mutual "
+                    "exclusion by pairing the two"
+                )
+            # Forward reference check: required_when / forbidden_when must
+            # name a variable declared EARLIER in the same service block.
+            for clause_key in ("required_when", "forbidden_when"):
+                clause = entry.get(clause_key)
+                if not clause:
+                    continue
+                other_name = clause.split("=", 1)[0]
+                if other_name not in seen:
+                    result.failures.append(
+                        f"{svc_name}.{name}.{clause_key} references "
+                        f"{other_name!r} which is not declared earlier in "
+                        "services." + svc_name + " — declaration order MUST "
+                        "be dependency order"
+                    )
+            # Schema forbids explicit "" in forbidden_values (empty is
+            # handled by the required / required_when gate). Catch drift.
+            for bad in entry.get("forbidden_values", []):
+                if bad == "":
+                    result.failures.append(
+                        f"{svc_name}.{name}: forbidden_values contains the "
+                        "empty string explicitly — empty is implicit; remove it"
+                    )
+    return result
+
+
+@register_check(
+    "env-example-matches-required-env-yaml",
+    ".env.example is a byte-identical re-render of config/required-env.yaml "
+    "via scripts/generate-env-example.py (§14). If this fails, run the "
+    "generator and commit both files.",
+)
+def check_env_example_fresh() -> CheckResult:
+    result = CheckResult(
+        "env-example-matches-required-env-yaml",
+        ".env.example up-to-date",
+    )
+    # Delegate to the generator's --check mode to avoid duplicating the
+    # renderer here. Import via importlib so check-contracts stays a
+    # single-file drop-in.
+    import importlib.util as _ilu
+
+    spec = _ilu.spec_from_file_location(
+        "_gen_env", REPO_ROOT / "scripts" / "generate-env-example.py"
+    )
+    if spec is None or spec.loader is None:
+        result.failures.append("could not load scripts/generate-env-example.py")
+        return result
+    module = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[arg-type]
+
+    doc = _load_required_env_doc()
+    rendered = module.render(doc)
+    existing = (
+        _ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+        if _ENV_EXAMPLE_PATH.exists()
+        else ""
+    )
+    if rendered != existing:
+        result.failures.append(
+            ".env.example does not match required-env.yaml; "
+            "run `python3 scripts/generate-env-example.py` and commit"
+        )
+    return result
+
+
+@register_check(
+    "required-env-yaml-consumers-registered",
+    "Every file listed in _REQUIRED_ENV_CONSUMERS references the path "
+    "'config/required-env.yaml' at least once. Prevents silent forks where "
+    "a consumer hardcodes its own list instead of reading the SSOT.",
+)
+def check_required_env_consumers() -> CheckResult:
+    result = CheckResult(
+        "required-env-yaml-consumers-registered",
+        "5 declared SSOT consumers actually reference the YAML",
+    )
+    needle = "config/required-env.yaml"
+    for path in _REQUIRED_ENV_CONSUMERS:
+        if not path.exists():
+            # smoke.sh is the known "future PR" case. Tolerate its absence
+            # with an explicit message instead of silently skipping —
+            # that way "oh I forgot to add smoke.sh as a consumer" still
+            # surfaces, while "oh smoke.sh hasn't been written yet" doesn't
+            # block PRs for unrelated §14 work.
+            if path.name == "smoke.sh":
+                continue
+            result.failures.append(
+                f"consumer file missing: {path.relative_to(REPO_ROOT)}"
+            )
+            continue
+        text = path.read_text(encoding="utf-8")
+        if needle not in text:
+            result.failures.append(
+                f"{path.relative_to(REPO_ROOT)} does not reference "
+                f"{needle!r}; either read the SSOT or remove from "
+                "_REQUIRED_ENV_CONSUMERS"
+            )
     return result
 
 

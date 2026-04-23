@@ -173,6 +173,12 @@ docker-compose.*.local.yml
 *.jks
 secrets/
 keys/
+# §14 / B5: keep the keys/jwt/ directory structure (empty placeholder)
+# tracked so `docker compose up` finds a directory to bind-mount even
+# on a fresh clone. Actual PEM files remain ignored (*.pem rule above).
+!keys/
+!keys/jwt/
+!keys/jwt/.gitkeep
 **/jwt-keys/
 **/rsa-keys/
 **/private/

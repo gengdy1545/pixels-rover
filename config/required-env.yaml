@@ -1,0 +1,197 @@
+# Pixels Rover — required environment variables (SSOT).
+#
+# Single source of truth for every "if this env var is missing / malformed
+# the system is silently broken" declaration across the three services
+# (auth-service, assistant-service, gateway). Five consumers read this
+# file — change this list in lockstep when you add a new consumer:
+#
+#   1. scripts/generate-env-example.py              — renders .env.example
+#   2. gateway/validate-required-env.py             — gateway entrypoint
+#   3. services/auth-service/src/main/java/.../bootstrap/RequiredEnvValidator.java
+#   4. services/assistant-service/app/required_env.py
+#   5. scripts/smoke.sh                             — cold-boot pre-flight (future PR)
+#
+# scripts/check-contracts.py enforces all five actually reference this
+# path (`required-env-yaml-consumers-registered`) AND that every entry
+# conforms to config/required-env.schema.yaml
+# (`required-env-yaml-conforms-to-schema`) AND that .env.example is a
+# byte-identical re-render of this file (`env-example-matches-required-env-yaml`).
+#
+# ----------------------------------------------------------------------
+# DSL reference (see config/required-env.schema.yaml for the formal schema):
+#
+#   name:                 (required) env var name, UPPER_SNAKE_CASE
+#   description:          (required) one-sentence human-readable purpose
+#   required:             (optional, default false) always-required
+#   required_when:        (optional) "OTHER_VAR=value" — required iff other var equals value
+#   forbidden_when:       (optional) "OTHER_VAR=value" — MUST be empty iff other var equals value
+#                         (together with required_when, encodes mutually exclusive groups)
+#   enum:                 (optional) list of exact allowed values (string compare)
+#   forbidden_values:     (optional) list of values that must NEVER appear (placeholders, "change-me", "*")
+#   min_utf8_bytes:       (optional) minimum length of the value as UTF-8 bytes
+#   file_must_exist:      (optional) value is a path; file must exist AND be readable at validator run time
+#   env_example:          (optional) value to render in .env.example; if omitted the var is emitted as `KEY=` with a commented-out placeholder above it
+#   sensitive:            (optional, default false) if true, generator emits `KEY=` (no value); operator MUST supply before boot
+#
+# Hard rules:
+#   * Every entry MUST carry either `required: true` OR `required_when:`
+#     (never both). Pure-optional vars have no place here.
+#   * `required_when` and `forbidden_when` MUST reference a var declared
+#     earlier in the same service block (declaration order = dependency order).
+#   * `forbidden_values` always includes the empty string implicitly —
+#     do NOT list "" explicitly. Placeholders like "change-me",
+#     "<set-me>", "sk-your-api-key-here" MUST be listed.
+# ----------------------------------------------------------------------
+
+services:
+
+  # -------------------------------------------------------------------
+  # gateway — APISIX Standalone YAML. Entrypoint validator
+  # (gateway/validate-required-env.py) runs BEFORE apisix template
+  # render / envsubst, so missing vars produce a single FATAL log line
+  # with zero upstream side-effects.
+  # -------------------------------------------------------------------
+  gateway:
+    - name: INTERNAL_INTROSPECTION_SECRET
+      description: >-
+        Shared secret the gateway sends in X-Internal-Auth when it calls
+        auth-service's /api/internal/auth/introspect. auth-service rejects
+        introspect requests whose header does not match.
+      required: true
+      forbidden_values: ["change-me", "<set-me>"]
+      min_utf8_bytes: 16
+      sensitive: true
+
+    - name: INTERNAL_GATEWAY_ADMIN_SECRET
+      description: >-
+        Shared secret the gateway sends in X-Internal-Auth when auth-service
+        invokes POST /gateway/internal/invalidate_session (§7.4 session
+        invalidation / A1+A3). Distinct from INTROSPECTION_SECRET so the
+        two calling directions can be rotated independently.
+      required: true
+      forbidden_values: ["change-me", "<set-me>"]
+      min_utf8_bytes: 16
+      sensitive: true
+
+    - name: CORS_ALLOWED_ORIGINS
+      description: >-
+        Comma-separated list of allowed origins for CORS pre-flight
+        responses. Gateway rejects requests from any other Origin with
+        403 GATEWAY_CORS_DENIED (see gateway.md §6.6). "*" is forbidden
+        in production; use docker-compose.dev.yml override to relax for
+        local dev.
+      required: true
+      forbidden_values: ["*"]
+
+    - name: GATEWAY_CSP_PROFILE
+      description: >-
+        Content-Security-Policy profile selector. "production" emits the
+        strict CSP (no unsafe-inline, no unsafe-eval); "development"
+        emits the looser CSP allowing Vite's HMR websocket. Empty / any
+        other value is a fatal boot error — gateway.md §6.6 forbids a
+        default so every deployment makes an explicit choice.
+      required: true
+      enum: [production, development]
+
+    - name: GATEWAY_OPENAPI_PUBLIC
+      description: >-
+        OpenAPI exposure profile selector (gateway.md §6.7). "true"
+        serves /api/v1/{auth,analysis}/openapi.json anonymously;
+        "false" requires a valid session. No default — every deployment
+        must decide explicitly. NEVER ship "true" to production.
+      required: true
+      enum: ["true", "false"]
+      env_example: "false"
+
+  # -------------------------------------------------------------------
+  # auth-service — Java / Spring Boot. Validator
+  # (io.pixelsdb.pixels.rover.bootstrap.RequiredEnvValidator) runs as a
+  # Spring @Component with highest-priority ordering, fails the boot
+  # with a FATAL log line before JwtTokenProvider is constructed.
+  # -------------------------------------------------------------------
+  auth-service:
+    - name: JWT_ALGORITHM
+      description: >-
+        Signing algorithm for access + refresh tokens. "HS256" is
+        symmetric (single shared secret); "RS256" is asymmetric (private
+        key signs, public key verifies, and enables rotation via
+        jwt.public-keys-directory). See docs/design/jwt-rotation.md.
+      required: true
+      enum: [HS256, RS256]
+
+    - name: JWT_SECRET
+      description: >-
+        HS256 shared secret, Base64-encoded (jjwt decodes before use).
+        Minimum 32 UTF-8 bytes. MUST be empty when JWT_ALGORITHM=RS256
+        (mutual exclusion; validator refuses boot on co-presence).
+      required_when: "JWT_ALGORITHM=HS256"
+      forbidden_when: "JWT_ALGORITHM=RS256"
+      forbidden_values: ["change-me", "<set-me>"]
+      min_utf8_bytes: 32
+      sensitive: true
+
+    - name: JWT_PRIVATE_KEY_PATH
+      description: >-
+        RS256 private-key PEM path inside the auth-service container.
+        Validator opens and parses the file at boot; a missing /
+        unreadable / malformed PEM fails the boot. In docker compose
+        the key directory is bind-mounted from ./keys/jwt/ (prod) or a
+        jwt-keys named volume populated by the dev override (see
+        docs/runbooks/jwt-key-provisioning.md).
+      required_when: "JWT_ALGORITHM=RS256"
+      forbidden_when: "JWT_ALGORITHM=HS256"
+      file_must_exist: true
+
+    - name: JWT_PUBLIC_KEY_PATH
+      description: >-
+        RS256 public-key PEM path (used as the ACTIVE verify key).
+        Validator parses the PEM AND performs a sign→verify self-test
+        using JWT_PRIVATE_KEY_PATH to prove the pair is a valid RSA
+        keypair before admission.
+      required_when: "JWT_ALGORITHM=RS256"
+      forbidden_when: "JWT_ALGORITHM=HS256"
+      file_must_exist: true
+
+    - name: JWT_ACTIVE_KID
+      description: >-
+        Key-id claim stamped into the JWT header ("kid"). Clients /
+        introspection code use it to pick the correct verify key.
+        Forbidden placeholder values catch operators who leave the
+        dev-time kid in a production config.
+      required_when: "JWT_ALGORITHM=RS256"
+      forbidden_when: "JWT_ALGORITHM=HS256"
+      forbidden_values: ["default-hmac", "dev-rsa-1", "<set-me>"]
+
+    - name: INTERNAL_INTROSPECTION_SECRET
+      description: >-
+        MUST match the value shipped to the gateway (see gateway.*).
+        auth-service's SecurityConfig rejects /api/internal/auth/introspect
+        callers whose X-Internal-Auth header does not equal this value.
+      required: true
+      forbidden_values: ["change-me", "<set-me>"]
+      min_utf8_bytes: 16
+      sensitive: true
+
+  # -------------------------------------------------------------------
+  # assistant-service — Python / FastAPI. Validator
+  # (app.required_env.validate_or_die) runs from app.main before
+  # FastAPI's ASGI app is returned, so boot fails cleanly without ever
+  # binding :8090.
+  # -------------------------------------------------------------------
+  assistant-service:
+    - name: ROVER_LLM_API_KEY
+      description: >-
+        API key for the configured LLM provider (OpenAI-compatible).
+        Empty or placeholder values disable analysis outright; we fail
+        fast rather than serving 500s on the first /analysis submit.
+      required: true
+      forbidden_values: ["sk-your-api-key-here", "<set-me>"]
+      sensitive: true
+
+    - name: ROVER_DATABASE_URL
+      description: >-
+        SQLAlchemy async URL for pixels_analysis. Alembic upgrade head
+        runs against this URL from entrypoint.sh before uvicorn binds
+        the port (backend.md §12.2); a missing URL would leave the
+        service in a half-migrated state invisible from /internal/ready.
+      required: true

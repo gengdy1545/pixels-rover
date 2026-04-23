@@ -4,8 +4,12 @@ USER root
 
 # envsubst is needed by entrypoint.sh to render config.yaml.
 # curl is kept for /gateway/live probes and operator diagnostics.
+# python3 + python3-yaml are consumed exclusively by
+# validate-required-env.py (§14 / backend.md §13.1); keeping the
+# dependency surface tiny (stdlib + PyYAML) lets the validator run in
+# the same hermetic image without a build step.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl gettext-base \
+    && apt-get install -y --no-install-recommends curl gettext-base python3 python3-yaml \
     && rm -rf /var/lib/apt/lists/*
 
 # Custom Lua plugins must live under /usr/local/apisix/apisix/plugins.
@@ -38,6 +42,16 @@ COPY fragments/          /usr/local/apisix/conf/fragments/
 # source changes). The JSON schema file rides along for discoverability.
 COPY error-codes.json        /usr/local/apisix/conf/error-codes.json
 COPY error-codes.schema.json /usr/local/apisix/conf/error-codes.schema.json
+
+# Required-env validator (§14). The companion config/required-env.yaml
+# is NOT baked into the image: it is bind-mounted from docker-compose.yml
+# at /usr/local/apisix/conf/required-env.yaml so the three services
+# (gateway / auth-service / assistant-service) all read byte-identical
+# contract definitions from the same on-host file. Missing bind-mount
+# fails validate-required-env.py with a clear message — exactly the
+# signal we want for misconfigured deployments.
+COPY validate-required-env.py /usr/local/apisix/conf/validate-required-env.py
+RUN chmod +x /usr/local/apisix/conf/validate-required-env.py
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import app.models  # noqa: F401 - import side-effect: populate Base.metadata for Alembic reflection in tests
 from app.config import get_settings
 from app.database import async_session_factory
+from app.required_env import validate_or_die
 from app.dependencies import get_duckdb_backend, get_backend_registry
 from app.api_response import api_error, api_unknown_error
 from app.error_codes import ANALYSIS_INVALID_ARGUMENT, ErrorCategory
@@ -63,6 +64,14 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # §14: fail-fast on missing / placeholder env vars BEFORE we read
+    # settings (which would e.g. silently accept an empty LLM_API_KEY
+    # and only surface it on the first /analysis request). validator
+    # reads the SSOT shape from config/required-env.yaml — bind-mounted
+    # at /app/config/required-env.yaml via docker-compose.yml. Tests
+    # bypass by setting ROVER_REQUIRED_ENV_SKIP=1.
+    validate_or_die()
+
     settings = get_settings()
     app = FastAPI(
         title=settings.app_name,

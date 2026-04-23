@@ -2,9 +2,11 @@
 # APISIX gateway container entrypoint (Standalone YAML mode).
 #
 # Responsibilities (see docs/development/gateway.md §1 + §6.7):
-#   1. Fail-fast on missing / invalid required env vars so gateway
-#      never boots in a silently-broken state. Same discipline is
-#      applied in backend services -- see backend.md §13.1.
+#   1. Fail-fast on missing / invalid required env vars by delegating
+#      to validate-required-env.py, which reads the SSOT shape from
+#      /usr/local/apisix/conf/required-env.yaml (services.gateway
+#      block). Same discipline is applied in backend services -- see
+#      backend.md §13.1.
 #   2. Render /usr/local/apisix/conf/apisix.yaml.template ->
 #      /usr/local/apisix/conf/apisix.yaml by splicing in one of the
 #      mutually-exclusive OpenAPI route fragments at the
@@ -35,43 +37,37 @@ set -eu
 CONF_DIR="/usr/local/apisix/conf"
 FRAGMENT_DIR="${CONF_DIR}/fragments"
 
-require_env() {
-  var="$1"
-  eval "value=\${$var:-}"
-  if [ -z "${value}" ]; then
-    echo "gateway entrypoint: required env var ${var} is missing; refusing to start" >&2
-    exit 1
-  fi
-}
-
-# INTERNAL_INTROSPECTION_SECRET is read at runtime by
-# gateway-auth.lua via os.getenv(). Failing to set it means every
-# introspect call would send an empty X-Internal-Auth and auth-service
-# would reject with INTERNAL_AUTH_FAILED -- we want that failure at
-# boot, not on the first request.
-require_env INTERNAL_INTROSPECTION_SECRET
+# ---------------------------------------------------------------------
+# Required env var hard validation (§14 / backend.md §13.1).
+#
+# ALL per-var shape (required / enum / forbidden placeholders / minimum
+# length) lives in config/required-env.yaml — the SSOT shared by auth-
+# service, assistant-service, and this gateway. validate-required-env.py
+# exits non-zero with a FATAL line per violation; `set -eu` then aborts
+# the container. Doing this BEFORE template splice / envsubst means we
+# never produce a half-rendered apisix.yaml with blank introspection
+# secrets / unknown CSP profile.
+# ---------------------------------------------------------------------
+python3 /usr/local/apisix/conf/validate-required-env.py \
+  --yaml "${CONF_DIR}/required-env.yaml" \
+  --service gateway
 
 # ---------------------------------------------------------------------
 # OpenAPI exposure profile (gateway.md §6.7).
 #
-# Strict enum. Empty / any other value is a fatal boot error — the
-# docs explicitly forbid a default here so every deployment makes the
-# public-vs-protected decision explicitly. Same pattern as (future)
-# GATEWAY_CSP_PROFILE handling in §6.6.
+# The validator above has already asserted GATEWAY_OPENAPI_PUBLIC ∈
+# {"true", "false"}. This case block only picks the fragment — keep it
+# narrow and let the YAML own the "what counts as valid" contract.
 # ---------------------------------------------------------------------
-case "${GATEWAY_OPENAPI_PUBLIC:-}" in
+case "${GATEWAY_OPENAPI_PUBLIC}" in
   true)
     openapi_fragment="${FRAGMENT_DIR}/openapi-public.yaml"
     ;;
   false)
     openapi_fragment="${FRAGMENT_DIR}/openapi-protected.yaml"
     ;;
-  "")
-    echo "gateway entrypoint: GATEWAY_OPENAPI_PUBLIC is empty; must be exactly 'true' or 'false' (see gateway.md §6.7)" >&2
-    exit 1
-    ;;
   *)
-    echo "gateway entrypoint: GATEWAY_OPENAPI_PUBLIC='${GATEWAY_OPENAPI_PUBLIC}' is invalid; must be exactly 'true' or 'false' (see gateway.md §6.7)" >&2
+    echo "gateway entrypoint: impossible GATEWAY_OPENAPI_PUBLIC=${GATEWAY_OPENAPI_PUBLIC} after validator; validate-required-env.py out of sync" >&2
     exit 1
     ;;
 esac

@@ -1,34 +1,36 @@
 #!/usr/bin/env bash
 #
-# Unified startup script for Pixels Rover component development.
+# Frontend dev-server launcher (Vite).
+#
+# Scope — DELIBERATELY narrowed (see .notes/todolist.md §15 C2):
+#   * This script used to also start auth-service (`mvn spring-boot:run`)
+#     and assistant-service (`uvicorn`) directly on the host. Those
+#     paths are GONE. They encouraged running backends WITHOUT the
+#     gateway, which silently bypasses every contract enforced by
+#     APISIX (CSRF, CORS, X-Request-Id injection, introspection,
+#     security headers, readiness aggregation). The canonical local
+#     path for anything that touches auth / business APIs is:
+#
+#         docker compose up --build
+#
+#   * What remains here is ONLY the Vite dev server, because a
+#     browser-first feedback loop benefits from HMR and it proxies
+#     /api to the gateway running in compose — i.e. this script still
+#     sits BEHIND the gateway contract, not around it.
 #
 # Usage:
-#   ./start.sh              Start auth-service + assistant-service + frontend dev server
-#   ./start.sh java         Start auth-service only (:8081)
-#   ./start.sh python       Start assistant-service only (:8090)
-#   ./start.sh frontend     Start frontend dev server only (:3000)
-#   ./start.sh --prod       Build frontend and start both backend services
+#   ./start.sh              # start Vite dev server (:3000)
+#   ./start.sh -h|--help    # print usage
 #
-# For the canonical end-to-end topology, prefer:
-#   docker compose up --build
-#
-# The frontend dev server proxies /api to http://localhost:80, so it expects the
-# APISIX gateway to be running separately.
-#
+# All other invocations (arguments, `java`, `python`, `--prod`, `all`)
+# are rejected to prevent muscle-memory from old workflows; the error
+# message steers the user to `docker compose up` for the full stack.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JAVA_DIR="$SCRIPT_DIR/services/auth-service"
-PYTHON_DIR="$SCRIPT_DIR/services/assistant-service"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
-JWT_KEYS_DIR="$SCRIPT_DIR/.tmp/jwt-keys"
-JWT_DEFAULT_KID="${JWT_DEFAULT_KID:-dev-rsa-1}"
-JWT_DEFAULT_PRIVATE_KEY_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-private.pem"
-JWT_DEFAULT_PUBLIC_KEY_PATH="$JWT_KEYS_DIR/${JWT_DEFAULT_KID}-public.pem"
 
-JAVA_PID=""
-PYTHON_PID=""
 FRONTEND_PID=""
 
 RED='\033[0;31m'
@@ -58,40 +60,17 @@ cleanup() {
     echo ""
     log_info "Shutting down..."
 
-    for pid_var in FRONTEND_PID PYTHON_PID JAVA_PID; do
-        pid="${!pid_var}"
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-            log_info "Stopping $pid_var (PID: $pid)..."
-            kill "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-        fi
-    done
+    if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
+        log_info "Stopping FRONTEND_PID (PID: $FRONTEND_PID)..."
+        kill "$FRONTEND_PID" 2>/dev/null || true
+        wait "$FRONTEND_PID" 2>/dev/null || true
+    fi
 
-    log_info "All services stopped."
+    log_info "Frontend dev server stopped."
     exit 0
 }
 
 trap cleanup SIGINT SIGTERM
-
-check_java() {
-    if ! command -v java &>/dev/null; then
-        log_error "Java is not installed. JDK 17+ is required."
-        return 1
-    fi
-    if ! command -v mvn &>/dev/null; then
-        log_error "Maven is not installed."
-        return 1
-    fi
-    return 0
-}
-
-check_python() {
-    if ! command -v python3 &>/dev/null; then
-        log_error "Python 3 is not installed. Python 3.10+ is required."
-        return 1
-    fi
-    return 0
-}
 
 check_node() {
     if ! command -v node &>/dev/null; then
@@ -103,65 +82,6 @@ check_node() {
         return 1
     fi
     return 0
-}
-
-ensure_dev_jwt_keys() {
-    if [[ -n "${JWT_PRIVATE_KEY_PATH:-}" ]]; then
-        log_info "Using externally provided JWT key configuration."
-        return 0
-    fi
-
-    if [[ ! -f "$JWT_DEFAULT_PRIVATE_KEY_PATH" || ! -f "$JWT_DEFAULT_PUBLIC_KEY_PATH" ]]; then
-        log_step "Generating local RS256 JWT keys for development..."
-        bash "$SCRIPT_DIR/scripts/generate-jwt-rsa-keys.sh" "$JWT_KEYS_DIR" "$JWT_DEFAULT_KID" >/dev/null
-    fi
-
-    export JWT_ALGORITHM=RS256
-    export JWT_ACTIVE_KID="$JWT_DEFAULT_KID"
-    export JWT_PRIVATE_KEY_PATH="$JWT_DEFAULT_PRIVATE_KEY_PATH"
-    export JWT_PUBLIC_KEY_PATH="$JWT_DEFAULT_PUBLIC_KEY_PATH"
-    # Multi-kid verification source during rotation: the local key directory is
-    # enumerated for every <kid>-public.pem. The former "<kid>-public-keys.json"
-    # merged-public-key artifact (and its companion /api/v1/auth/jwks surface)
-    # have been retired — see docs/design/jwt-rotation.md §1.2.
-    export JWT_PUBLIC_KEYS_DIRECTORY="$JWT_KEYS_DIR"
-
-    log_info "Development JWT mode: RS256 (kid=$JWT_DEFAULT_KID)."
-}
-
-start_java() {
-    check_java || exit 1
-    ensure_dev_jwt_keys
-    log_step "Starting Java backend (auth) on port 8081..."
-    cd "$JAVA_DIR"
-    mvn spring-boot:run -q &
-    JAVA_PID=$!
-    log_info "Java backend started (PID: $JAVA_PID)."
-}
-
-start_python() {
-    check_python || exit 1
-    ensure_dev_jwt_keys
-    log_step "Starting Python backend (assistant) on port 8090..."
-    cd "$PYTHON_DIR"
-
-    if [[ ! -d ".venv" ]]; then
-        log_step "Creating Python virtual environment..."
-        python3 -m venv .venv
-        source .venv/bin/activate
-        pip install --quiet -e .
-    else
-        source .venv/bin/activate
-    fi
-
-    if [[ ! -f ".env" ]] && [[ -f ".env.example" ]]; then
-        log_warn "No .env file found. Copying from .env.example — please edit services/assistant-service/.env with your LLM API key."
-        cp .env.example .env
-    fi
-
-    uvicorn app.main:app --host 0.0.0.0 --port 8090 --reload &
-    PYTHON_PID=$!
-    log_info "Python backend started (PID: $PYTHON_PID)."
 }
 
 start_frontend() {
@@ -181,19 +101,6 @@ start_frontend() {
     log_info "Frontend started (PID: $FRONTEND_PID)."
 }
 
-build_frontend_prod() {
-    check_node || exit 1
-    log_step "Building frontend for production..."
-    cd "$FRONTEND_DIR"
-
-    if [[ ! -d "node_modules" ]]; then
-        npm install
-    fi
-
-    npm run build
-    log_info "Frontend production build completed → frontend/dist/"
-}
-
 print_banner() {
     echo -e "${CYAN}"
     echo "  ____  _          _       ____"
@@ -206,47 +113,38 @@ print_banner() {
 }
 
 print_usage() {
-    echo "Usage: $0 [java|python|frontend|--prod|-h]"
+    # Plain echo (no color escapes) — print_usage is also emitted on
+    # the error path where we can't assume a colour-capable terminal.
+    echo "Usage: $0 [-h|--help]"
     echo ""
-    echo "  (no args)    Start auth-service + assistant-service + frontend dev server"
-    echo "  java         Start auth-service only (:8081)"
-    echo "  python       Start assistant-service only (:8090)"
-    echo "  frontend     Start frontend dev server only (:3000)"
-    echo "  --prod       Build frontend and start both backend services"
+    echo "  (no args)    Start the frontend Vite dev server on :3000."
+    echo "               /api/* is proxied to http://localhost:80 (gateway)."
     echo ""
-    echo "  Full gateway topology: docker compose up --build"
+    echo "  Full end-to-end topology (auth + assistant + gateway + frontend):"
+    echo "    docker compose up --build"
     echo ""
+    echo "  The former 'java' / 'python' / '--prod' modes have been removed."
+    echo "  Running backends without the gateway bypasses every auth, CSRF,"
+    echo "  CORS, and X-Request-Id contract and is no longer supported."
+    echo ""
+}
+
+reject_legacy_mode() {
+    local mode="$1"
+    log_error "'$mode' mode has been removed from start.sh."
+    log_error "Backends must run behind the APISIX gateway. Use:"
+    log_error "    docker compose up --build"
+    print_usage
+    exit 1
 }
 
 # --- Main ---
 
 print_banner
 
-MODE="${1:-all}"
+MODE="${1:-frontend}"
 
 case "$MODE" in
-    java|backend)
-        start_java
-        echo ""
-        log_info "========================================="
-        log_info "  Java Backend (Auth) running at:"
-        log_info "    ${CYAN}http://localhost:8081${NC}"
-        log_info "  JWT mode: ${CYAN}${JWT_ALGORITHM:-HS256}${NC}"
-        log_info "========================================="
-        log_info "Press Ctrl+C to stop."
-        wait "$JAVA_PID"
-        ;;
-    python)
-        start_python
-        echo ""
-        log_info "========================================="
-        log_info "  Python Backend (Analysis) running at:"
-        log_info "    ${CYAN}http://localhost:8090${NC}"
-        log_info "  JWT mode: ${CYAN}${ROVER_JWT_ALGORITHM:-HS256}${NC}"
-        log_info "========================================="
-        log_info "Press Ctrl+C to stop."
-        wait "$PYTHON_PID"
-        ;;
     frontend)
         start_frontend
         warn_if_gateway_missing
@@ -260,43 +158,8 @@ case "$MODE" in
         log_info "Press Ctrl+C to stop."
         wait "$FRONTEND_PID"
         ;;
-    --prod)
-        build_frontend_prod
-        start_java
-        start_python
-        echo ""
-        log_info "=========================================="
-        log_info "  Production mode is ready!"
-        log_info ""
-        log_info "  Java Backend (Auth)     → ${CYAN}http://localhost:8081${NC}"
-        log_info "  Python Backend (Analysis)→ ${CYAN}http://localhost:8090${NC}"
-        log_info "  Frontend static files   → frontend/dist/"
-        log_info "=========================================="
-        log_info "Press Ctrl+C to stop."
-        wait
-        ;;
-    all)
-        start_java
-        start_python
-        start_frontend
-        warn_if_gateway_missing
-        echo ""
-        log_info "=========================================="
-        log_info "  Component development mode is running!"
-        log_info ""
-        log_info "  Java Backend (Auth)      → ${CYAN}http://localhost:8081${NC}"
-        log_info "  Python Backend (Analysis) → ${CYAN}http://localhost:8090${NC}"
-        log_info "  Frontend UI              → ${CYAN}http://localhost:3000${NC}"
-        log_info "  Frontend API entry       → ${CYAN}http://localhost:80${NC} (Gateway)"
-        log_info "  JWT mode                 → ${CYAN}${JWT_ALGORITHM:-HS256}${NC}"
-        log_info ""
-        log_info "  For full end-to-end auth flow, start APISIX with:"
-        log_info "    ${CYAN}docker compose up --build${NC}"
-        log_info ""
-        log_info "  Open UI: ${CYAN}http://localhost:3000${NC}"
-        log_info "=========================================="
-        log_info "Press Ctrl+C to stop all services."
-        wait
+    java|backend|python|--prod|all)
+        reject_legacy_mode "$MODE"
         ;;
     -h|--help)
         print_usage

@@ -1,4 +1,4 @@
-# Pixels Rover — Docker Compose
+# Pixels Rover — Docker Compose (production-shaped baseline)
 #
 # Usage:
 #   docker compose up              Start all services
@@ -7,9 +7,27 @@
 #   docker compose down            Stop all services
 #   docker compose logs -f         Follow logs
 #
-# Prerequisites:
-#   1. Copy .env.example to .env and fill in required values
-#   2. Run: docker compose up
+# LOCAL DEVELOPMENT OVERRIDE:
+#   docker-compose.dev.yml layers the dev-convenience machinery back on
+#   top of this file (jwt-keygen init container, throw-away named
+#   volume, optional CORS relaxation). Use:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+#   Production deployments MUST NOT include docker-compose.dev.yml —
+#   the bind-mounted ./keys/jwt/ directory is the canonical key source
+#   of truth (B5 / docs/runbooks/jwt-key-provisioning.md). Running the
+#   dev override in production would silently regenerate RS256 keys on
+#   every container rebuild and invalidate every active session.
+#
+# Prerequisites (production path):
+#   1. Copy .env.example to .env and fill EVERY value marked REQUIRED.
+#   2. Provision RS256 keypair on host:
+#        mkdir -p keys/jwt
+#        ./scripts/generate-jwt-rsa-keys.sh keys/jwt "$JWT_KID"
+#      (or equivalent openssl commands; see runbook). The
+#      auth-service container bind-mounts ./keys/jwt/ read-only.
+#   3. Run: docker compose up
 #
 # Architecture:
 #   All traffic enters through the API Gateway (port 80/443).
@@ -34,6 +52,13 @@
 #     readiness is observable via /gateway/ready (aggregates each
 #     upstream's /internal/ready) and is the signal external smoke /
 #     load-balancer drain should consume.
+#
+# Env var hard validation (§14 / backend.md §13.1):
+#   Every service bind-mounts ./config/required-env.yaml read-only
+#   into its container and invokes its own RequiredEnvValidator at
+#   boot. A missing / placeholder secret fails the container with
+#   FATAL-tagged stderr lines and a non-zero exit; compose surfaces
+#   this as a restart loop so operators see the failure loudly.
 #
 # Ports (external):
 #   - 80    API Gateway (unified entry point)
@@ -65,16 +90,6 @@ services:
       start_period: 30s
       retries: 5
 
-  # ---------- JWT Key Generator (init container) ----------
-  jwt-keygen:
-    image: alpine:3.20
-    container_name: pixels-rover-jwt-keygen
-    volumes:
-      - jwt-keys:/keys
-      - ./scripts/generate-jwt-rsa-keys.sh:/generate.sh:ro
-    entrypoint: ["/bin/sh", "/generate.sh", "/keys", "${JWT_KID:-dev-rsa-1}"]
-    restart: "no"
-
   # ---------- Auth Service (Java / Spring Boot) ----------
   auth-service:
     build:
@@ -88,30 +103,45 @@ services:
       # the real readiness work on startup (backend.md §12.2).
       mysql:
         condition: service_started
-      jwt-keygen:
-        condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pixels_auth
       SPRING_DATASOURCE_USERNAME: pixels
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-password}
-      JWT_ALGORITHM: RS256
-      JWT_ACTIVE_KID: ${JWT_KID:-dev-rsa-1}
-      JWT_PRIVATE_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-private.pem
-      JWT_PUBLIC_KEY_PATH: /jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem
+      # §14: all security-sensitive JWT + introspection env vars have
+      # NO :- default fallbacks here. If .env omits them, the string
+      # interpolation resolves to empty, RequiredEnvValidator rejects
+      # the empty value at boot with a FATAL log line, and the
+      # container exits. docker-compose.dev.yml override supplies
+      # test-grade defaults for local dev.
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACTIVE_KID: ${JWT_ACTIVE_KID}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
       # Multi-kid verification during rotation: enumerate auth-service's local
       # key directory (every `<kid>-public.pem`). There is no merged JWKS artifact
       # any more -- the former external /api/v1/auth/jwks surface was retired
       # (see docs/design/jwt-rotation.md §1.2).
       JWT_PUBLIC_KEYS_DIRECTORY: /jwt-keys
       SERVER_PORT: 8081
-      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
+      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
     expose:
       - "8081"
     volumes:
-      - jwt-keys:/jwt-keys:ro
+      # §14 / B5: JWT key directory is bind-mounted from host. Host
+      # owns provisioning (mkdir -p keys/jwt && generate script). This
+      # replaces the former `jwt-keys` named volume + jwt-keygen init
+      # container, which silently regenerated keys on image rebuild
+      # and invalidated every session. docker-compose.dev.yml puts
+      # that dev-convenience back for local loops.
+      - ./keys/jwt:/jwt-keys:ro
+      # §14 SSOT bind-mount — RequiredEnvValidator reads
+      # /app/config/required-env.yaml at boot. Missing bind-mount
+      # causes validator to exit 2 with a clear message.
+      - ./config/required-env.yaml:/app/config/required-env.yaml:ro
     healthcheck:
       # /health is process-only liveness (backend.md §7.1). Do NOT
       # switch this to /internal/ready -- that would trigger container
@@ -137,7 +167,7 @@ services:
         condition: service_started
     environment:
       ROVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      ROVER_LLM_API_KEY: ${LLM_API_KEY:-}
+      ROVER_LLM_API_KEY: ${LLM_API_KEY}
       ROVER_LLM_API_BASE: ${LLM_API_BASE:-}
       ROVER_DATABASE_URL: mysql+aiomysql://pixels:${MYSQL_PASSWORD:-password}@mysql:3306/pixels_analysis
       ROVER_DUCKDB_PATH: ":memory:"
@@ -146,6 +176,8 @@ services:
       ROVER_DEBUG: ${DEBUG:-false}
     expose:
       - "8090"
+    volumes:
+      - ./config/required-env.yaml:/app/config/required-env.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
@@ -193,15 +225,14 @@ services:
     ports:
       - "${GATEWAY_PORT:-80}:9080"
     environment:
-      # INTERNAL_INTROSPECTION_SECRET is consumed at runtime by
-      # gateway-auth.lua via os.getenv(); entrypoint.sh fails fast if
-      # this is missing. See gateway.md §5.1.
-      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
-      # OpenAPI exposure profile (strict enum: "true" | "false"; empty
-      # or any other value is a fatal boot error). gateway.md §6.7
-      # forbids a default — this compose forwards the value from .env
-      # WITHOUT a fallback so every deployment must set it explicitly
-      # in .env. See .env.example.
+      # §14: every value is forwarded WITHOUT a :- default so that
+      # validate-required-env.py (invoked from entrypoint.sh) sees the
+      # true empty-or-missing state and fails loudly. Placeholder
+      # strings ("change-me" etc.) are caught by the same validator.
+      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET}
+      INTERNAL_GATEWAY_ADMIN_SECRET: ${INTERNAL_GATEWAY_ADMIN_SECRET}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      GATEWAY_CSP_PROFILE: ${GATEWAY_CSP_PROFILE}
       GATEWAY_OPENAPI_PUBLIC: ${GATEWAY_OPENAPI_PUBLIC}
     volumes:
       # Bind-mount the apisix.yaml *template* plus the fragments
@@ -213,6 +244,11 @@ services:
       # → /usr/local/apisix/conf/apisix.yaml at boot (see gateway.md §6.7).
       - ./gateway/apisix.yaml.template:/usr/local/apisix/conf/apisix.yaml.template:ro
       - ./gateway/fragments:/usr/local/apisix/conf/fragments:ro
+      # §14 SSOT bind-mount. The gateway image does NOT bake this
+      # YAML (unlike error-codes.json) — keeping it external forces
+      # ops to bind-mount the canonical contract, so "image says
+      # OK but your .env is stale" never happens silently.
+      - ./config/required-env.yaml:/usr/local/apisix/conf/required-env.yaml:ro
     healthcheck:
       # /gateway/live is pure-local liveness (gateway.md §4.2). MUST
       # NOT be /gateway/ready (which is system readiness; failing it
@@ -227,7 +263,9 @@ services:
 volumes:
   # etcd-data volume was removed with the Standalone YAML migration
   # (see docs/development/gateway.md §1.2). Don't re-introduce it.
+  # jwt-keys named volume was removed with the B5 migration
+  # (see docs/runbooks/jwt-key-provisioning.md). Production uses a
+  # bind-mount of ./keys/jwt; dev uses docker-compose.dev.yml override
+  # to re-introduce the jwt-keygen init container + named volume.
   mysql-data:
-    driver: local
-  jwt-keys:
     driver: local
