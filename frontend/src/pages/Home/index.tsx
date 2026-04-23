@@ -2,7 +2,8 @@ import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { message, Spin } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
-import AppHeader from '../../components/Header';
+import { AppHeader } from '../../features/auth';
+import { Reports } from '../../features/report';
 import { useAnalysisStore } from '../../stores/analysisStore';
 import {
   useThreadsQuery,
@@ -13,7 +14,6 @@ import { useSchemaStore } from '../../stores/schemaStore';
 import './index.css';
 
 const Analysis = React.lazy(() => import('../Analysis'));
-const Reports = React.lazy(() => import('../Reports'));
 
 const Home: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();

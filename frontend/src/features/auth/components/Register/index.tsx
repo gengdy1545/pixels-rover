@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, message } from 'antd';
 import { UserOutlined, MailOutlined, LockOutlined, BankOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
-import { authApi } from '../../shared/api';
+import { authApi } from '../../services/authApi';
 import '../Login/index.css';
 
 const Register: React.FC = () => {

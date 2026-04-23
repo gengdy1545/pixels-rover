@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { DatePicker, Button, Card, Row, Col, message } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
-import { conversationApi } from '../../shared/api';
-import type { ConversationHistoryItem, ConversationThread } from '../../shared/types/conversation';
+import { conversationApi } from '../../../../shared/api';
+import type {
+  ConversationHistoryItem,
+  ConversationThread,
+} from '../../../../shared/types/conversation';
 import './index.css';
 
 const { RangePicker } = DatePicker;

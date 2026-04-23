@@ -3,7 +3,11 @@
 // ════════════════════════════════════════
 
 // API modules
-export { authApi } from './modules/auth';
+//
+// 注意：原 `authApi` 已迁至 `features/auth/services/authApi.ts`（Stage 3
+// §10 PR-2）——`shared/api/` 只保留跨 feature 通用能力，feature 私有
+// endpoint 归 feature 自己的 `services/` 目录。后续 PR-3 计划把
+// conversationApi / metadataApi 同样迁进各自 feature。
 export { submitAnalysis, getAnalysisResult, getSemanticMetrics, getSemanticDimensions } from './modules/analysis';
 export { conversationApi } from './modules/conversations';
 export { metadataApi } from './modules/metadata';

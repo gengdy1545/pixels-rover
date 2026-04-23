@@ -1,28 +1,35 @@
 /**
- * Tests for the authStore (zustand) — login state management.
+ * colocated 测试（Stage 3 §10 PR-2）——authStore 的契约。
+ *
+ * 历史位置：`src/__tests__/stores/authStore.test.ts`。搬到 feature 内部后：
+ *   - mock 路径回落到相对本文件的 `../services/authApi` / `../../../shared/storage/cookie`；
+ *   - 不再跨层拉 `../../shared/api` 的 `authApi`——PR-2 已经把 authApi 从
+ *     `shared/api/index.ts` 撤下；作为 feature 内部 API 客户端它的唯一消
+ *     费者就是本 feature 的 store / UI。
+ *   - features/<name>/model/ 在 lint-1 受限制下默认禁 react / antd / router，
+ *     本测试本身不触发这些（纯状态机断言）所以保持合规；即便 barrel lint
+ *     也对所有 .test 文件豁免（见 `.eslintrc.cjs` overrides）。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useAuthStore } from '../../stores/authStore';
 
-// Mock the cookie module (now under shared/storage/)
-vi.mock('../../shared/storage/cookie', () => ({
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useAuthStore } from './store';
+
+vi.mock('../../../shared/storage/cookie', () => ({
   getCookie: vi.fn(() => null),
   isLoggedInCookie: vi.fn(() => false),
 }));
 
-// Mock the authApi module (now under shared/api/)
-vi.mock('../../shared/api', () => ({
+vi.mock('../services/authApi', () => ({
   authApi: {
     me: vi.fn(),
     logout: vi.fn(),
   },
 }));
 
-import { authApi } from '../../shared/api';
+import { authApi } from '../services/authApi';
 
 describe('useAuthStore', () => {
   beforeEach(() => {
-    // Reset store state before each test
     useAuthStore.setState({
       user: null,
       isAuthenticated: false,
@@ -50,7 +57,7 @@ describe('useAuthStore', () => {
 
   it('checkAuth should set user when /me succeeds', async () => {
     const mockUser = { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' };
-    // New API layer auto-unwraps ApiResponse — me() resolves directly to UserInfo
+    // 客户端层已经 unwrap ApiResponse → me() 直接 resolve UserInfo
     vi.mocked(authApi.me).mockResolvedValue(mockUser);
 
     await useAuthStore.getState().checkAuth();
@@ -64,7 +71,6 @@ describe('useAuthStore', () => {
   it('checkAuth should clear user when /me fails', async () => {
     vi.mocked(authApi.me).mockRejectedValue(new Error('Unauthorized'));
 
-    // Start with a user set
     useAuthStore.setState({
       user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
