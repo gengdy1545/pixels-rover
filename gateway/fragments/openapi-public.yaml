@@ -1,0 +1,56 @@
+# OpenAPI per-service routes — PUBLIC profile (gateway.md §6.7).
+#
+# Spliced into apisix.yaml.template at the `#__OPENAPI_ROUTES__`
+# marker by entrypoint.sh when GATEWAY_OPENAPI_PUBLIC=true.
+#
+# PUBLIC profile is intended for DEV / pre-prod debugging only.
+# Production deployments MUST set GATEWAY_OPENAPI_PUBLIC=false so
+# the protected fragment is spliced instead. This is a docs-only
+# rule (.env.example keeps false as the shipped default); machine
+# enforcement is delegated to deployment pipelines / runbook review.
+#
+# The only differences vs openapi-protected.yaml:
+#   * gateway-auth.require_auth = false  (no login required)
+#   * upstream still receives no X-Auth-* headers, so auth-service
+#     MUST permitAll `/openapi.json` in SecurityConfig (see
+#     services/auth-service/.../SecurityConfig.java) — otherwise
+#     Spring Security would 401 the anonymous request regardless of
+#     what the gateway decides.
+#
+# Priority / uri / proxy-rewrite / upstream are byte-identical to
+# the protected fragment by contract (check-contracts.py enforces).
+  - id: auth-openapi
+    name: auth-openapi
+    uri: /api/v1/auth/openapi.json
+    methods: [GET, OPTIONS]
+    priority: 960
+    plugins:
+      gateway-auth:
+        require_auth: false
+        csrf_protect: false
+        introspection_url: http://auth-service:8081/api/internal/auth/introspect
+        positive_cache_ttl: 5
+        negative_cache_ttl: 5
+        introspect_timeout_ms: 800
+        introspect_total_budget_ms: 1500
+      proxy-rewrite:
+        uri: /openapi.json
+    upstream_id: auth-service
+
+  - id: analysis-openapi
+    name: analysis-openapi
+    uri: /api/v1/analysis/openapi.json
+    methods: [GET, OPTIONS]
+    priority: 960
+    plugins:
+      gateway-auth:
+        require_auth: false
+        csrf_protect: false
+        introspection_url: http://auth-service:8081/api/internal/auth/introspect
+        positive_cache_ttl: 5
+        negative_cache_ttl: 5
+        introspect_timeout_ms: 800
+        introspect_total_budget_ms: 1500
+      proxy-rewrite:
+        uri: /openapi.json
+    upstream_id: assistant-service

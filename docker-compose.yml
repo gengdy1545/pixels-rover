@@ -197,12 +197,22 @@ services:
       # gateway-auth.lua via os.getenv(); entrypoint.sh fails fast if
       # this is missing. See gateway.md §5.1.
       INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-change-me}
+      # OpenAPI exposure profile (strict enum: "true" | "false"; empty
+      # or any other value is a fatal boot error). gateway.md §6.7
+      # forbids a default — this compose forwards the value from .env
+      # WITHOUT a fallback so every deployment must set it explicitly
+      # in .env. See .env.example.
+      GATEWAY_OPENAPI_PUBLIC: ${GATEWAY_OPENAPI_PUBLIC}
     volumes:
-      # Bind-mount apisix.yaml so iterating on routes is just
-      # `docker compose restart gateway` (no image rebuild). The file
-      # is also COPY'd into the image as a fallback for deployments
-      # where compose isn't the runtime.
-      - ./gateway/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+      # Bind-mount the apisix.yaml *template* plus the fragments
+      # directory so iterating on routes (including OpenAPI profile
+      # fragments) is just `docker compose restart gateway` — no
+      # image rebuild. The same files are also COPY'd into the image
+      # as a fallback for deployments where compose isn't the runtime.
+      # entrypoint.sh renders apisix.yaml.template + selected fragment
+      # → /usr/local/apisix/conf/apisix.yaml at boot (see gateway.md §6.7).
+      - ./gateway/apisix.yaml.template:/usr/local/apisix/conf/apisix.yaml.template:ro
+      - ./gateway/fragments:/usr/local/apisix/conf/fragments:ro
     healthcheck:
       # /gateway/live is pure-local liveness (gateway.md §4.2). MUST
       # NOT be /gateway/ready (which is system readiness; failing it

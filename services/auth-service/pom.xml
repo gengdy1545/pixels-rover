@@ -29,6 +29,13 @@
 		<dep.kaptcha.version>2.3.3</dep.kaptcha.version>
 		<dep.jjwt.version>0.12.5</dep.jjwt.version>
 		<dep.slf4j.version>2.0.12</dep.slf4j.version>
+		<!-- springdoc-openapi 2.1.x is the last release tracked as
+		     compatible with Spring Boot 3.0.x; 2.2+ requires SB 3.1+.
+		     Pinning the "api-only" starter (no swagger-ui HTML) keeps
+		     the transitive footprint minimal — we only need the
+		     /openapi.json endpoint for the gateway's /api/v1/auth/
+		     openapi.json route (see backend.md §9 / gateway.md §6.7). -->
+		<dep.springdoc.version>2.1.0</dep.springdoc.version>
 	</properties>
 
 	<dependencyManagement>
@@ -206,6 +213,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-tomcat</artifactId>
 			<scope>provided</scope>
+		</dependency>
+
+		<!-- springdoc: serves /openapi.json (no swagger-ui HTML). The
+		     gateway exposes this under /api/v1/auth/openapi.json via
+		     proxy-rewrite (gateway.md §6.7); internal path stays the
+		     default /openapi.json per backend.md §9 single-path rule. -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+			<version>${dep.springdoc.version}</version>
 		</dependency>
 
 		<!-- testing -->

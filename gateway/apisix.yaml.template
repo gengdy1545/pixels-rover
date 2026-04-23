@@ -12,6 +12,18 @@
 #   * Route priorities follow gateway.md §6.2 (deeper prefix beats
 #     shallower by >= 10; frontend /* stays at priority 1).
 #
+# Render pipeline (entrypoint.sh):
+#   * This file is a *template* — on container boot `entrypoint.sh`
+#     reads it, splices in one of the mutually-exclusive OpenAPI
+#     route fragments (fragments/openapi-{public,protected}.yaml) at
+#     the `#__OPENAPI_ROUTES__` marker line according to
+#     `GATEWAY_OPENAPI_PUBLIC`, then writes the result to
+#     /usr/local/apisix/conf/apisix.yaml. See gateway.md §6.7 for
+#     why runtime-conditional routing is rejected and why the two
+#     profiles are pre-rendered instead.
+#   * The marker line MUST appear exactly once, at top level indent
+#     under `routes:`. `scripts/check-contracts.py` enforces this.
+#
 # Change-control (hard rules):
 #   * Adding a new backend service requires simultaneous edits to
 #     (a) this file: new upstream + per-domain routes + gateway-ready
@@ -75,6 +87,21 @@ routes:
       type: roundrobin
       nodes:
         "127.0.0.1:65535": 1
+
+  # ------------------------------------------------------------------
+  # OpenAPI per-service namespace routes (gateway.md §6.7).
+  #
+  # The next line is a template splice marker; the actual route
+  # definitions come from fragments/openapi-{public,protected}.yaml
+  # and are selected by entrypoint.sh based on
+  # GATEWAY_OPENAPI_PUBLIC. Do NOT edit the marker text; do NOT move
+  # it out of the `routes:` list. The marker MUST be the ONLY
+  # location declaring OpenAPI routes — inline duplicates here or in
+  # the other fragment would produce duplicate route ids when the
+  # protected fragment is also spliced, and APISIX Standalone YAML
+  # rejects duplicate ids.
+  # ------------------------------------------------------------------
+#__OPENAPI_ROUTES__
 
   # ------------------------------------------------------------------
   # Auth-service — public routes (no login required)

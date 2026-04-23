@@ -22,11 +22,14 @@ COPY custom/apisix/plugins/gateway-ready.lua       /usr/local/apisix/apisix/plug
 # renders it to /usr/local/apisix/conf/config.yaml at container start.
 COPY config.yaml.template /usr/local/apisix/conf/config.yaml.template
 
-# Standalone YAML route table. APISIX reads this file on boot when
-# deployment.role=data_plane and config_provider=yaml. In compose
-# this path is usually bind-mounted over from ./gateway/apisix.yaml
-# so dev iteration is just `docker compose restart gateway`.
-COPY apisix.yaml /usr/local/apisix/conf/apisix.yaml
+# Standalone YAML route table, rendered at container start by
+# entrypoint.sh (template + fragment splice → apisix.yaml). See
+# docs/development/gateway.md §6.7 for why we render instead of
+# serving a static file directly. In compose this path is
+# bind-mounted over from ./gateway/apisix.yaml.template so dev
+# iteration is just `docker compose restart gateway`.
+COPY apisix.yaml.template /usr/local/apisix/conf/apisix.yaml.template
+COPY fragments/          /usr/local/apisix/conf/fragments/
 
 # Gateway error-code registry — single source of truth for GATEWAY_* /
 # INTERNAL_* codes (see backend.md §6.3.1). Baked into the image rather

@@ -124,6 +124,20 @@ public class SecurityConfig
                                 // identity. External exposure is prevented at the gateway layer,
                                 // not here.
                                 "/internal/ready",
+                                // /openapi.json is the springdoc-served OpenAPI document
+                                // (application.properties `springdoc.api-docs.path=/openapi.json`).
+                                // External exposure is controlled EXCLUSIVELY at the gateway
+                                // (gateway.md §6.7: `/api/v1/auth/openapi.json` route switches
+                                // between public / protected fragment profiles based on
+                                // GATEWAY_OPENAPI_PUBLIC). From auth-service's perspective the
+                                // endpoint must be reachable without X-Auth-* headers so that
+                                // BOTH profiles reach the handler — the protected profile's
+                                // gateway-auth does not guarantee identity injection for
+                                // non-Introspection-required routes either, and making this
+                                // endpoint authenticated() here would break the public profile
+                                // with a 401 at the Spring layer regardless of the gateway's
+                                // intent. Access control is deliberately single-layered here.
+                                "/openapi.json",
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/captcha",

@@ -599,10 +599,24 @@ nginx_config:
 - **访问控制**：
   - 生产：`gateway-auth` 配 `require_auth: true`、`csrf_protect: false`（GET 请求），仅登录用户可见。
   - 开发：在 compose 里通过环境变量 `GATEWAY_OPENAPI_PUBLIC=true` 开放给匿名访问，配合 `apisix.yaml` 里两条**互斥**的 route 定义（按 env 选一条挂载）。
-  - **渲染期互斥机制（硬约束，与 §6.6 CSP profile 同源）**：APISIX Standalone YAML **不支持**运行时条件路由，两条互斥 route 必须在 `entrypoint.sh` 渲染 `apisix.yaml` 的阶段依 `GATEWAY_OPENAPI_PUBLIC` 取值**二选一挂载**——实现形态与 §6.6 的 `GATEWAY_CSP_PROFILE` 完全对齐：`apisix.yaml.template` 里准备 `openapi-public.yaml.fragment` / `openapi-protected.yaml.fragment` 两个 fragment，`entrypoint.sh` 按环境变量 `envsubst` + 片段 include 出唯一一份最终 `apisix.yaml`；**禁止**运行时字符串拼接、**禁止**两条 route 同时存在（同一 URI 的 route 重复注册 APISIX 行为未定义）。
-  - `.env.example` 必须显式声明 `GATEWAY_OPENAPI_PUBLIC`，默认值留空（= 未选择），`entrypoint.sh` 在空值或非法值时 fail fast，强制每个部署显式选择一条路由形态。**禁止**把 `true` 设为默认值（与 §6.6 的 CSP profile 空值拒绝启动同规则）。
+  - **渲染期互斥机制（硬约束，与 §6.6 CSP profile 同源）**：APISIX Standalone YAML **不支持**运行时条件路由，两条互斥 route 必须在 `entrypoint.sh` 渲染 `apisix.yaml` 的阶段依 `GATEWAY_OPENAPI_PUBLIC` 取值**二选一挂载**——实现形态与 §6.6 的 `GATEWAY_CSP_PROFILE` 完全对齐。具体文件布局：
+    - `gateway/apisix.yaml.template` — 主路由模板，含一行唯一标记 `#__OPENAPI_ROUTES__`。
+    - `gateway/fragments/openapi-protected.yaml` — `require_auth=true` 版（PROD 基线）。
+    - `gateway/fragments/openapi-public.yaml` — `require_auth=false` 版（DEV / pre-prod only）。
+    - `gateway/entrypoint.sh` 按 `GATEWAY_OPENAPI_PUBLIC` 选片段、用 `awk` 行替换 marker → 写出 `/usr/local/apisix/conf/apisix.yaml`，再 `envsubst` 渲染 `config.yaml.template`。
+    - **禁止**运行时字符串拼接、**禁止**两条 route 同时存在（同一 URI 的 route 重复注册 APISIX 行为未定义）。
+    - **禁止**在 `apisix.yaml.template` 的其它位置或另一份 fragment 里重复声明 openapi 相关 route——`scripts/check-contracts.py` `openapi-route-priority-above-deepest-prefix` 断言会在 `_OPENAPI_ROUTE_IDS` 白名单比对环节拦下。
+    - **两个 fragment 的硬对称**：public 与 protected 必须**字段级字节相等**，只有 `gateway-auth.require_auth` 的布尔值允许不同。该约束由 `openapi-route-priority-above-deepest-prefix` 断言的"cross-fragment symmetry"子项强制。
+  - `.env.example` 必须显式声明 `GATEWAY_OPENAPI_PUBLIC`（仓库内默认发 `false`——PROD 安全值——但`entrypoint.sh` 对空值/任意其它取值仍然 fail fast，不允许被外部部署环境以 `:-` 默认值偷偷覆盖）。**禁止**把 `true` 设为默认值（与 §6.6 的 CSP profile 空值拒绝启动同规则）。
 - **不聚合**：不做"统一的 `/api/openapi.json` 把所有服务合并"这类事。每个服务各自拥有自己的 schema，合并由前端工具或 CI 做离线产物，不在 gateway 实时处理。
-- **openapi route priority 硬规则**：`/api/v1/<service>/openapi.json` 是一个**精确路径** route（非前缀），它必须在同域下所有前缀 route 之前被匹配，否则会被 `/api/v1/<service>*` 之类的前缀路由抢先转发到服务的业务 handler 而不是 openapi endpoint。**每条 openapi route 的 `priority` 必须显式声明 > 对应域下最深业务前缀的 `priority` + 10**（例如 auth 域最深前缀 `/api/v1/auth/sessions/{id}` 若 `priority=900`，则 `/api/v1/auth/openapi.json` 必须 `priority ≥ 910`）。与 §6.2 "深前缀压浅前缀"的 +10 约束同源。`scripts/check-gateway-config.py` 应断言该规则。
+- **openapi route priority 硬规则**：`/api/v1/<service>/openapi.json` 是一个**精确路径** route（非前缀），它必须在同域下所有前缀 route 之前被匹配，否则会被 `/api/v1/<service>*` 之类的前缀路由抢先转发到服务的业务 handler 而不是 openapi endpoint。**每条 openapi route 的 `priority` 必须显式声明 ≥ 对应域（`/api/v1/<service>/` 前缀下）所有 route 的最高 `priority` + 10**——这比原先"压最深业务前缀"的说法略严格，原因是精确路径 route（如 `/api/v1/auth/login=950`）虽然 URI 不同、理论上不会真正遮蔽 openapi，但把 openapi 放到域内绝对优先级顶端可以在未来重构域内 route 时免于回归检查。当前实现 openapi route 统一取 `priority=960`（auth 域最高为 auth-login=950，analysis 域最高为 analysis-backends-root=890，960 都满足 +10 要求）。与 §6.2 "深前缀压浅前缀"的 +10 约束同源。`scripts/check-contracts.py` 的 `openapi-route-priority-above-deepest-prefix` 断言对两条 openapi route × 两个 profile × 四项子检查（priority / proxy-rewrite / require_auth 对极 / 跨 fragment 对称）全量兜底。
+- **backend 侧必备配套**：
+  - `services/auth-service/src/main/resources/application.properties` 必须显式声明 `springdoc.api-docs.path=/openapi.json`（backend.md §9 单真源路径）；`pom.xml` 依赖 `org.springdoc:springdoc-openapi-starter-webmvc-api`（无 swagger-ui HTML，仅 JSON）。
+  - `SecurityConfig.publicAndUserChain` 的 `permitAll()` 列表必须包含 `/openapi.json`——两条 profile 任一下**都**会 401，原因细分：
+    - **Public profile**：gateway 不做 introspect，上游没有 X-Auth-User-Id；Spring Security 在 `.authenticated()` 阶段把匿名请求拒掉。
+    - **Protected profile**：gateway 做 introspect 并注入 X-Auth-User-Id，但 `IdentityHeaderValidationFilter.shouldNotFilter()` 以 `PROTECTED_PATTERNS` 白名单形式工作，`/openapi.json` 不在其中 → filter 直接 skip → 没有 `SecurityContext` 被设置 → `.authenticated()` 仍然拒匿名。
+    - 结论：把 `/openapi.json` 归入 `permitAll()`，access control **一层收敛到 gateway**，是 §6.7 的默认取舍。
+  - assistant-service（FastAPI）默认即暴露 `/openapi.json`，不需要额外动作。
 
 ---
 

@@ -1,0 +1,63 @@
+# OpenAPI per-service routes — PROTECTED profile (gateway.md §6.7).
+#
+# Spliced into apisix.yaml.template at the `#__OPENAPI_ROUTES__`
+# marker by entrypoint.sh when GATEWAY_OPENAPI_PUBLIC=false.
+#
+# Invariants (enforced by scripts/check-contracts.py
+# `openapi-route-priority-above-deepest-prefix`):
+#   * Precise path (NOT prefix). URI MUST end with `/openapi.json`.
+#   * priority > max(priority of any `/api/v1/<svc>/*` prefix route
+#     declared in apisix.yaml.template for the same <svc> domain) + 10.
+#     Current deepest: auth-protected=900, analysis-backends-detail=885.
+#     We uniformly pick 960 to also sit above the most specific auth
+#     public routes (auth-login=950), leaving room for future
+#     insertions without reshuffling.
+#   * `proxy-rewrite` strips the `/api/v1/<svc>/` prefix so the
+#     upstream receives the framework-default `/openapi.json` path —
+#     i.e. the gateway translates a namespace-qualified URL into
+#     each service's own internal /openapi.json. Doing the rewrite
+#     here rather than per-framework config keeps the "/openapi.json
+#     is the ONE internal path every service uses" rule from
+#     backend.md §9 enforceable in a single place.
+#   * gateway-auth with require_auth=true + csrf_protect=false (GET
+#     methods don't need CSRF; see gateway.md §5.2.2).
+#
+# The `public` profile mirror is in openapi-public.yaml; any schema
+# / plugin config change in one file MUST be made in the other too
+# (the two fragments differ ONLY in `require_auth` and the
+# `gateway-auth` block; everything else is identical by contract).
+  - id: auth-openapi
+    name: auth-openapi
+    uri: /api/v1/auth/openapi.json
+    methods: [GET, OPTIONS]
+    priority: 960
+    plugins:
+      gateway-auth:
+        require_auth: true
+        csrf_protect: false
+        introspection_url: http://auth-service:8081/api/internal/auth/introspect
+        positive_cache_ttl: 5
+        negative_cache_ttl: 5
+        introspect_timeout_ms: 800
+        introspect_total_budget_ms: 1500
+      proxy-rewrite:
+        uri: /openapi.json
+    upstream_id: auth-service
+
+  - id: analysis-openapi
+    name: analysis-openapi
+    uri: /api/v1/analysis/openapi.json
+    methods: [GET, OPTIONS]
+    priority: 960
+    plugins:
+      gateway-auth:
+        require_auth: true
+        csrf_protect: false
+        introspection_url: http://auth-service:8081/api/internal/auth/introspect
+        positive_cache_ttl: 5
+        negative_cache_ttl: 5
+        introspect_timeout_ms: 800
+        introspect_total_budget_ms: 1500
+      proxy-rewrite:
+        uri: /openapi.json
+    upstream_id: assistant-service

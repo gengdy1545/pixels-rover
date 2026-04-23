@@ -100,7 +100,9 @@ def register_check(name: str, description: str):
 
 
 _ERROR_CODES_PATH = REPO_ROOT / "gateway" / "error-codes.json"
-_APISIX_YAML_PATH = REPO_ROOT / "gateway" / "apisix.yaml"
+_APISIX_TEMPLATE_PATH = REPO_ROOT / "gateway" / "apisix.yaml.template"
+_OPENAPI_FRAGMENT_DIR = REPO_ROOT / "gateway" / "fragments"
+_OPENAPI_MARKER = "#__OPENAPI_ROUTES__"
 _CONFIG_TEMPLATE_PATH = REPO_ROOT / "gateway" / "config.yaml.template"
 _INFRA_TS_PATH = REPO_ROOT / "frontend" / "src" / "shared" / "types" / "infra.ts"
 _PLUGIN_DIR = REPO_ROOT / "gateway" / "custom" / "apisix" / "plugins"
@@ -110,13 +112,60 @@ def _load_error_codes() -> dict:
     return json.loads(_ERROR_CODES_PATH.read_text(encoding="utf-8"))
 
 
-def _load_apisix_yaml() -> dict:
-    # APISIX Standalone YAML ends with a literal `#END` marker that is not
-    # actually valid YAML body — strip any trailing content after the final
-    # document separator before parsing. In practice PyYAML tolerates `#END`
-    # as a comment, so no special handling is needed, but we keep a guard.
-    text = _APISIX_YAML_PATH.read_text(encoding="utf-8")
-    return yaml.safe_load(text) or {}
+def _splice_openapi_fragment(template_text: str, profile: str) -> str:
+    """Splice the named OpenAPI fragment into the apisix template.
+
+    Mirrors the splice logic in ``gateway/entrypoint.sh`` so contract
+    checks see a realistic post-render route table. The marker line
+    MUST appear exactly once; caller-visible errors are surfaced as
+    ValueError so checks can report a precise failure message.
+    """
+    fragment_path = _OPENAPI_FRAGMENT_DIR / f"openapi-{profile}.yaml"
+    if not fragment_path.is_file():
+        raise ValueError(f"OpenAPI fragment missing: {fragment_path}")
+    fragment_text = fragment_path.read_text(encoding="utf-8")
+
+    lines = template_text.splitlines(keepends=True)
+    marker_hits = [i for i, line in enumerate(lines) if line.strip() == _OPENAPI_MARKER]
+    if not marker_hits:
+        raise ValueError(
+            f"{_OPENAPI_MARKER} marker not found in {_APISIX_TEMPLATE_PATH}"
+        )
+    if len(marker_hits) > 1:
+        raise ValueError(
+            f"{_OPENAPI_MARKER} marker appears {len(marker_hits)} times "
+            f"in {_APISIX_TEMPLATE_PATH} (must be exactly 1)"
+        )
+    idx = marker_hits[0]
+    return "".join(lines[:idx]) + fragment_text + "".join(lines[idx + 1 :])
+
+
+def _load_apisix_yaml(profile: str = "protected") -> dict:
+    """Return the apisix route table as it would exist at runtime.
+
+    Mirrors entrypoint.sh: reads ``apisix.yaml.template`` and splices
+    the requested OpenAPI fragment (default = protected, the PROD
+    baseline) into place. Returns the parsed YAML dict.
+    """
+    template_text = _APISIX_TEMPLATE_PATH.read_text(encoding="utf-8")
+    rendered = _splice_openapi_fragment(template_text, profile)
+    return yaml.safe_load(rendered) or {}
+
+
+def _load_openapi_fragment(profile: str) -> list[dict]:
+    """Return the list of route dicts declared in an OpenAPI fragment."""
+    fragment_path = _OPENAPI_FRAGMENT_DIR / f"openapi-{profile}.yaml"
+    fragment_text = fragment_path.read_text(encoding="utf-8")
+    # The fragment is a YAML snippet expected to be spliced UNDER an
+    # existing `routes:` list; at the top-level of a standalone parse
+    # it reads as a bare sequence, which PyYAML returns as a list.
+    parsed = yaml.safe_load(fragment_text)
+    if not isinstance(parsed, list):
+        raise ValueError(
+            f"{fragment_path} did not parse as a YAML sequence of routes; "
+            f"got {type(parsed).__name__}"
+        )
+    return parsed
 
 
 def _load_config_template() -> str:
@@ -561,6 +610,254 @@ def check_positive_cache_invalidate_linkage() -> CheckResult:
                 f"route {rid}: positive_cache_ttl={ttl} but no "
                 "/gateway/internal/invalidate_session route exists. "
                 "Lower to <=5 or land the invalidate_session PR first."
+            )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI per-service namespace routes (§9.1 / gateway.md §6.7)
+# ---------------------------------------------------------------------------
+
+# Known OpenAPI route ids. Each must appear in BOTH fragments with
+# byte-identical config except for gateway-auth.require_auth.
+_OPENAPI_ROUTE_IDS: tuple[str, ...] = ("auth-openapi", "analysis-openapi")
+_OPENAPI_PROFILES: tuple[str, ...] = ("protected", "public")
+# Mapping route id -> API domain prefix. Used to locate "sibling
+# business prefix routes" against which the OpenAPI precise-path
+# route's priority is compared.
+_OPENAPI_ROUTE_DOMAIN: dict[str, str] = {
+    "auth-openapi": "/api/v1/auth/",
+    "analysis-openapi": "/api/v1/analysis/",
+}
+_OPENAPI_PRIORITY_MARGIN = 10  # gateway.md §6.2 / §6.7 hard rule
+
+
+@register_check(
+    "openapi-route-priority-above-deepest-prefix",
+    "Each /api/v1/<svc>/openapi.json route has priority >= "
+    "deepest /api/v1/<svc>/* prefix route's priority + 10, and both "
+    "fragments (public / protected) declare the same set of openapi "
+    "routes with byte-identical fields except for require_auth.",
+)
+def check_openapi_route_priority() -> CheckResult:
+    result = CheckResult(
+        "openapi-route-priority-above-deepest-prefix",
+        "OpenAPI route priority + fragment symmetry",
+    )
+
+    # 1. Parse template (sans openapi routes) to find deepest business
+    #    prefix per domain.
+    template_text = _APISIX_TEMPLATE_PATH.read_text(encoding="utf-8")
+    try:
+        # Splicing with an empty-fragment stand-in would need another
+        # scaffold; easier to splice protected and then strip openapi
+        # routes out before computing the per-domain prefix bases.
+        template_only = yaml.safe_load(
+            _splice_openapi_fragment(template_text, "protected")
+        ) or {}
+    except ValueError as exc:
+        result.failures.append(str(exc))
+        return result
+
+    template_routes = [
+        r
+        for r in (template_only.get("routes") or [])
+        if isinstance(r, dict) and r.get("id") not in _OPENAPI_ROUTE_IDS
+    ]
+
+    deepest_prefix_priority: dict[str, int] = {}
+    for rid, domain in _OPENAPI_ROUTE_DOMAIN.items():
+        max_prio = -1
+        for r in template_routes:
+            uri = r.get("uri") or ""
+            prio = r.get("priority")
+            if not isinstance(prio, int):
+                continue
+            # Match any route that lives under <domain> (including
+            # prefix routes like `/api/v1/auth/*` and precise routes
+            # like `/api/v1/auth/login`). Excludes the openapi route
+            # itself via the _OPENAPI_ROUTE_IDS filter above.
+            if uri.startswith(domain) or uri == domain.rstrip("/"):
+                if prio > max_prio:
+                    max_prio = prio
+        if max_prio < 0:
+            # Domain has no sibling routes — still require the openapi
+            # priority to be declared, but there's nothing to compare
+            # against. Skip the +10 check and leave a note.
+            continue
+        deepest_prefix_priority[rid] = max_prio
+
+    # 2. For each fragment, verify openapi route set + priority.
+    fragments: dict[str, list[dict]] = {}
+    for profile in _OPENAPI_PROFILES:
+        try:
+            fragments[profile] = _load_openapi_fragment(profile)
+        except (FileNotFoundError, ValueError) as exc:
+            result.failures.append(f"fragment {profile}: {exc}")
+            return result
+
+    for profile, routes in fragments.items():
+        ids_in_fragment = {
+            r.get("id") for r in routes if isinstance(r, dict)
+        }
+        missing = set(_OPENAPI_ROUTE_IDS) - ids_in_fragment
+        extra = ids_in_fragment - set(_OPENAPI_ROUTE_IDS)
+        if missing:
+            result.failures.append(
+                f"fragment {profile}: missing openapi routes {sorted(missing)}"
+            )
+        if extra:
+            result.failures.append(
+                f"fragment {profile}: fragment declares unknown openapi "
+                f"routes {sorted(extra)}; register them in _OPENAPI_ROUTE_IDS "
+                "or remove from the fragment"
+            )
+
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            rid = route.get("id")
+            if rid not in _OPENAPI_ROUTE_IDS:
+                continue
+            uri = route.get("uri") or ""
+            if not uri.endswith("/openapi.json"):
+                result.failures.append(
+                    f"fragment {profile} route {rid}: uri {uri!r} must end "
+                    "with /openapi.json (precise path, not a prefix)"
+                )
+            if uri.rstrip("/") == "/openapi.json":
+                result.failures.append(
+                    f"fragment {profile} route {rid}: bare /openapi.json "
+                    "exposure is forbidden by gateway.md §6.7; use "
+                    "/api/v1/<svc>/openapi.json"
+                )
+
+            prio = route.get("priority")
+            if not isinstance(prio, int):
+                result.failures.append(
+                    f"fragment {profile} route {rid}: priority must be an "
+                    f"integer, got {prio!r}"
+                )
+                continue
+            floor = deepest_prefix_priority.get(rid)
+            if floor is not None and prio < floor + _OPENAPI_PRIORITY_MARGIN:
+                result.failures.append(
+                    f"fragment {profile} route {rid}: priority={prio} < "
+                    f"deepest /api/v1/<svc>/ prefix priority ({floor}) + "
+                    f"{_OPENAPI_PRIORITY_MARGIN}; gateway.md §6.2 / §6.7 "
+                    "require openapi precise paths to beat their domain's "
+                    "deepest prefix route by at least the margin to avoid "
+                    "being shadowed"
+                )
+
+            # proxy-rewrite must rewrite upstream path to /openapi.json.
+            plugins = route.get("plugins") or {}
+            proxy_rewrite = plugins.get("proxy-rewrite")
+            if not isinstance(proxy_rewrite, dict):
+                result.failures.append(
+                    f"fragment {profile} route {rid}: missing proxy-rewrite "
+                    "plugin; gateway must strip the /api/v1/<svc>/ prefix so "
+                    "upstream receives /openapi.json (backend.md §9)"
+                )
+            elif proxy_rewrite.get("uri") != "/openapi.json":
+                result.failures.append(
+                    f"fragment {profile} route {rid}: proxy-rewrite.uri must "
+                    f"be '/openapi.json', got {proxy_rewrite.get('uri')!r}"
+                )
+
+    # 3. Cross-fragment symmetry: public / protected must differ ONLY
+    #    in gateway-auth.require_auth.
+    def _strip_require_auth(route: dict) -> dict:
+        clone = json.loads(json.dumps(route))
+        ga = (clone.get("plugins") or {}).get("gateway-auth")
+        if isinstance(ga, dict):
+            ga.pop("require_auth", None)
+        return clone
+
+    by_id_public = {
+        r.get("id"): _strip_require_auth(r)
+        for r in fragments.get("public", [])
+        if isinstance(r, dict)
+    }
+    by_id_protected = {
+        r.get("id"): _strip_require_auth(r)
+        for r in fragments.get("protected", [])
+        if isinstance(r, dict)
+    }
+    for rid in _OPENAPI_ROUTE_IDS:
+        pub = by_id_public.get(rid)
+        prot = by_id_protected.get(rid)
+        if pub and prot and pub != prot:
+            result.failures.append(
+                f"route {rid}: public vs protected fragment differ in "
+                "fields other than gateway-auth.require_auth — the two "
+                "fragments must be byte-identical except for that one "
+                "boolean (gateway.md §6.7)"
+            )
+
+    # 4. Require the opposite require_auth values actually differ.
+    for rid in _OPENAPI_ROUTE_IDS:
+        pub_r = next(
+            (r for r in fragments.get("public", []) if isinstance(r, dict) and r.get("id") == rid),
+            None,
+        )
+        prot_r = next(
+            (r for r in fragments.get("protected", []) if isinstance(r, dict) and r.get("id") == rid),
+            None,
+        )
+        if not pub_r or not prot_r:
+            continue
+        pub_req = ((pub_r.get("plugins") or {}).get("gateway-auth") or {}).get("require_auth")
+        prot_req = ((prot_r.get("plugins") or {}).get("gateway-auth") or {}).get("require_auth")
+        if pub_req is not False:
+            result.failures.append(
+                f"route {rid} in public fragment: require_auth must be "
+                f"exactly False, got {pub_req!r}"
+            )
+        if prot_req is not True:
+            result.failures.append(
+                f"route {rid} in protected fragment: require_auth must be "
+                f"exactly True, got {prot_req!r}"
+            )
+
+    return result
+
+
+@register_check(
+    "no-bare-openapi-json-route",
+    "apisix.yaml.template and both openapi fragments declare zero "
+    "routes with uri == /openapi.json (gateway.md §6.7 bans bare "
+    "exposure; use /api/v1/<svc>/openapi.json instead).",
+)
+def check_no_bare_openapi_route() -> CheckResult:
+    result = CheckResult(
+        "no-bare-openapi-json-route",
+        "Bare /openapi.json never exposed",
+    )
+    # Scan the raw text of template + both fragments; YAML parsing
+    # is unnecessary here, and grep-style catches copy-paste slips
+    # in comments too (false positives on comments are acceptable
+    # since the rule is "not even as a draft").
+    paths_to_scan = [_APISIX_TEMPLATE_PATH] + [
+        _OPENAPI_FRAGMENT_DIR / f"openapi-{p}.yaml" for p in _OPENAPI_PROFILES
+    ]
+    # Match `uri: /openapi.json` (with any amount of whitespace); the
+    # pattern deliberately anchors to the `uri:` key to ignore any
+    # internal proxy-rewrite `uri: /openapi.json` which IS permitted.
+    # Specifically: top-level route `uri:` lines are indented with 4
+    # spaces; plugin-nested `uri:` lines are indented with 8+ spaces.
+    bare_route_uri = re.compile(r"^\s{2,4}uri:\s*/openapi\.json\s*$", re.MULTILINE)
+    for path in paths_to_scan:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if bare_route_uri.search(text):
+            result.failures.append(
+                f"{path.relative_to(REPO_ROOT)}: found a route with "
+                "`uri: /openapi.json` at route-level indentation; bare "
+                "exposure is forbidden — use a namespaced URI like "
+                "/api/v1/<svc>/openapi.json and move /openapi.json to "
+                "proxy-rewrite only"
             )
     return result
 
