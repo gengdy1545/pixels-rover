@@ -38,7 +38,7 @@ import type { ErrorCategory, ErrorCode } from '../types/common';
  * matches the JSON's retryable-infra subset (see the
  * `frontend-retryable-infra-codes-match-json` check).
  *
- * Business-prefix codes (AUTH_* / ANALYSIS_* / ...) never appear here —
+ * Business-prefix codes (ANALYSIS_* / ...) never appear here —
  * their retryability is category-driven (see `isRetryableCategory`). If a
  * specific business code needs a non-default retryability, add it as a
  * per-code exception below rather than widening this set; that keeps the
@@ -47,7 +47,6 @@ import type { ErrorCategory, ErrorCode } from '../types/common';
  */
 const RETRYABLE_INFRA_ERROR_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'GATEWAY_CSRF_INVALID',
-  'GATEWAY_INTROSPECT_UNAVAILABLE',
   'GATEWAY_NOT_READY',
 ]);
 
@@ -55,7 +54,7 @@ const RETRYABLE_INFRA_ERROR_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
  * Which categories are retryable by default. Based on backend.md §6.3.2:
  *
  * - `UPSTREAM` — by definition a transient upstream dependency failure
- *   (database down, LLM API rate limit, introspect unreachable). Safe to
+ *   (database down, LLM API rate limit, Ory/Oathkeeper unreachable). Safe to
  *   offer a retry; the C3 degradation-mode contract (backend.md §6.7)
  *   specifically picks 503 + `UPSTREAM` so clients know to back off and
  *   try again rather than clear state and bounce to login.

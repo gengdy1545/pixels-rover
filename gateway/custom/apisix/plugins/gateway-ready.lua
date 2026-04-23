@@ -8,8 +8,9 @@
 --   * Semantics: boolean AND over each registered probe's `/health`. Any
 --     probe that is not HTTP 200 -> overall 503. No degraded/warning tier.
 --   * Coverage: only "each upstream process is alive and its /health returns
---     200". Does NOT reflect DB/schema/LLM/3rd-party reachability; those
---     belong to per-service `/health` (backend.md §7.1) and to the cold-start
+--     an allowed status code". Default is HTTP 200; browser UI probes may opt
+--     into 3xx redirects explicitly. Does NOT reflect DB/schema/LLM/3rd-party
+--     reachability; those belong to per-service `/health` (backend.md §7.1) and to the cold-start
 --     `scripts/smoke.sh` that talks to MySQL directly (todolist.md §15).
 --   * Configuration: `probes[]` is an *instance config* of this plugin on
 --     the `/gateway/ready` route. Adding a new upstream service means
@@ -40,7 +41,7 @@ local error_code_registry = require("apisix.plugins.error_code_registry")
 
 local plugin_name = "gateway-ready"
 
--- See gateway-auth.lua for the full rationale on KNOWN_ERROR_CODES. Short
+-- See error_code_registry.lua for the full rationale on KNOWN_ERROR_CODES. Short
 -- version: this is the ground truth of which errorCodes this plugin may
 -- emit; init() asserts it is a subset of gateway/error-codes.json.
 local KNOWN_ERROR_CODES = {
@@ -66,6 +67,16 @@ local probe_schema = {
             maximum = 10000,
             default = 1000,
             description = "declarative per-probe budget; MUST be mirrored by proxy_*_timeout on the corresponding internal location",
+        },
+        success_statuses = {
+            type = "array",
+            items = {
+                type = "integer",
+                minimum = 100,
+                maximum = 599,
+            },
+            default = { 200 },
+            description = "HTTP statuses treated as ready for this probe. Defaults to [200].",
         },
     },
     required = { "name", "uri" },
@@ -133,7 +144,14 @@ local function build_verdict(probes, responses, request_id, elapsed_total_ms)
     for i, probe in ipairs(probes) do
         local resp = responses[i]
         local status = (resp and resp.status) or 0
-        local healthy = (status == 200)
+        local success_statuses = probe.success_statuses or { 200 }
+        local healthy = false
+        for _, expected in ipairs(success_statuses) do
+            if status == expected then
+                healthy = true
+                break
+            end
+        end
         if not healthy then
             any_failed = true
         end
@@ -188,7 +206,7 @@ local function empty_probes_body(request_id)
     }
 end
 
--- See gateway-auth.lua _M.init for the reasoning. Same fail-closed contract:
+-- Same fail-closed contract as other gateway plugins:
 -- if the registry is missing or out of sync, /gateway/ready stops serving
 -- rather than produce an unregistered errorCode.
 function _M.init()
@@ -230,7 +248,7 @@ function _M.access(conf, ctx)
     return write_json(status, body)
 end
 
--- Exposed strictly for unit tests. See gateway-auth.lua for the same caveat.
+-- Exposed strictly for unit tests.
 _M._private = {
     build_verdict = build_verdict,
     empty_probes_body = empty_probes_body,

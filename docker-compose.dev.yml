@@ -3,19 +3,44 @@
 # Supplies non-production defaults that satisfy required-env validation for
 # first-time local boots. Do not use this overlay for production.
 
+x-kratos-dev-environment: &kratos-dev-environment
+  SERVE_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+  SERVE_PUBLIC_CORS_ALLOWED_ORIGINS_0: ${PUBLIC_BASE_URL:-http://localhost}
+  SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: ${PUBLIC_BASE_URL:-http://localhost}/home
+  SELFSERVICE_ALLOWED_RETURN_URLS_0: ${PUBLIC_BASE_URL:-http://localhost}
+  SELFSERVICE_ALLOWED_RETURN_URLS_1: ${PUBLIC_BASE_URL:-http://localhost}/home
+  SELFSERVICE_ALLOWED_RETURN_URLS_2: ${PUBLIC_BASE_URL:-http://localhost}/login
+  SELFSERVICE_ALLOWED_RETURN_URLS_3: ${PUBLIC_BASE_URL:-http://localhost}/register
+  SELFSERVICE_FLOWS_ERROR_UI_URL: ${PUBLIC_BASE_URL:-http://localhost}/ui/error
+  SELFSERVICE_FLOWS_LOGIN_UI_URL: ${PUBLIC_BASE_URL:-http://localhost}/ui/login
+  SELFSERVICE_FLOWS_REGISTRATION_UI_URL: ${PUBLIC_BASE_URL:-http://localhost}/ui/registration
+  SELFSERVICE_FLOWS_SETTINGS_UI_URL: ${PUBLIC_BASE_URL:-http://localhost}/ui/settings
+  SELFSERVICE_FLOWS_RECOVERY_UI_URL: ${PUBLIC_BASE_URL:-http://localhost}/ui/recovery
+  SELFSERVICE_FLOWS_VERIFICATION_UI_URL: ${PUBLIC_BASE_URL:-http://localhost}/ui/verification
+  SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: ${PUBLIC_BASE_URL:-http://localhost}/login
+  SECRETS_DEFAULT_0: ${KRATOS_SECRET_DEFAULT:-dev-local-kratos-default-secret-00000001}
+  SECRETS_COOKIE_0: ${KRATOS_SECRET_COOKIE:-dev-local-kratos-cookie-secret-00000001}
+
 services:
+  required-env-guard:
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-dev-local-kratos-default-secret-00000001}
+      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-dev-local-kratos-cookie-secret-00000001}
+      ORY_UI_COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-dev-local-ory-ui-cookie-secret-000001}
+
   kratos-migrate:
     environment:
-      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-dev-local-kratos-default-secret-00000001}
-      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-dev-local-kratos-cookie-secret-00000001}
+      <<: *kratos-dev-environment
 
   kratos:
+    command: ["serve", "--dev", "--config", "/etc/config/kratos/kratos.yml"]
     environment:
-      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-dev-local-kratos-default-secret-00000001}
-      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-dev-local-kratos-cookie-secret-00000001}
+      <<: *kratos-dev-environment
 
   ory-ui:
     environment:
+      KRATOS_BROWSER_URL: ${PUBLIC_BASE_URL:-http://localhost}
       COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-dev-local-ory-ui-cookie-secret-000001}
       CSRF_COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-dev-local-ory-ui-cookie-secret-000001}
       DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES: ${ORY_UI_DISABLE_SECURE_CSRF_COOKIES:-true}

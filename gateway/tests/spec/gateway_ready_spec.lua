@@ -4,7 +4,7 @@
 -- integration (ngx.location.capture_multi dispatch, nginx timeouts) is
 -- covered by scripts/smoke.sh, not here.
 
-package.path = "./?.lua;./stubs/?.lua;" .. package.path
+package.path = "./?.lua;./stubs/?.lua;../custom/?.lua;" .. package.path
 
 local mocks = require("stubs.install_mocks")
 local ngx_stub = require("stubs.ngx_stub")
@@ -46,7 +46,7 @@ describe("gateway-ready", function()
         before_each(function() build_verdict = plugin._private.build_verdict end)
 
         local probes = {
-            { name = "auth",      uri = "/__ready_probe/auth" },
+            { name = "kratos",    uri = "/__ready_probe/kratos" },
             { name = "assistant", uri = "/__ready_probe/assistant" },
         }
 
@@ -73,6 +73,22 @@ describe("gateway-ready", function()
             assert.equals("UP", body.details.components[1].status)
             assert.equals("DOWN", body.details.components[2].status)
             assert.equals(500, body.details.components[2].httpCode)
+        end)
+
+        it("allows a probe to opt into explicit 3xx success statuses", function()
+            local status, body = build_verdict({
+                {
+                    name = "ory-ui",
+                    uri = "/__ready_probe/ory-ui",
+                    success_statuses = { 200, 302, 303 },
+                },
+            }, {
+                { status = 302 },
+            }, "rid", 3)
+
+            assert.equals(200, status)
+            assert.equals("UP", body.data.components[1].status)
+            assert.equals(302, body.data.components[1].httpCode)
         end)
 
         it("treats a missing response as DOWN with httpCode=0", function()

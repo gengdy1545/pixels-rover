@@ -9,7 +9,7 @@
 --   -- ...require the plugin, drive it, then assert on ngx_stub.captured.*
 --   ngx_stub.reset()
 --
--- Covers the surface that gateway-auth / gateway-ready touch. Intentionally
+-- Covers the surface that gateway-csrf / gateway-ready touch. Intentionally
 -- simple -- if a plugin starts needing more ngx APIs, extend here explicitly
 -- rather than silently no-op'ing; a quiet no-op mask is how real regressions
 -- leak past unit tests.

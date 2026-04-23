@@ -1,4 +1,4 @@
--- error_code_registry: tiny helper shared by gateway-auth / gateway-ready so
+-- error_code_registry: tiny helper shared by gateway plugins so
 -- each plugin can self-check, at plugin-loader init time, that every
 -- `GATEWAY_* / INTERNAL_*` string literal the plugin may emit is registered
 -- in `gateway/error-codes.json` (= `/usr/local/apisix/conf/error-codes.json`
@@ -15,8 +15,8 @@
 --     loader still errors out at worker init rather than silently shipping
 --     the drifted code into production.
 --   * Hard failure model: `error(msg)` inside plugin init triggers
---     APISIX's plugin-loader failure path. Since `gateway-auth` is on every
---     protected route, a loader failure fails requests closed — which is
+--     APISIX's plugin-loader failure path. Since edge plugins protect the
+--     browser boundary, a loader failure fails requests closed — which is
 --     exactly what we want when the contract boundary has drifted.
 --
 -- Non-goals:

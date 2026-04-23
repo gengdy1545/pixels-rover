@@ -8,7 +8,7 @@
 #
 # Scope:
 #   This script only validates the CONTRACT layer — request/response envelopes,
-#   gateway routing shape, auth chain wiring, identity-header injection, and
+#   gateway routing shape, Ory auth boundary wiring, identity-header injection, and
 #   OpenAPI reachability. It does NOT exercise business flows (analysis runs,
 #   LLM calls, conversation history, etc.) and MUST NOT be taken as proof of
 #   end-to-end functional correctness.
@@ -34,8 +34,8 @@
 #                              happy-path and 404 responses
 #   5. auth boundary     — unauthenticated protected API requests are rejected
 #                          by Oathkeeper, forged X-Auth-* headers do not bypass
-#                          auth, and unsafe methods are stopped by the thin
-#                          CSRF policy adapter before Oathkeeper.
+#                          auth, and unsafe methods are stopped by the
+#                          gateway-csrf plugin before Oathkeeper.
 #
 # Consumption of config/required-env.yaml (§14 SSOT):
 #   The script sources the SSOT indirectly — it relies on the three startup-
@@ -64,6 +64,10 @@ SMOKE_READY_MAX_BACKOFF="${SMOKE_READY_MAX_BACKOFF:-8}"
 SMOKE_KEEP_STACK="${SMOKE_KEEP_STACK:-0}"
 SMOKE_NO_BUILD="${SMOKE_NO_BUILD:-0}"
 SMOKE_SKIP_BOOT="${SMOKE_SKIP_BOOT:-0}"
+
+# Keep local smoke isolated from a developer's host MySQL. Operators can still
+# override MYSQL_PORT explicitly when targeting a known environment.
+export MYSQL_PORT="${MYSQL_PORT:-13306}"
 
 # The dev overlay supplies defaults for every required env var so the stack
 # actually boots from an otherwise empty .env; see docker-compose.dev.yml.
@@ -110,7 +114,7 @@ cleanup() {
     stage "FAILURE — dumping compose state + per-service logs (last 50 lines)"
     docker compose "${SMOKE_COMPOSE_FILES[@]}" ps || true
     local svc
-    for svc in mysql kratos-migrate kratos oathkeeper ory-policy-adapter ory-ui assistant-service frontend gateway; do
+    for svc in mysql required-env-guard kratos-migrate kratos oathkeeper ory-ui assistant-service frontend gateway; do
       echo
       echo "$C_YELLOW--- $svc ---$C_RESET" >&2
       docker compose "${SMOKE_COMPOSE_FILES[@]}" logs --tail=50 "$svc" || true
@@ -200,6 +204,7 @@ assert_containers_running() {
   bad="$(printf '%s' "$normalised" | jq -r '
     .[]
     | select(.Service != "kratos-migrate")
+    | select(.Service != "required-env-guard")
     | select((.State // "") != "running")
     | "\(.Service)=\(.State // "?")"
   ')"
@@ -268,6 +273,7 @@ stage "Stage 4: contract assertions"
 #        printf '%s' "$SMOKE_LAST_HEADERS" | grep -i x-request-id
 SMOKE_LAST_STATUS=""
 SMOKE_LAST_HEADERS=""
+SMOKE_LAST_BODY=""
 smoke_request() {
   local method="$1" path="$2"; shift 2
   local hdr_file body_file
@@ -277,7 +283,8 @@ smoke_request() {
     "$@" \
     "$SMOKE_GATEWAY_URL$path" || echo "000")"
   SMOKE_LAST_HEADERS="$(cat "$hdr_file")"
-  cat "$body_file"
+  SMOKE_LAST_BODY="$(cat "$body_file")"
+  printf '%s' "$SMOKE_LAST_BODY"
   rm -f "$hdr_file" "$body_file"
 }
 smoke_header() {
@@ -289,7 +296,7 @@ smoke_header() {
 
 # -- 4a: /api/internal/* and /gateway/internal/* are not externally declared --
 for hidden in \
-    /api/internal/auth/introspect \
+    /api/internal/health \
     /gateway/internal/invalidate_session; do
   smoke_request GET "$hidden" >/dev/null || true
   if [[ "$SMOKE_LAST_STATUS" != "404" ]]; then
@@ -304,7 +311,8 @@ for retired in \
     /api/v1/auth/register \
     /api/v1/auth/refresh \
     /api/v1/auth/captcha; do
-  body="$(smoke_request POST "$retired")"
+  smoke_request POST "$retired" >/dev/null || true
+  body="$SMOKE_LAST_BODY"
   if [[ "$SMOKE_LAST_STATUS" != "410" ]]; then
     die "expected 410 for retired $retired (got $SMOKE_LAST_STATUS body=$body)"
   fi
@@ -337,7 +345,7 @@ ok "404 response carries X-Request-Id=$rid_404"
 # ---------------------------------------------------------------------------
 # Stage 5 — auth boundary.
 # ---------------------------------------------------------------------------
-stage "Stage 5: auth boundary (Oathkeeper + CSRF policy adapter)"
+stage "Stage 5: auth boundary (Oathkeeper + gateway-csrf)"
 
 body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
   --max-time 15 \

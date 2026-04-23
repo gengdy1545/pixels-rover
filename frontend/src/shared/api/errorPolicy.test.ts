@@ -57,7 +57,6 @@ describe('isRetryable()', () => {
   it('is false for AUTH category (auto-retry already exhausted by client)', () => {
     const err = makeError({
       httpStatus: 401,
-      errorCode: 'GATEWAY_AUTH_REQUIRED',
       category: 'AUTH',
     });
     expect(isRetryable(err)).toBe(false);
@@ -66,7 +65,7 @@ describe('isRetryable()', () => {
   it('is false for USER_INPUT (wait for user correction)', () => {
     const err = makeError({
       httpStatus: 400,
-      errorCode: 'AUTH_INVALID_ARGUMENT',
+      errorCode: 'ANALYSIS_INVALID_ARGUMENT',
       category: 'USER_INPUT',
     });
     expect(isRetryable(err)).toBe(false);
@@ -107,7 +106,7 @@ describe('categorize()', () => {
     ['INTERNAL', 'server-error'],
   ])('maps %s → %s', (category, bucket) => {
     const err = makeError({
-      errorCode: 'AUTH_INVALID_ARGUMENT',
+      errorCode: 'ANALYSIS_INVALID_ARGUMENT',
       category,
     });
     expect(categorize(err)).toBe(bucket);

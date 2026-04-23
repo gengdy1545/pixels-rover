@@ -61,7 +61,7 @@ class TestSubmitAnalysisAuth:
         resp = await async_client.post(
             "/api/v1/analysis",
             json={"question": "What is the total revenue?", "threadId": "missing-thread"},
-            headers=auth_header("not-a-valid-jwt"),
+            headers=auth_header("not-a-valid-identity-payload"),
         )
         _assert_gateway_identity_missing(resp)
 

@@ -13,28 +13,26 @@
  * source-of-truth: backend.md §6.0 (unified response envelope: `code` /
  *   `message` / `data | details` / `requestId`) + §6.3.2 (how per-service
  *   `ErrorCode` unions merge into the top-level union declared here).
- *   Per-service branches import from `./infra` (gateway), `./auth/ErrorCode`
- *   (auth-service), `./analysis/ErrorCode` (assistant-service), each of
- *   which carries its own owning-service + source-of-truth tags.
+ *   Per-service branches import from `./infra` (gateway) and
+ *   `./analysis/ErrorCode` (assistant-service), each of which carries its own
+ *   owning-service + source-of-truth tags.
  *
  * Hand-mirrored per frontend.md §4.6 "手写契约镜像文件的顶部元数据" rule.
  */
 import type { InfraErrorCode } from './infra';
-import type { AuthErrorCode } from './auth/ErrorCode';
 import type { AnalysisErrorCode } from './analysis/ErrorCode';
 
-export type { InfraErrorCode, AuthErrorCode, AnalysisErrorCode };
+export type { InfraErrorCode, AnalysisErrorCode };
 
 /**
  * Union of every stable errorCode the frontend may observe under
  * `ApiErrorResponse.details.errorCode`. See backend.md §6.3.2.
  */
-export type ErrorCode = InfraErrorCode | AuthErrorCode | AnalysisErrorCode;
+export type ErrorCode = InfraErrorCode | AnalysisErrorCode;
 
 /**
  * Coarse failure categories used for the "second-tier" fallback dispatch
  * (backend.md §6.3.2 step 2). Stay aligned with
- * `services/auth-service/.../ErrorCategory.java` and
  * `services/assistant-service/app/error_codes.py ErrorCategory`.
  */
 export type ErrorCategory =

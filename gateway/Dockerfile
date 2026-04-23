@@ -15,6 +15,7 @@ RUN apt-get update \
 # Custom Lua plugins must live under /usr/local/apisix/apisix/plugins.
 COPY custom/apisix/plugins/error_code_registry.lua /usr/local/apisix/apisix/plugins/error_code_registry.lua
 COPY custom/apisix/plugins/gateway-ready.lua       /usr/local/apisix/apisix/plugins/gateway-ready.lua
+COPY custom/apisix/plugins/gateway-csrf.lua        /usr/local/apisix/apisix/plugins/gateway-csrf.lua
 
 # Boot configuration template (Standalone YAML mode). entrypoint.sh
 # renders it to /usr/local/apisix/conf/config.yaml at container start.

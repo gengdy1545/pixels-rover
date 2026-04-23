@@ -3,11 +3,10 @@
 # Frontend dev-server launcher (Vite).
 #
 # Scope — DELIBERATELY narrowed:
-#   * This script used to also start auth-service (`mvn spring-boot:run`)
-#     and assistant-service (`uvicorn`) directly on the host. Those
-#     paths are GONE. They encouraged running backends WITHOUT the
-#     gateway, which silently bypasses every contract enforced by
-#     APISIX (CSRF, CORS, X-Request-Id injection, introspection,
+#   * This script used to also start backend services directly on the
+#     host. Those paths are GONE. They encouraged running backends
+#     WITHOUT the gateway, which silently bypasses contracts enforced by
+#     APISIX/Ory (CSRF, CORS, X-Request-Id, Oathkeeper authorization,
 #     security headers, readiness aggregation). The canonical local
 #     path for anything that touches auth / business APIs is:
 #

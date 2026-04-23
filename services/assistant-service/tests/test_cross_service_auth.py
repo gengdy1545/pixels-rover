@@ -1,8 +1,8 @@
 """
 Gateway identity contract tests.
 
-These tests replace the old JWT cross-service checks. The new contract is that
-APISIX validates tokens and projects identity into X-Auth-* headers, while the
+These tests replace the old cross-service token checks. The new contract is
+that Oathkeeper projects identity into X-Auth-* headers, while the
 assistant-service only consumes those headers.
 """
 

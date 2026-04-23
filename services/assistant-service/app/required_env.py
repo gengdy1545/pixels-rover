@@ -98,8 +98,7 @@ def _validate_entry(entry: dict[str, Any], failures: list[str]) -> None:
         p = Path(value)
         if not p.is_file():
             failures.append(
-                f"{name}={value!r} is not a regular file (check compose "
-                f"volume — docs/runbooks/jwt-key-provisioning.md)."
+                f"{name}={value!r} is not a regular file (check compose volume)."
             )
 
 

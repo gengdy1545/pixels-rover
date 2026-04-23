@@ -29,13 +29,6 @@ nginx_config:
       proxy_read_timeout    1s;
       proxy_pass http://oathkeeper:4456/health/ready;
     }
-    location = /__ready_probe/policy-adapter {
-      internal;
-      proxy_connect_timeout 1s;
-      proxy_send_timeout    1s;
-      proxy_read_timeout    1s;
-      proxy_pass http://ory-policy-adapter:8080/health;
-    }
     location = /__ready_probe/ory-ui {
       internal;
       proxy_connect_timeout 1s;
@@ -53,10 +46,12 @@ nginx_config:
 
 plugins:
   - gateway-ready
+  - gateway-csrf
   - cors
   - proxy-rewrite
   - proxy-control
   - request-id
   - response-rewrite
   - serverless-pre-function
+  - mocking
   - prometheus

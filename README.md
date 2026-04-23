@@ -1,234 +1,77 @@
 # Pixels Rover
 
-Pixels Rover 是一个面向数据分析场景、但可继续扩展为更通用智能编排能力的 assistant 系统。当前仓库已经按最终态完成服务边界收口：
+Pixels Rover is a gateway-first web application. All browser traffic enters
+through APISIX, identity is owned by Ory Kratos, protected API access is
+mediated by Ory Oathkeeper, and business services consume only the identity
+headers injected by Oathkeeper.
 
-- `auth-service` 只负责认证、会话、JWT 签发/自校验和内部 introspection
-- `assistant-service` 是唯一业务后端，当前负责分析、会话历史、语义层和后端元数据
-- `gateway` 只保留显式资源前缀路由，不再承载 legacy Translator 代理
-- 前端只保留 `authApi`、`conversationApi + analysis SSE`、`metadataApi(/api/v1/analysis/backends/*)` 三类调用面
-
-## Architecture
+## Runtime Shape
 
 ```text
-┌──────────────┐      ┌──────────────────────────────┐
-│   Frontend   │─────▶│ APISIX Gateway               │
-│ React + Vite │      │ :80                          │
-└──────────────┘      │                              │
-                      │ /api/v1/auth/*              -> auth-service
-                      │ /api/v1/analysis*           -> assistant-service
-                      │ /api/v1/analysis/backends*  -> assistant-service
-                      │ /api/v1/conversations*      -> assistant-service
-                      │ /api/v1/semantic*           -> assistant-service
-                      │ /                           -> frontend
-                      └──────────┬───────────┬───────────┘
-                                 │           │
-                                 ▼           ▼
-                         ┌──────────────┐ ┌──────────────┐
-                         │ auth-service │ │assistant-serv│
-                         │ Spring Boot  │ │ FastAPI      │
-                         │ :8081        │ │ :8090        │
-                         └──────┬───────┘ └──────┬───────┘
-                                │                │
-                                ▼                ▼
-                         ┌──────────────┐  ┌──────────────┐
-                         │ pixels_auth  │  │pixels_analysis│
-                         │ MySQL        │  │ MySQL        │
-                         └──────────────┘  └──────────────┘
+Browser
+  |
+  v
+APISIX gateway
+  |-- /ui/*, /self-service/*, /sessions/*, /schemas/* -> Ory UI / Kratos
+  |-- /api/v1/auth*                                  -> 410 retired
+  |-- /api/v1/*                                      -> gateway-csrf -> Oathkeeper
+  |-- /*                                             -> frontend
+                                                        |
+                                                        v
+                                                   assistant-service
 ```
 
-## Service Responsibilities
+APISIX owns routing, CORS/CSP/security headers, `X-Request-Id`,
+`/gateway/live`, `/gateway/ready`, and unsafe-method CSRF validation through
+the `gateway-csrf` plugin. Kratos owns browser identity/session state.
+Oathkeeper owns protected API authorization and writes `X-Auth-User-Id`,
+`X-Auth-User-Email`, and `X-Auth-Session-Id`.
 
-| Service | Responsibility |
-|---------|----------------|
-| `auth-service` | login/register/captcha/refresh/logout/session management/internal introspection |
-| `assistant-service` | analysis SSE, conversation history, semantic CRUD, backend metadata browsing |
-| `gateway` | explicit route dispatch, auth introspection, identity header injection, CSRF enforcement |
-| `frontend` | SPA UI for login, conversation management, analysis execution, reports, schema browsing |
+## Directory Layout
 
-## Public APIs
+```text
+config/
+  ory/                  # Kratos/Oathkeeper config and rules
+  required-env.yaml     # required environment SSOT
+gateway/                # APISIX image, templates, custom Lua plugins
+frontend/               # Vite/React SPA
+services/
+  assistant-service/    # FastAPI business service
+db/                     # MySQL first-boot schema bootstrap
+docs/                   # development and runbook docs
+```
 
-### Auth Service
+`services/` contains only in-repo service implementations. Third-party service
+configuration lives under `config/`. Real secrets and keys are not stored in
+the repository; use `.env`, Docker secrets, or deployment-managed secret
+stores.
 
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/register`
-- `GET /api/v1/auth/captcha`
-- `POST /api/v1/auth/refresh`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/auth/user-info`
-- `GET /api/v1/auth/sessions`
-- `POST /api/v1/auth/logout`
-- `POST /api/v1/auth/logout-all`
-- `DELETE /api/v1/auth/sessions/{sessionId}`
-- `POST /api/internal/auth/introspect` only for gateway/internal callers
+## Local Development
 
-### Assistant Service
-
-- `POST /api/v1/analysis`
-- `GET /api/v1/analysis/{sessionId}`
-- `POST /api/v1/conversations`
-- `GET /api/v1/conversations`
-- `GET /api/v1/conversations/{threadId}`
-- `PATCH /api/v1/conversations/{threadId}`
-- `GET /api/v1/semantic/metrics`
-- `POST /api/v1/semantic/metrics`
-- `GET /api/v1/semantic/dimensions`
-- `POST /api/v1/semantic/dimensions`
-- `GET /api/v1/semantic/synonyms`
-- `POST /api/v1/semantic/synonyms`
-- `GET /api/v1/analysis/backends`
-- `GET /api/v1/analysis/backends/{backendId}/schemas`
-- `GET /api/v1/analysis/backends/{backendId}/schemas/{schema}/tables`
-- `GET /api/v1/analysis/backends/{backendId}/schemas/{schema}/tables/{table}/columns`
-
-### Removed Legacy APIs
-
-These routes are intentionally removed and must not be used again:
-
-- `/api/v1/chat/*`
-- `/api/v1/query/*`
-- `/api/v1/metadata/*`
-- `POST /api/v1/analysis/text-to-sql`
-
-## Quick Start
-
-### Prerequisites
-
-| Component | Requirement |
-|-----------|-------------|
-| Docker | 24+ |
-| Docker Compose | v2 |
-
-### Recommended Full-Stack Startup
-
-The canonical local topology is the same as production: all traffic enters through the gateway.
+Use the development overlay so local-only Ory defaults are explicit:
 
 ```bash
-# 1. Render .env from the auto-generated template and fill every
-#    REQUIRED value. Anything marked `sensitive` has no default —
-#    the relevant container will refuse to boot until you supply it.
-#    .env.example itself is regenerated by
-#    `python3 scripts/generate-env-example.py` from
-#    config/required-env.yaml (the §14 single source of truth).
-cp .env.example .env
-$EDITOR .env
-
-# 2a. LOCAL DEV: layer docker-compose.dev.yml on top of the
-#     production-shaped baseline. The override adds a jwt-keygen
-#     init container that provisions RS256 keys into a throw-away
-#     named volume, plus dev-grade defaults for introspection
-#     secrets / CSP / OpenAPI so first-boot works without
-#     pre-seeding keys/jwt/.
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-
-# 2b. PROD: do NOT include docker-compose.dev.yml. Pre-provision
-#     keys/jwt/ per docs/runbooks/jwt-key-provisioning.md, fill
-#     every REQUIRED value in .env yourself, then:
-docker compose up --build
 ```
 
-Then open:
+The base compose file is production-oriented and requires explicit values for
+`PUBLIC_BASE_URL`, Kratos secrets, Ory UI cookie secret, gateway CORS/CSP
+settings, and assistant-service runtime settings. `.env.example` is generated
+from `config/required-env.yaml`.
 
-- App: `http://localhost`
-- Gateway liveness: `http://localhost/gateway/live`
-- Gateway readiness: `http://localhost/gateway/ready`
-- MySQL: `localhost:3306`
+## Validation
 
-### Database Layout
-
-`db/pixels_rover.sql` initializes the final-state MySQL layout:
-
-- `pixels_auth`: logical database owned by `auth-service`; application tables managed by Flyway migrations under `services/auth-service/src/main/resources/db/migration/`
-- `pixels_analysis`: logical database owned by `assistant-service`; application tables managed by Alembic migrations under `services/assistant-service/alembic/versions/`
-
-`db/pixels_rover.sql` only creates the logical databases + grants; it runs once on MySQL volume init. Application-table schemas live with each service and are applied on service startup (Flyway in the Spring Boot lifecycle, Alembic via the assistant-service container entrypoint). See `docs/development/backend.md §12` for the full contract.
-
-### Environment
-
-`config/required-env.yaml` is the **single source of truth** for every env var whose absence / misconfiguration would silently break the system (§14 / `docs/development/backend.md §13.1`). Five consumers read it in lockstep:
-
-1. `scripts/generate-env-example.py` — renders `.env.example` (do **not** hand-edit; the CI contract check `env-example-matches-required-env-yaml` enforces byte equality).
-2. `gateway/validate-required-env.py` — gateway entrypoint, fails the container with a FATAL log line before APISIX loads the route table.
-3. `io.pixelsdb.pixels.rover.bootstrap.RequiredEnvValidator` — auth-service Spring Boot listener, fails the boot before any bean is instantiated.
-4. `services/assistant-service/app/required_env.py` — assistant-service FastAPI startup, fails before uvicorn binds.
-5. `scripts/smoke.sh` — cold-boot pre-flight (future §15.1 PR).
-
-The YAML declares, per service, which vars are `required` / `required_when: OTHER=value`, allowed `enum`, `forbidden_values` (placeholders like `"change-me"`), `min_utf8_bytes`, and file-existence checks for PEM paths.
-
-To add or modify a required env var:
+Useful checks before opening a PR:
 
 ```bash
-$EDITOR config/required-env.yaml
-python3 scripts/generate-env-example.py
 python3 scripts/check-contracts.py
-# commit both files together
+docker compose -f docker-compose.yml -f docker-compose.dev.yml config
+./gateway/tests/run.sh
+cd frontend && npm test -- --run
 ```
 
-JWT keys in production are bind-mounted from `./keys/jwt/` — see [docs/runbooks/jwt-key-provisioning.md](docs/runbooks/jwt-key-provisioning.md) for the controlled provisioning flow. Local development instead uses the `docker-compose.dev.yml` override's `jwt-keygen` init container; see §4.2 of that runbook for the "never ship dev override to prod" rule.
-
-## Local Component Development
-
-`start.sh` now only starts the frontend Vite dev server. The former `./start.sh java` / `./start.sh python` / `./start.sh --prod` modes have been removed: running backends directly on the host bypasses the APISIX gateway, and with it every auth, CSRF, CORS, introspection, and `X-Request-Id` contract the project depends on. The canonical path for anything that touches auth or business APIs is:
+For live contract smoke tests:
 
 ```bash
-docker compose up --build
+bash scripts/smoke.sh
 ```
-
-The frontend-only workflow stays supported because the Vite dev server still proxies `/api/*` to the gateway and therefore sits BEHIND the gateway contract rather than around it:
-
-```bash
-./start.sh           # Vite dev server on :3000, HMR, /api → http://localhost:80
-```
-
-Notes:
-
-- `frontend` dev server proxies `/api` to `http://localhost:80`, so it expects the gateway (in compose) to be running.
-- `auth-service` and `assistant-service` protected APIs trust gateway-injected identity headers and are not meant to be called directly from the browser or host.
-- For end-to-end auth, conversation, and analysis verification, use `docker compose up --build`.
-- Legacy invocations (`./start.sh java` / `./start.sh python` / `./start.sh --prod`) now exit with an error that points here.
-
-## Data Ownership
-
-### `pixels_auth`
-
-- `user`
-- `auth_session`
-
-### `pixels_analysis`
-
-- `conversation_threads`
-- `analysis_sessions`
-- `analysis_steps`
-- semantic tables created by SQLAlchemy
-
-Historical chat/query tables are removed and are not migrated.
-
-## Project Structure
-
-```text
-pixels-rover/
-├── frontend/                     # React SPA (单 Web 前端)
-├── services/auth-service/        # Auth-only service
-├── services/assistant-service/   # Business backend
-├── gateway/                      # APISIX config and bootstrap
-├── db/                           # Final-state MySQL init script
-├── docs/development/             # Cross-repo specs (frontend/gateway/backend)
-├── docs/design/                  # Long-lived design archives (e.g. jwt-rotation)
-├── docs/runbooks/                # Operational runbooks
-└── .notes/                       # Historical snapshot (engineering-design) + paper outline; not a long-term reference (engineering truths live in docs/development/*)
-```
-
-## Related Docs
-
-开发规范（权威）：
-
-- [前端开发指南](docs/development/frontend.md)
-- [网关开发指南](docs/development/gateway.md)
-- [后端接入契约](docs/development/backend.md)
-
-长期设计沿革（对外公开，随仓库发布）：
-
-- [JWT 非对称签名与密钥轮换设计](docs/design/jwt-rotation.md)（配套实施 Runbook 见下）
-
-运维 Runbook：
-
-- [JWT RS256 切换与密钥轮换 Runbook](docs/runbooks/jwt-rotation-drill.md)

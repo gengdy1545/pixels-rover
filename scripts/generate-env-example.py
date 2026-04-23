@@ -102,8 +102,9 @@ FOOTER = """\
 # PIXELS_HOST=host.docker.internal
 # PIXELS_PORT=18890
 
-# Debug toggles.
-# DEBUG=false
+# Assistant-service debug toggle. Keep this project-scoped instead of DEBUG to
+# avoid colliding with shell/debugger-provided DEBUG values.
+# ROVER_DEBUG=false
 """
 
 

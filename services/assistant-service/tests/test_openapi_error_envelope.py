@@ -109,8 +109,8 @@ class TestOpenApiEndpointShape:
     async def test_business_prefix_AUTH_is_not_present(
         self, async_client: AsyncClient,
     ) -> None:
-        """AUTH_* codes are owned by auth-service (backend.md §6.3 namespace
-        ownership); they must NOT appear in assistant-service's enum even if
+        """AUTH_* codes were retired with the old auth-service namespace.
+        They must NOT appear in assistant-service's enum even if
         someone accidentally imports them."""
         resp = await async_client.get("/openapi.json")
         assert resp.status_code == 200

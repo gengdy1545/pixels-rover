@@ -68,8 +68,8 @@ httpClient.interceptors.request.use(
 
 // Success is defined by HTTP status (2xx), not by `code === 200` inside the
 // envelope. Per backend.md §6.0 the two should agree, but gating on HTTP
-// status lets the gateway's own 5xx (e.g. GATEWAY_INTROSPECT_UNAVAILABLE at
-// 503) flow through the normal error path consistently -- axios only fires
+// status lets gateway/Oathkeeper failures flow through the normal error path
+// consistently -- axios only fires
 // the error branch on non-2xx, so the success branch here is already
 // narrowed to "transport-layer 2xx".
 httpClient.interceptors.response.use(

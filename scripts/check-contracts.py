@@ -4,7 +4,7 @@
 Purpose
 -------
 
-The gateway, auth-service, assistant-service, and frontend each make
+The gateway, Ory components, assistant-service, and frontend each make
 contract-bearing claims that MUST agree with each other: error-code
 registries, APISIX route declarations, Lua shared-dict sizing, internal
 prefix isolation, readiness probe coverage, etc. Hand-review cannot catch
@@ -118,10 +118,7 @@ _ENV_EXAMPLE_PATH = REPO_ROOT / ".env.example"
 _REQUIRED_ENV_CONSUMERS = (
     REPO_ROOT / "scripts" / "generate-env-example.py",
     REPO_ROOT / "gateway" / "validate-required-env.py",
-    REPO_ROOT
-    / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "bootstrap"
-    / "RequiredEnvValidator.java",
+    REPO_ROOT / "docker-compose.yml",
     REPO_ROOT / "services" / "assistant-service" / "app" / "required_env.py",
     REPO_ROOT / "scripts" / "smoke.sh",
 )
@@ -391,9 +388,9 @@ def check_lua_known_table_matches_literals() -> CheckResult:
         "lua-known-table-matches-literals",
         "KNOWN_ERROR_CODES ↔ plugin source",
     )
-    # Only audit the two custom plugins that actually emit errorCodes; skip
+    # Only audit custom plugins that actually emit errorCodes; skip
     # the shared helper and any future non-emitting modules.
-    targeted = {"gateway-auth.lua", "gateway-ready.lua"}
+    targeted = {"gateway-csrf.lua", "gateway-ready.lua"}
 
     for path, source in _plugin_sources():
         if path.name not in targeted:
@@ -551,38 +548,88 @@ def check_shared_dict_banned_methods() -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
-def _gateway_auth_routes(apisix: dict) -> list[dict]:
-    """Return every route entry in apisix.yaml that carries the gateway-auth plugin."""
+@register_check(
+    "retired-auth-runtime-absent",
+    "Retired gateway-auth, auth-service, ory-policy-adapter, and keys/jwt "
+    "runtime dependencies must not reappear in compose or APISIX runtime config.",
+)
+def check_retired_auth_runtime_absent() -> CheckResult:
+    result = CheckResult(
+        "retired-auth-runtime-absent",
+        "old auth runtime dependencies absent",
+    )
+    apisix = _load_apisix_yaml()
     routes = apisix.get("routes") or []
-    return [r for r in routes if isinstance(r, dict) and "gateway-auth" in (r.get("plugins") or {})]
+    for route in routes:
+        plugins = route.get("plugins") or {}
+        if "gateway-auth" in plugins:
+            result.failures.append(
+                f"route {route.get('id', route.get('uri'))!r} still uses gateway-auth"
+            )
+    runtime_files = {
+        "docker-compose.yml": REPO_ROOT / "docker-compose.yml",
+        "gateway/Dockerfile": REPO_ROOT / "gateway" / "Dockerfile",
+        "gateway/config.yaml.template": _CONFIG_TEMPLATE_PATH,
+        "gateway/apisix.yaml.template": _APISIX_TEMPLATE_PATH,
+    }
+    banned = ("gateway-auth", "ory-policy-adapter", "services/auth-service", "keys/jwt")
+    for label, path in runtime_files.items():
+        text = path.read_text(encoding="utf-8")
+        for needle in banned:
+            if needle in text:
+                result.failures.append(f"{label}: retired runtime reference {needle!r}")
+    return result
 
 
 @register_check(
-    "gateway-auth-route-mandatory-fields",
-    "Every gateway-auth route in apisix.yaml explicitly declares "
-    "positive_cache_ttl / negative_cache_ttl / introspect_timeout_ms / "
-    "introspect_total_budget_ms (gateway.md §5.3).",
+    "protected-api-goes-through-oathkeeper",
+    "APISIX has one coarse /api/v1/* protected route, strips forged X-Auth-* "
+    "headers, enforces gateway-csrf, and proxies directly to Oathkeeper.",
 )
-def check_gateway_auth_route_fields() -> CheckResult:
+def check_protected_api_goes_through_oathkeeper() -> CheckResult:
     result = CheckResult(
-        "gateway-auth-route-mandatory-fields",
-        "gateway-auth per-route required fields",
-    )
-    required = (
-        "positive_cache_ttl",
-        "negative_cache_ttl",
-        "introspect_timeout_ms",
-        "introspect_total_budget_ms",
+        "protected-api-goes-through-oathkeeper",
+        "/api/v1/* -> gateway-csrf -> oathkeeper",
     )
     apisix = _load_apisix_yaml()
-    for route in _gateway_auth_routes(apisix):
-        conf = route["plugins"]["gateway-auth"]
-        missing = [f for f in required if f not in conf]
-        if missing:
-            rid = route.get("id") or route.get("uri") or "<unnamed>"
-            result.failures.append(
-                f"route {rid}: gateway-auth missing {missing}"
-            )
+    routes = apisix.get("routes") or []
+    protected = [r for r in routes if r.get("id") == "protected-api"]
+    if len(protected) != 1:
+        result.failures.append(
+            f"expected exactly one route id='protected-api', found {len(protected)}"
+        )
+        return result
+
+    route = protected[0]
+    if route.get("uri") != "/api/v1/*":
+        result.failures.append(f"protected-api uri must be /api/v1/*, got {route.get('uri')!r}")
+    if route.get("upstream_id") != "oathkeeper-proxy":
+        result.failures.append(
+            f"protected-api upstream_id must be oathkeeper-proxy, got {route.get('upstream_id')!r}"
+        )
+    plugins = route.get("plugins") or {}
+    if "gateway-csrf" not in plugins:
+        result.failures.append("protected-api missing gateway-csrf plugin")
+    proxy_rewrite = plugins.get("proxy-rewrite") or {}
+    removed = set(((proxy_rewrite.get("headers") or {}).get("remove")) or [])
+    required_removed = {"X-Auth-User-Id", "X-Auth-User-Email", "X-Auth-Session-Id"}
+    missing_removed = required_removed - removed
+    if missing_removed:
+        result.failures.append(
+            f"protected-api proxy-rewrite must remove {sorted(missing_removed)}"
+        )
+
+    upstreams = {
+        u.get("id"): u
+        for u in apisix.get("upstreams") or []
+        if isinstance(u, dict)
+    }
+    oathkeeper = upstreams.get("oathkeeper-proxy")
+    nodes = (oathkeeper or {}).get("nodes") or {}
+    if set(nodes.keys()) != {"oathkeeper:4455"}:
+        result.failures.append(
+            f"oathkeeper-proxy upstream must point directly to oathkeeper:4455, got {sorted(nodes.keys())}"
+        )
     return result
 
 
@@ -613,38 +660,44 @@ def check_no_external_internal_routes() -> CheckResult:
 
 
 @register_check(
-    "positive-cache-ttl-invalidate-session-linkage",
-    "If no /gateway/internal/invalidate_session route exists, every "
-    "gateway-auth route must have positive_cache_ttl <= 5 (gateway.md §5.3 "
-    "bidirectional invariant).",
+    "oathkeeper-rules-cover-protected-domains",
+    "Oathkeeper rules own protected API path-to-upstream dispatch for analysis, "
+    "conversations, and semantic domains.",
 )
-def check_positive_cache_invalidate_linkage() -> CheckResult:
+def check_oathkeeper_rules_cover_protected_domains() -> CheckResult:
     result = CheckResult(
-        "positive-cache-ttl-invalidate-session-linkage",
-        "positive_cache_ttl ↔ invalidate_session",
+        "oathkeeper-rules-cover-protected-domains",
+        "Oathkeeper protected domain rules",
     )
-    apisix = _load_apisix_yaml()
-    has_invalidate = any(
-        (r.get("uri") or "").rstrip("/") == "/gateway/internal/invalidate_session"
-        for r in apisix.get("routes") or []
-    )
-    if has_invalidate:
-        # Reverse direction: when invalidate_session IS declared, at least one
-        # route should reasonably have positive_cache_ttl > 5 (else why bother
-        # declaring it?). We don't enforce this strictly because intermediate
-        # states during a PR chain are legitimate.
+    rules_path = REPO_ROOT / "config" / "ory" / "oathkeeper" / "rules.yml"
+    if not rules_path.is_file():
+        result.failures.append("config/ory/oathkeeper/rules.yml missing")
         return result
-
-    for route in _gateway_auth_routes(apisix):
-        conf = route["plugins"]["gateway-auth"]
-        ttl = conf.get("positive_cache_ttl")
-        if isinstance(ttl, int) and ttl > 5:
-            rid = route.get("id") or route.get("uri") or "<unnamed>"
-            result.failures.append(
-                f"route {rid}: positive_cache_ttl={ttl} but no "
-                "/gateway/internal/invalidate_session route exists. "
-                "Lower to <=5 or land the invalidate_session PR first."
-            )
+    rules = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or []
+    domains = {
+        "analysis": "/api/v1/analysis",
+        "conversations": "/api/v1/conversations",
+        "semantic": "/api/v1/semantic",
+    }
+    text_by_rule = [
+        {
+            "id": rule.get("id"),
+            "url": ((rule.get("match") or {}).get("url") or ""),
+            "authenticators": [a.get("handler") for a in rule.get("authenticators") or []],
+            "mutators": [m.get("handler") for m in rule.get("mutators") or []],
+        }
+        for rule in rules
+        if isinstance(rule, dict)
+    ]
+    for domain, prefix in domains.items():
+        matches = [r for r in text_by_rule if prefix in r["url"]]
+        if not matches:
+            result.failures.append(f"no Oathkeeper rule covers {domain} prefix {prefix}")
+            continue
+        if not any("cookie_session" in r["authenticators"] for r in matches):
+            result.failures.append(f"{domain} rules must use cookie_session authenticator")
+        if not any("header" in r["mutators"] for r in matches):
+            result.failures.append(f"{domain} rules must use header mutator")
     return result
 
 
@@ -652,15 +705,16 @@ def check_positive_cache_invalidate_linkage() -> CheckResult:
 # OpenAPI per-service namespace routes (§9.1 / gateway.md §6.7)
 # ---------------------------------------------------------------------------
 
-# Known OpenAPI route ids. Each must appear in BOTH fragments with
-# byte-identical config except for gateway-auth.require_auth.
-_OPENAPI_ROUTE_IDS: tuple[str, ...] = ("auth-openapi", "analysis-openapi")
+# Known OpenAPI route ids for legacy fragment-based gateway templates. The
+# current Ory cutover template does not use fragments, but keeping this check
+# lets older branches fail loudly if they accidentally reintroduce ambiguous
+# OpenAPI route ordering.
+_OPENAPI_ROUTE_IDS: tuple[str, ...] = ("analysis-openapi",)
 _OPENAPI_PROFILES: tuple[str, ...] = ("protected", "public")
 # Mapping route id -> API domain prefix. Used to locate "sibling
 # business prefix routes" against which the OpenAPI precise-path
 # route's priority is compared.
 _OPENAPI_ROUTE_DOMAIN: dict[str, str] = {
-    "auth-openapi": "/api/v1/auth/",
     "analysis-openapi": "/api/v1/analysis/",
 }
 _OPENAPI_PRIORITY_MARGIN = 10  # gateway.md §6.2 / §6.7 hard rule
@@ -671,7 +725,7 @@ _OPENAPI_PRIORITY_MARGIN = 10  # gateway.md §6.2 / §6.7 hard rule
     "Each /api/v1/<svc>/openapi.json route has priority >= "
     "deepest /api/v1/<svc>/* prefix route's priority + 10, and both "
     "fragments (public / protected) declare the same set of openapi "
-    "routes with byte-identical fields except for require_auth.",
+    "routes with byte-identical fields.",
 )
 def check_openapi_route_priority() -> CheckResult:
     result = CheckResult(
@@ -801,22 +855,13 @@ def check_openapi_route_priority() -> CheckResult:
                     f"be '/openapi.json', got {proxy_rewrite.get('uri')!r}"
                 )
 
-    # 3. Cross-fragment symmetry: public / protected must differ ONLY
-    #    in gateway-auth.require_auth.
-    def _strip_require_auth(route: dict) -> dict:
-        clone = json.loads(json.dumps(route))
-        ga = (clone.get("plugins") or {}).get("gateway-auth")
-        if isinstance(ga, dict):
-            ga.pop("require_auth", None)
-        return clone
-
     by_id_public = {
-        r.get("id"): _strip_require_auth(r)
+        r.get("id"): json.loads(json.dumps(r))
         for r in fragments.get("public", [])
         if isinstance(r, dict)
     }
     by_id_protected = {
-        r.get("id"): _strip_require_auth(r)
+        r.get("id"): json.loads(json.dumps(r))
         for r in fragments.get("protected", [])
         if isinstance(r, dict)
     }
@@ -826,34 +871,8 @@ def check_openapi_route_priority() -> CheckResult:
         if pub and prot and pub != prot:
             result.failures.append(
                 f"route {rid}: public vs protected fragment differ in "
-                "fields other than gateway-auth.require_auth — the two "
-                "fragments must be byte-identical except for that one "
-                "boolean (gateway.md §6.7)"
-            )
-
-    # 4. Require the opposite require_auth values actually differ.
-    for rid in _OPENAPI_ROUTE_IDS:
-        pub_r = next(
-            (r for r in fragments.get("public", []) if isinstance(r, dict) and r.get("id") == rid),
-            None,
-        )
-        prot_r = next(
-            (r for r in fragments.get("protected", []) if isinstance(r, dict) and r.get("id") == rid),
-            None,
-        )
-        if not pub_r or not prot_r:
-            continue
-        pub_req = ((pub_r.get("plugins") or {}).get("gateway-auth") or {}).get("require_auth")
-        prot_req = ((prot_r.get("plugins") or {}).get("gateway-auth") or {}).get("require_auth")
-        if pub_req is not False:
-            result.failures.append(
-                f"route {rid} in public fragment: require_auth must be "
-                f"exactly False, got {pub_req!r}"
-            )
-        if prot_req is not True:
-            result.failures.append(
-                f"route {rid} in protected fragment: require_auth must be "
-                f"exactly True, got {prot_req!r}"
+                "fields — fragment-based OpenAPI routes must be "
+                "byte-identical after the Ory cutover (gateway.md §6.7)"
             )
 
     return result
@@ -915,7 +934,7 @@ def check_no_bare_openapi_route() -> CheckResult:
 # Adding a new SSE route: append the route id here AND mirror the
 # template in apisix.yaml. The check below will fail loudly if either
 # half drifts.
-_SSE_ROUTE_IDS: tuple[str, ...] = ("analysis-submit",)
+_SSE_ROUTE_IDS: tuple[str, ...] = ("protected-api",)
 _SSE_READ_TIMEOUT_MIN_S = 600   # 10 min
 _SSE_READ_TIMEOUT_MAX_S = 1800  # 30 min hard cap (gateway.md §6.3)
 
@@ -1547,13 +1566,11 @@ def _scan_for_pattern(
 
 
 # Named scan roots — keep the list here so individual checks compose cleanly.
-_ROOT_AUTH_MAIN = REPO_ROOT / "services" / "auth-service" / "src" / "main"
 _ROOT_ASSISTANT_APP = REPO_ROOT / "services" / "assistant-service" / "app"
 _ROOT_FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
 _ROOT_GATEWAY_PLUGINS = REPO_ROOT / "gateway" / "custom" / "apisix" / "plugins"
 
 _ALL_CODE_ROOTS = (
-    _ROOT_AUTH_MAIN,
     _ROOT_ASSISTANT_APP,
     _ROOT_FRONTEND_SRC,
     _ROOT_GATEWAY_PLUGINS,
@@ -1647,15 +1664,9 @@ def check_no_5_digit_codes() -> CheckResult:
 # ---- A4 / no business 401 or 403 (user-facing controllers only) ----------
 
 
-# User-facing controller files. Internal-only plumbing (InternalAuthFilter,
-# JsonAuthenticationFailHandler wired to /api/internal/*, introspect service
-# layer) legitimately emits 401/403 because it IS the boundary. The §17.B
-# sweep covers those paths by hand.
+# User-facing controller files. Internal-only plumbing legitimately emits
+# 401/403 because it IS the boundary; user-facing business APIs do not.
 _USER_FACING_CONTROLLER_FILES = (
-    REPO_ROOT / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "controller" / "AuthController.java",
-    REPO_ROOT / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "controller" / "HealthController.java",
     REPO_ROOT / "services" / "assistant-service" / "app" / "api" / "analysis.py",
     REPO_ROOT / "services" / "assistant-service" / "app" / "api" / "backends.py",
     REPO_ROOT / "services" / "assistant-service" / "app" / "api" / "conversations.py",
@@ -1665,8 +1676,7 @@ _USER_FACING_CONTROLLER_FILES = (
 
 @register_check(
     "no-business-401-or-403",
-    "User-facing controllers (auth-service/.../controller/*.java excluding "
-    "Internal*, assistant-service/app/api/*.py excluding internal.py) MUST "
+    "User-facing assistant-service API modules MUST "
     "NOT emit HTTP 401 / 403. Those are gateway-level statuses per "
     "backend.md §6.3; business errors use 4xx / 500 + a SCREAMING_SNAKE_CASE "
     "errorCode. Internal / introspect plumbing is allow-listed.",
@@ -1714,11 +1724,7 @@ def check_x_request_id_single_writer() -> CheckResult:
         )
         """
     )
-    # Scan the two service code trees. Gateway writes it intentionally.
-    hits = _scan_for_pattern(
-        (_ROOT_AUTH_MAIN, _ROOT_ASSISTANT_APP),
-        pattern,
-    )
+    hits = _scan_for_pattern((_ROOT_ASSISTANT_APP,), pattern)
     for path, lineno, line in hits:
         result.failures.append(f"{path}:{lineno}: {line.strip()}")
     return result
@@ -1727,9 +1733,6 @@ def check_x_request_id_single_writer() -> CheckResult:
 # ---- A6 / JWKS sunset regression -----------------------------------------
 
 
-# Allowed callers of JWKS symbols. Auth-service is the ONLY place that may
-# mention these (the multi-public-key rotation internals still carry kid /
-# pubkey bookkeeping even with the external JWKS endpoint retired).
 _JWKS_FORBIDDEN_ROOTS = (
     _ROOT_ASSISTANT_APP,
     _ROOT_GATEWAY_PLUGINS,
@@ -1740,15 +1743,12 @@ _JWKS_FORBIDDEN_ROOTS = (
 @register_check(
     "jwks-sunset-no-regression",
     "`jwks` / `JWKS` / `PyJWKClient` / `NimbusJwtDecoder` / `jwks_uri` do "
-    "not appear in assistant-service, gateway plugins, or the frontend "
-    "(docs/design/jwt-rotation.md §6.B). Auth-service retains the symbols "
-    "for key-rotation internals — see §6.B sunset review mechanism for the "
-    "conditions under which this check itself is reviewed.",
+    "not appear in assistant-service, gateway plugins, or the frontend.",
 )
 def check_jwks_sunset() -> CheckResult:
     result = CheckResult(
         "jwks-sunset-no-regression",
-        "zero JWKS-symbol references outside auth-service / docs",
+        "zero JWKS-symbol references in runtime code",
     )
     pattern = r"\b(jwks|JWKS|PyJWKClient|NimbusJwtDecoder|jwks_uri)\b"
     hits = _scan_for_pattern(_JWKS_FORBIDDEN_ROOTS, pattern)
@@ -1777,7 +1777,7 @@ def check_no_horizontal_service_calls() -> CheckResult:
     # contain a slash. Guards against both hostname and IP literals.
     pattern = r"""https?://[A-Za-z0-9_.-]+(?::\d+)?/api/v1/"""
     hits = _scan_for_pattern(
-        (_ROOT_AUTH_MAIN, _ROOT_ASSISTANT_APP),
+        (_ROOT_ASSISTANT_APP,),
         pattern,
     )
     for path, lineno, line in hits:
@@ -1790,12 +1790,11 @@ def check_no_horizontal_service_calls() -> CheckResult:
 #
 # The infra-code checks upstream (lua-literals-registered / frontend-infra-
 # union-equals-json) prove that GATEWAY_* / INTERNAL_* stay in lockstep.
-# Business prefixes (AUTH_* owned by auth-service, ANALYSIS_* / CONVERSATION_*
-# / SEMANTIC_* owned by assistant-service) need the symmetric guarantee:
+# Business prefixes (ANALYSIS_* / CONVERSATION_* / SEMANTIC_* owned by
+# assistant-service) need the symmetric guarantee:
 #
-#   * No cross-namespace leakage (backend.md §6.3): auth-service source must
-#     NOT mention ANALYSIS_* / CONVERSATION_* / SEMANTIC_*, and the converse.
-#   * Frontend union equality with the Java / Python source of truth, same
+#   * No cross-namespace leakage (backend.md §6.3).
+#   * Frontend union equality with the Python source of truth, same
 #     shape as `frontend-infra-union-equals-json` but bidirectional per
 #     namespace.
 #   * Route priority: every "request-set containment" pair must be ordered
@@ -1804,15 +1803,10 @@ def check_no_horizontal_service_calls() -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
-_ERROR_CODE_NAME_JAVA = (
-    REPO_ROOT / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "config" / "common" / "ErrorCodeName.java"
-)
 _ERROR_CODES_PY = REPO_ROOT / "services" / "assistant-service" / "app" / "error_codes.py"
 _FRONTEND_AUTH_ERRORCODE_TS = REPO_ROOT / "frontend" / "src" / "shared" / "types" / "auth" / "ErrorCode.ts"
 _FRONTEND_ANALYSIS_ERRORCODE_TS = REPO_ROOT / "frontend" / "src" / "shared" / "types" / "analysis" / "ErrorCode.ts"
 
-_BUSINESS_PREFIX_AUTH = ("AUTH_",)
 _BUSINESS_PREFIX_ANALYSIS = ("ANALYSIS_", "CONVERSATION_", "SEMANTIC_")
 
 
@@ -1875,21 +1869,10 @@ def _extract_ts_union_literals(path: Path, type_name: str) -> set[str]:
     return set(re.findall(r"""['"]([A-Z][A-Z0-9_]+)['"]""", body))
 
 
-# ---- B1 / AUTH_* namespace single owner ----------------------------------
+# ---- B1 / retired AUTH_* namespace ----------------------------------------
 
 
 _AUTH_ALLOWED_ROOTS = (
-    REPO_ROOT / "services" / "auth-service",
-    REPO_ROOT / "frontend" / "src" / "shared" / "types" / "auth",
-    # Frontend consumer-side dispatch is a legitimate use of the literals
-    # per backend.md §6.3.2 step-1 (precise errorCode branching). The TS
-    # compiler narrows `case 'AUTH_FOO':` against the `AuthErrorCode` union
-    # and rejects typos at compile time, so these subtrees don't need the
-    # belt-and-suspenders string-literal gate — `frontend-auth-union-
-    # equals-java-source` already locks in the union/source alignment.
-    REPO_ROOT / "frontend" / "src" / "features",
-    REPO_ROOT / "frontend" / "src" / "pages",
-    REPO_ROOT / "frontend" / "src" / "app",
 )
 
 
@@ -1904,20 +1887,15 @@ def _path_under(path: Path, roots: Iterable[Path]) -> bool:
 
 
 @register_check(
-    "auth-business-namespace-single-owner",
-    "`AUTH_*` business error-code literals only appear inside auth-service "
-    "source, the frontend auth type mirror, or frontend consumer subtrees "
-    "(features / pages / app). assistant-service and gateway plugins leaking "
-    "any `AUTH_*` literal violate backend.md §6.3 cross-service namespace "
-    "ownership.",
+    "retired-auth-business-namespace-absent",
+    "`AUTH_*` business error-code literals are retired with auth-service and "
+    "must not appear in runtime code.",
 )
 def check_auth_namespace_single_owner() -> CheckResult:
     result = CheckResult(
-        "auth-business-namespace-single-owner",
-        "AUTH_* literals only in auth-service + frontend auth types",
+        "retired-auth-business-namespace-absent",
+        "AUTH_* literals absent from runtime code",
     )
-    # \b guards the left edge; `INTERNAL_AUTH_FAILED` does NOT match because
-    # the `_` before `A` is a word char (no \b boundary).
     pattern = r"\bAUTH_[A-Z][A-Z0-9_]+\b"
     hits = _scan_for_pattern(
         (_ROOT_ASSISTANT_APP, _ROOT_FRONTEND_SRC, _ROOT_GATEWAY_PLUGINS),
@@ -1955,8 +1933,8 @@ _ANALYSIS_ALLOWED_ROOTS = (
     "`ANALYSIS_*` / `CONVERSATION_*` / `SEMANTIC_*` business error-code "
     "literals only appear inside assistant-service source, the frontend "
     "analysis type mirror, or frontend consumer subtrees (features / pages "
-    "/ app). auth-service and gateway plugins leaking any of these violate "
-    "backend.md §6.3 cross-service namespace ownership.",
+    "/ app). gateway plugins leaking any of these violate backend.md §6.3 "
+    "cross-service namespace ownership.",
 )
 def check_analysis_namespace_single_owner() -> CheckResult:
     result = CheckResult(
@@ -1965,7 +1943,7 @@ def check_analysis_namespace_single_owner() -> CheckResult:
     )
     pattern = r"\b(?:ANALYSIS|CONVERSATION|SEMANTIC)_[A-Z][A-Z0-9_]+\b"
     hits = _scan_for_pattern(
-        (_ROOT_AUTH_MAIN, _ROOT_FRONTEND_SRC, _ROOT_GATEWAY_PLUGINS),
+        (_ROOT_FRONTEND_SRC, _ROOT_GATEWAY_PLUGINS),
         pattern,
     )
     for path, lineno, line in hits:
@@ -1976,53 +1954,25 @@ def check_analysis_namespace_single_owner() -> CheckResult:
     return result
 
 
-# ---- B3 / frontend AuthErrorCode union == Java AUTH_* constants ----------
+# ---- B3 / retired frontend AuthErrorCode union ----------------------------
 
 
 @register_check(
-    "frontend-auth-union-equals-java-source",
-    "frontend/src/shared/types/auth/ErrorCode.ts `AuthErrorCode` union "
-    "equals the set of AUTH_* public-static-final constants in "
-    "services/auth-service/.../config/common/ErrorCodeName.java "
-    "(bidirectional). Adding a code on one side without the other is drift.",
+    "retired-frontend-auth-errorcode-type-absent",
+    "frontend AuthErrorCode mirror is removed with auth-service.",
 )
 def check_frontend_auth_union_equals_java() -> CheckResult:
     result = CheckResult(
-        "frontend-auth-union-equals-java-source",
-        "AuthErrorCode union ≡ AUTH_* Java constants",
+        "retired-frontend-auth-errorcode-type-absent",
+        "frontend auth ErrorCode mirror absent",
     )
-    java_constants = _extract_java_string_constants(
-        _ERROR_CODE_NAME_JAVA, _BUSINESS_PREFIX_AUTH
-    )
-    # Confirm each LHS == RHS (self-referencing pattern) — divergence here
-    # would mean a name/value mismatch bug upstream.
-    for name, value in java_constants.items():
-        if name != value:
-            result.failures.append(
-                f"ErrorCodeName.{name} constant value is {value!r}, "
-                f"must self-reference its own name"
-            )
-    java_names = set(java_constants.keys())
-
-    union_names = _extract_ts_union_literals(
-        _FRONTEND_AUTH_ERRORCODE_TS, "AuthErrorCode"
-    )
-    if not union_names:
+    if _FRONTEND_AUTH_ERRORCODE_TS.exists():
         result.failures.append(
-            f"could not parse `AuthErrorCode` union in "
-            f"{_FRONTEND_AUTH_ERRORCODE_TS.relative_to(REPO_ROOT)}"
+            f"{_FRONTEND_AUTH_ERRORCODE_TS.relative_to(REPO_ROOT)} still exists"
         )
-        return result
-
-    missing_in_union = sorted(java_names - union_names)
-    extra_in_union = sorted(union_names - java_names)
-    for n in missing_in_union:
+    if (REPO_ROOT / "services" / "auth-service").exists():
         result.failures.append(
-            f"ErrorCodeName.java declares {n!r} but AuthErrorCode union is missing it"
-        )
-    for n in extra_in_union:
-        result.failures.append(
-            f"AuthErrorCode union has {n!r} but ErrorCodeName.java doesn't declare it"
+            "services/auth-service still exists"
         )
     return result
 
@@ -2164,13 +2114,9 @@ def check_route_prefix_priority_ordered() -> CheckResult:
 # ---------------------------------------------------------------------------
 # §15.2 Batch C — structured log field-name consistency across layers.
 #
-# Both services render log lines with the same user-visible bracketed-field
-# shape (`[<service>] [req:<requestId>] [user:<userId>]`), so log aggregators
-# can grep a single request across auth-service and assistant-service. The
-# underlying MDC / ContextVar naming is intentionally language-idiomatic
-# (`requestId` in Java MDC, `request_id` in Python ContextVar), but the
-# OUTPUT field prefixes must match byte-for-byte; otherwise grep / aggregation
-# rules fork silently.
+# Assistant-service renders log lines with the user-visible bracketed-field
+# shape (`[<service>] [req:<requestId>] [user:<userId>]`), so future log
+# aggregators have a stable format to key on.
 #
 # This check is deliberately scoped to the currently-produced text log
 # format. When `elapsedMs` and per-request timing fields are introduced
@@ -2179,7 +2125,6 @@ def check_route_prefix_priority_ordered() -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
-_AUTH_LOGBACK_PATH = REPO_ROOT / "services" / "auth-service" / "src" / "main" / "resources" / "logback-spring.xml"
 _ASSISTANT_LOGGING_PY = REPO_ROOT / "services" / "assistant-service" / "app" / "logging_config.py"
 
 
@@ -2234,40 +2179,15 @@ def _collapse_string_node(node: ast.AST) -> str | None:
 
 @register_check(
     "log-format-bracket-field-consistency",
-    "auth-service logback pattern and assistant-service Python formatter "
-    "produce log lines whose user-visible bracket prefixes `[req:` and "
-    "`[user:` match byte-for-byte, and each embeds the owning service "
-    "identity (backend.md §5). Guards against silent divergence where one "
-    "service emits `[reqId:` while the other emits `[req:`, breaking "
-    "aggregated log grep.",
+    "assistant-service Python formatter produces log lines whose "
+    "user-visible bracket prefixes `[req:` and `[user:` match the shared "
+    "logging contract and embeds the owning service identity (backend.md §5).",
 )
 def check_log_format_bracket_consistency() -> CheckResult:
     result = CheckResult(
         "log-format-bracket-field-consistency",
-        "shared [req:] / [user:] / [service] bracket shape",
+        "assistant [req:] / [user:] / [service] bracket shape",
     )
-
-    # --- auth-service logback pattern ---
-    logback_pattern = _extract_logback_pattern(_AUTH_LOGBACK_PATH)
-    if not logback_pattern:
-        result.failures.append(
-            f"could not find a <pattern> element in "
-            f"{_AUTH_LOGBACK_PATH.relative_to(REPO_ROOT)}"
-        )
-        return result
-    # Must reference the ${SERVICE_NAME} property so the literal service
-    # identity bracket is present in the final output.
-    if "${SERVICE_NAME}" not in logback_pattern:
-        result.failures.append(
-            "logback pattern does not interpolate ${SERVICE_NAME} — "
-            "log lines will be missing the service-identity bracket"
-        )
-    for prefix in _REQUIRED_BRACKET_PREFIXES:
-        if prefix not in logback_pattern:
-            result.failures.append(
-                f"logback pattern missing required bracket prefix {prefix!r}; "
-                f"got: {logback_pattern!r}"
-            )
 
     # --- assistant-service Python formatter ---
     py_fmt = _extract_python_fmt_literal(_ASSISTANT_LOGGING_PY)
@@ -2291,18 +2211,7 @@ def check_log_format_bracket_consistency() -> CheckResult:
                 f"{prefix!r}; got: {py_fmt!r}"
             )
 
-    # --- cross-layer prefix-order sanity ---
-    # The prefixes must appear in the SAME ORDER in both formatters so grep
-    # regexes that key off column position stay valid.
-    def _indices(s: str) -> list[int]:
-        return [s.find(p) for p in _REQUIRED_BRACKET_PREFIXES]
-
-    java_idx = _indices(logback_pattern)
-    py_idx = _indices(py_fmt)
-    if sorted(java_idx) != java_idx:
-        result.failures.append(
-            "logback pattern: [req:] / [user:] are out of order"
-        )
+    py_idx = [py_fmt.find(p) for p in _REQUIRED_BRACKET_PREFIXES]
     if sorted(py_idx) != py_idx:
         result.failures.append(
             "Python formatter: [req:] / [user:] are out of order"
@@ -2310,112 +2219,19 @@ def check_log_format_bracket_consistency() -> CheckResult:
     return result
 
 
-# ---------------------------------------------------------------------------
-# auth-service OpenAPI schema: `details.errorCode` enum covers every
-# `ErrorCodeName` constant (§9.3 condition 8)
-# ---------------------------------------------------------------------------
-
-_AUTH_ERROR_CODE_NAME_PATH = (
-    REPO_ROOT / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "config" / "common"
-    / "ErrorCodeName.java"
-)
-_AUTH_API_ERROR_DETAILS_PATH = (
-    REPO_ROOT / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "api" / "dto"
-    / "ApiErrorDetails.java"
-)
-
-
-def _parse_error_code_name_constants(path: Path) -> set[str]:
-    """Extract every ``public static final String <NAME> = "<VALUE>";`` from
-    the auth-service ``ErrorCodeName.java`` file."""
-    text = path.read_text(encoding="utf-8")
-    pattern = re.compile(
-        r"public\s+static\s+final\s+String\s+(\w+)\s*=\s*\"([^\"]+)\"\s*;"
-    )
-    out: set[str] = set()
-    for name, value in pattern.findall(text):
-        if name != value:
-            continue  # defensive — the contract demands name ≡ value
-        out.add(value)
-    return out
-
-
-def _parse_error_details_allowable_values(path: Path) -> set[str]:
-    """Extract the ``allowableValues = { ... }`` array declared on the
-    ``errorCode`` field of ``ApiErrorDetails.java``."""
-    text = path.read_text(encoding="utf-8")
-    # Strip // line comments so commented-out strings aren't credited.
-    uncommented = re.sub(r"//[^\n]*", "", text)
-    m = re.search(
-        r"allowableValues\s*=\s*\{([^}]*)\}",
-        uncommented,
-        re.DOTALL,
-    )
-    if not m:
-        return set()
-    body = m.group(1)
-    return set(re.findall(r'"([^"]+)"', body))
-
-
 @register_check(
-    "auth-openapi-error-code-enum-matches-source",
-    "auth-service's `ApiErrorDetails.errorCode` @Schema allowableValues "
-    "array MUST be an exact permutation of the public-static-final string "
-    "constants declared in `ErrorCodeName.java` (backend.md §6.3 + §9.3 "
-    "condition 8). This is the static mirror of the spring PostConstruct "
-    "drift guard in OpenApiErrorSchemaContract; running the check here lets "
-    "PR review catch the skew before the context load fails on container "
-    "start, and before any code path that ingests `/openapi.json` can hand "
-    "out a stale enum.",
+    "retired-auth-service-directory-absent",
+    "services/auth-service is removed after the Ory cutover.",
 )
 def check_auth_openapi_error_code_enum_matches_source() -> CheckResult:
     result = CheckResult(
-        "auth-openapi-error-code-enum-matches-source",
-        "auth ApiErrorDetails.errorCode ⇄ ErrorCodeName",
+        "retired-auth-service-directory-absent",
+        "services/auth-service absent",
     )
-    if not _AUTH_ERROR_CODE_NAME_PATH.is_file():
+    if (REPO_ROOT / "services" / "auth-service").exists():
         result.failures.append(
-            f"expected {_AUTH_ERROR_CODE_NAME_PATH.relative_to(REPO_ROOT)} is missing"
+            "services/auth-service still exists after Ory cutover"
         )
-        return result
-    if not _AUTH_API_ERROR_DETAILS_PATH.is_file():
-        result.failures.append(
-            f"expected {_AUTH_API_ERROR_DETAILS_PATH.relative_to(REPO_ROOT)} is missing"
-        )
-        return result
-
-    from_source = _parse_error_code_name_constants(_AUTH_ERROR_CODE_NAME_PATH)
-    from_schema = _parse_error_details_allowable_values(
-        _AUTH_API_ERROR_DETAILS_PATH
-    )
-
-    missing = from_source - from_schema
-    extra = from_schema - from_source
-
-    if missing:
-        result.failures.append(
-            f"ApiErrorDetails.errorCode allowableValues is missing "
-            f"{sorted(missing)} — add them alongside the matching "
-            f"ErrorCodeName constant"
-        )
-    if extra:
-        result.failures.append(
-            f"ApiErrorDetails.errorCode allowableValues has extra values "
-            f"{sorted(extra)} that are not declared in ErrorCodeName — "
-            f"remove them or add the matching Java constant"
-        )
-
-    # §9.3 condition 8 explicitly calls out AUTH_INVALID_TOKEN / _TYPE pair;
-    # keep a belt-and-suspenders assertion so a lean-up collapse can't quietly
-    # drop them even if both sides agree on the removal.
-    for required in ("AUTH_INVALID_TOKEN", "AUTH_INVALID_TOKEN_TYPE"):
-        if required not in from_schema:
-            result.failures.append(
-                f"ApiErrorDetails.errorCode allowableValues must include "
-                f"{required!r} (explicit §9.3 condition 8 requirement)"
-            )
     return result
 
 
@@ -2431,7 +2247,6 @@ _FRONTEND_TYPES_DIR = REPO_ROOT / "frontend" / "src" / "shared" / "types"
 # from contract → SSOT narrow.
 _ALLOWED_OWNERS = {
     "assistant-service",
-    "auth-service",
     "kratos",
     "gateway",
     "shared",
@@ -2444,7 +2259,7 @@ _ALLOWED_OWNERS = {
     "`frontend/src/shared/types/**/*.{ts,d.ts}` (excluding tests and pure "
     "aggregators that do not declare types) MUST carry a top-of-file JSDoc "
     "block with an `owning-service:` tag matching one of "
-    "{assistant-service, auth-service, kratos, gateway, shared} and at least one "
+    "{assistant-service, kratos, gateway, shared} and at least one "
     "`source-of-truth` / `Source of truth` tag pointing at the OpenAPI schema "
     "name or SSOT file + symbol (frontend.md §4.6 hard rule). The `shared` "
     "owner is reserved for cross-service envelope definitions and aggregator "
@@ -2710,103 +2525,25 @@ def check_frontend_request_id_consumers_via_ensure() -> CheckResult:
     return result
 
 
-# ---- Introspect envelope wrapping (backend.md §8.6.1) ---------------------
-
-
-_INTERNAL_AUTH_CONTROLLER = (
-    REPO_ROOT / "services" / "auth-service" / "src" / "main" / "java"
-    / "io" / "pixelsdb" / "pixels" / "rover" / "controller"
-    / "InternalAuthController.java"
-)
-_GATEWAY_AUTH_LUA = (
-    REPO_ROOT / "gateway" / "custom" / "apisix" / "plugins" / "gateway-auth.lua"
-)
+# ---- Retired introspect/gateway-auth path --------------------------------
 
 
 @register_check(
-    "introspect-envelope-wrapping",
-    "The `/api/internal/auth/introspect` endpoint MUST return "
-    "`ApiResponse<AuthIntrospectionResponse>` (backend.md §8.6.1 — no "
-    "RFC 7662 bare-schema exemption) and `gateway-auth.lua` MUST unwrap "
-    "`decoded.data.active` / `.userId` / `.email` / `.sessionId`. A "
-    "regression on either side silently breaks every introspect cache "
-    "lookup at startup; this check freezes both sides against drift.",
+    "retired-introspect-gateway-auth-absent",
+    "The old auth-service introspection path and gateway-auth Lua plugin "
+    "must not exist after the Ory cutover.",
 )
 def check_introspect_envelope_wrapping() -> CheckResult:
     result = CheckResult(
-        "introspect-envelope-wrapping",
-        "InternalAuthController + gateway-auth.lua agree on envelope shape",
+        "retired-introspect-gateway-auth-absent",
+        "old introspect/gateway-auth path absent",
     )
-    if not _INTERNAL_AUTH_CONTROLLER.is_file():
-        result.failures.append(
-            f"missing {_INTERNAL_AUTH_CONTROLLER.relative_to(REPO_ROOT)}"
-        )
-    else:
-        ctrl = _INTERNAL_AUTH_CONTROLLER.read_text(encoding="utf-8")
-        # Strip comments so prose mentioning "AuthIntrospectionResponse"
-        # in JavaDoc doesn't satisfy the return-type check below.
-        code = re.sub(r"/\*[\s\S]*?\*/", "", ctrl)
-        code = "\n".join(
-            line.split("//", 1)[0] for line in code.splitlines()
-        )
-        # Positive: a @PostMapping handler declared on the class must
-        # return ApiResponse<AuthIntrospectionResponse>.
-        if not re.search(
-            r"public\s+ApiResponse<\s*AuthIntrospectionResponse\s*>",
-            code,
-        ):
-            result.failures.append(
-                f"{_INTERNAL_AUTH_CONTROLLER.relative_to(REPO_ROOT)}: "
-                "expected a `public ApiResponse<AuthIntrospectionResponse>` "
-                "handler; the introspect endpoint MUST wrap in ApiResponse"
-            )
-        # Positive: the wrap call must be present.
-        if "ApiResponse.success(" not in code:
-            result.failures.append(
-                f"{_INTERNAL_AUTH_CONTROLLER.relative_to(REPO_ROOT)}: "
-                "expected `ApiResponse.success(...)` wrap; the handler is "
-                "returning a bare DTO, which would make gateway-auth.lua "
-                "unwrap `decoded.data` fail"
-            )
-        # Negative: no bare return of an AuthIntrospectionResponse variable.
-        # This catches the specific regression where a refactor re-introduces
-        # `return response;` at the end of the handler body.
-        if re.search(
-            r"public\s+AuthIntrospectionResponse\s+\w+\s*\(",
-            code,
-        ):
-            result.failures.append(
-                f"{_INTERNAL_AUTH_CONTROLLER.relative_to(REPO_ROOT)}: a "
-                "handler method has return type AuthIntrospectionResponse; "
-                "wrap it in ApiResponse<AuthIntrospectionResponse> per "
-                "backend.md §8.6.1"
-            )
-
-    if not _GATEWAY_AUTH_LUA.is_file():
-        result.failures.append(
-            f"missing {_GATEWAY_AUTH_LUA.relative_to(REPO_ROOT)}"
-        )
-    else:
-        lua = _GATEWAY_AUTH_LUA.read_text(encoding="utf-8")
-        # Strip Lua `--` line comments so the `backend.md §8.6.1` anchor
-        # comment doesn't satisfy the positive check below.
-        lua_code = "\n".join(
-            line.split("--", 1)[0] for line in lua.splitlines()
-        )
-        # Positive: must traverse `decoded.data.*`.
-        if not re.search(r"\bdecoded\.data\b", lua_code):
-            result.failures.append(
-                f"{_GATEWAY_AUTH_LUA.relative_to(REPO_ROOT)}: expected "
-                "traversal through `decoded.data.*`; gateway-auth.lua "
-                "MUST unwrap the ApiResponse envelope one extra layer"
-            )
-        # Negative: no direct read of `decoded.active` (the pre-wrap shape).
-        if re.search(r"\bdecoded\.active\b", lua_code):
-            result.failures.append(
-                f"{_GATEWAY_AUTH_LUA.relative_to(REPO_ROOT)}: found "
-                "`decoded.active` — that's the pre-wrap bare-schema shape; "
-                "read `decoded.data.active` instead per backend.md §8.6.1"
-            )
+    for path in (
+        REPO_ROOT / "services" / "auth-service",
+        REPO_ROOT / "gateway" / "custom" / "apisix" / "plugins" / "gateway-auth.lua",
+    ):
+        if path.exists():
+            result.failures.append(f"{path.relative_to(REPO_ROOT)} still exists")
     return result
 
 

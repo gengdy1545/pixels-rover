@@ -8,28 +8,26 @@ APISIX plugins under `gateway/custom/apisix/plugins/`.
 These are **unit tests**, not integration tests. They lock in the contracts
 that are most likely to silently regress during refactors:
 
-- `gateway-auth`
+- `gateway-csrf`
   - `write_error` envelope shape (backend.md §6.0): HTTP status, `requestId`,
     `details.errorCode`, `details.category`; absence of `apiVersion` / top-level
     `errorCode`.
-  - §6.3.1 gateway-side `(status, errorCode, category)` registry round-trip.
   - `apply_csrf` behaviour across safe methods, missing cookie, mismatched
     cookie/header, and matching cookie/header.
   - `is_safe_method` / `should_skip_csrf` — the contract that CSRF is keyed on
-    HTTP method alone, never on cookie presence (gateway.md §5.2).
+    HTTP method alone, never on session state.
   - `clear_identity_headers` — strips every `X-Auth-*` prefix, not only the
-    three known names (gateway.md §3.2 — future-proofing against header
-    injection).
+    three known names before Oathkeeper writes authoritative identity.
   - `ensure_request_id` — propagate inbound or mint a new one.
-  - `should_retry` — transient vs permanent upstream error classification.
 
 - `gateway-ready`
   - `empty_probes_body` — 503 envelope when no probes are registered.
   - `build_verdict` — 200/503 verdict + per-component UP/DOWN derivation,
-    including the edge where `capture_multi` returns `nil` for a subrequest.
+    including per-probe success status overrides and the edge where
+    `capture_multi` returns `nil` for a subrequest.
 
-Full HTTP-level integration (real nginx, real cookies, real introspection
-upstream) is covered by `scripts/smoke.sh`, not here.
+Full HTTP-level integration (real nginx, real cookies, real Ory/Oathkeeper
+chain) is covered by `scripts/smoke.sh`, not here.
 
 ## Running
 

@@ -41,16 +41,17 @@ routes:
           - name: oathkeeper
             uri: /__ready_probe/oathkeeper
             timeout_ms: 1000
-          - name: ory-policy-adapter
-            uri: /__ready_probe/policy-adapter
-            timeout_ms: 1000
           - name: ory-ui
             uri: /__ready_probe/ory-ui
             timeout_ms: 1000
+            success_statuses:
+              - 200
+              - 302
+              - 303
           - name: assistant-service
             uri: /__ready_probe/assistant
             timeout_ms: 1000
-        total_timeout_ms: 5000
+        total_timeout_ms: 4000
     upstream:
       type: roundrobin
       nodes:
@@ -122,16 +123,11 @@ routes:
     uri: /api/v1/auth
     priority: 940
     plugins:
-      serverless-pre-function:
-        phase: rewrite
-        functions:
-          - |
-            return function(conf, ctx)
-              ngx.header.content_type = "application/json"
-              ngx.status = 410
-              ngx.say('{"code":410,"message":"Legacy auth API retired. Use Ory Kratos browser flows under /self-service/* and the Ory UI under /ui/*."}')
-              return ngx.exit(410)
-            end
+      mocking:
+        response_status: 410
+        content_type: application/json
+        with_mock_header: false
+        response_example: '{"code":410,"message":"Legacy auth API retired. Use Ory Kratos browser flows under /self-service/* and the Ory UI under /ui/*."}'
     upstream:
       type: roundrobin
       nodes:
@@ -141,91 +137,31 @@ routes:
     uri: /api/v1/auth/*
     priority: 950
     plugins:
-      serverless-pre-function:
-        phase: rewrite
-        functions:
-          - |
-            return function(conf, ctx)
-              ngx.header.content_type = "application/json"
-              ngx.status = 410
-              ngx.say('{"code":410,"message":"Legacy auth API retired. Use Ory Kratos browser flows under /self-service/* and the Ory UI under /ui/*."}')
-              return ngx.exit(410)
-            end
+      mocking:
+        response_status: 410
+        content_type: application/json
+        with_mock_header: false
+        response_example: '{"code":410,"message":"Legacy auth API retired. Use Ory Kratos browser flows under /self-service/* and the Ory UI under /ui/*."}'
     upstream:
       type: roundrobin
       nodes:
         "127.0.0.1:65535": 1
 
-  - id: analysis-backends-root
-    uri: /api/v1/analysis/backends
-    methods: [GET, OPTIONS]
-    priority: 910
-    plugins:
-      proxy-rewrite:
-        headers:
-          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
-    upstream_id: oathkeeper-proxy
-
-  - id: analysis-backends-detail
-    uri: /api/v1/analysis/backends/*
-    priority: 920
-    plugins:
-      proxy-rewrite:
-        headers:
-          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
-    upstream_id: oathkeeper-proxy
-
-  - id: analysis-submit
-    uri: /api/v1/analysis
-    methods: [POST, OPTIONS]
-    priority: 880
+  - id: protected-api
+    uri: /api/v1/*
+    priority: 800
     timeout:
       connect: 5
       send: 60
       read: 900
     plugins:
+      gateway-csrf:
+        csrf_protect: true
       proxy-rewrite:
         headers:
           remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
       proxy-control:
         request_buffering: false
-    upstream_id: oathkeeper-proxy
-
-  - id: analysis-detail
-    uri: /api/v1/analysis/*
-    priority: 890
-    plugins:
-      proxy-rewrite:
-        headers:
-          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
-    upstream_id: oathkeeper-proxy
-
-  - id: conversations-root
-    uri: /api/v1/conversations
-    methods: [GET, POST, OPTIONS]
-    priority: 860
-    plugins:
-      proxy-rewrite:
-        headers:
-          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
-    upstream_id: oathkeeper-proxy
-
-  - id: conversations-detail
-    uri: /api/v1/conversations/*
-    priority: 850
-    plugins:
-      proxy-rewrite:
-        headers:
-          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
-    upstream_id: oathkeeper-proxy
-
-  - id: semantic-protected
-    uri: /api/v1/semantic/*
-    priority: 840
-    plugins:
-      proxy-rewrite:
-        headers:
-          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
     upstream_id: oathkeeper-proxy
 
   - id: frontend
@@ -239,7 +175,7 @@ upstreams:
     name: oathkeeper-proxy
     type: roundrobin
     nodes:
-      "ory-policy-adapter:8080": 1
+      "oathkeeper:4455": 1
 
   - id: kratos-public
     name: kratos-public

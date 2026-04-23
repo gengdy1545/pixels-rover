@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pixels-rover.local/gateway/error-codes.schema.json",
   "title": "Gateway infrastructure-prefix error code registry",
-  "description": "Formal schema for gateway/error-codes.json. Validates the DSL that gateway/error-codes.json must conform to. The registry itself is the single source of truth for GATEWAY_* / INTERNAL_* codes and is consumed by scripts/generate-error-code-registry.py (renders backend.md §6.3.1), scripts/check-contracts.py (cross-layer drift assertions), and the gateway-auth / gateway-ready Lua plugins' init-time self-checks.",
+  "description": "Formal schema for gateway/error-codes.json. Validates the DSL that gateway/error-codes.json must conform to. The registry itself is the single source of truth for GATEWAY_* / INTERNAL_* codes and is consumed by scripts/generate-error-code-registry.py (renders backend.md §6.3.1), scripts/check-contracts.py (cross-layer drift assertions), and gateway Lua plugins' init-time self-checks.",
   "type": "object",
   "additionalProperties": false,
   "required": ["codes"],
@@ -14,7 +14,7 @@
       "minProperties": 1,
       "propertyNames": {
         "pattern": "^(GATEWAY|INTERNAL)_[A-Z][A-Z0-9_]*$",
-        "description": "Keys MUST be SCREAMING_SNAKE_CASE infra-prefix error codes. Business-domain codes (AUTH_*, ANALYSIS_*, ...) are explicitly disallowed here — they live in per-service OpenAPI details.errorCode enums (backend.md §6.3 namespace split)."
+        "description": "Keys MUST be SCREAMING_SNAKE_CASE infra-prefix error codes. Business-domain codes (ANALYSIS_*, ...) are explicitly disallowed here — they live in per-service OpenAPI details.errorCode enums."
       },
       "additionalProperties": {
         "type": "object",

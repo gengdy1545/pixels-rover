@@ -42,44 +42,14 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------
-  # Java auth-service: compile + unit tests
-  # ---------------------------------------------------------------
-  java-test:
-    name: Java Auth Service (test)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/auth-service
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-          cache: maven
-
-      # Run only pure unit tests that do not require Spring context or DB.
-      # Tests using @WebMvcTest / @SpringBootTest are excluded because the
-      # parent POM (io.pixelsdb:pixels) is not available in public Maven repos.
-      - name: Run unit tests
-        run: >
-          mvn test -B
-          -pl .
-          -Dtest="JwtTokenProviderTest,SysLoginServiceImplTest,AuthSessionServiceImplTest,UserServiceImplTest"
-          -DfailIfNoTests=false
-        continue-on-error: false
-
-  # ---------------------------------------------------------------
-  # Python analysis-service: test
+  # Python assistant-service: test
   # ---------------------------------------------------------------
   python-test:
-    name: Python Analysis Service (test)
+    name: Python Assistant Service (test)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/analysis-service
+        working-directory: services/assistant-service
 
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +58,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: services/analysis-service/pyproject.toml
+          cache-dependency-path: services/assistant-service/pyproject.toml
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
@@ -103,10 +73,8 @@ jobs:
   #     GATEWAY_* / INTERNAL_* error codes, and every consumer (Lua
   #     plugins, frontend InfraErrorCode union, backend.md §6.3.1
   #     rendered view) stays in sync;
-  #   * gateway/apisix.yaml route declarations carry the required
-  #     gateway-auth fields and respect priority / namespace rules;
-  #   * lua_shared_dict declarations meet the sizing and access
-  #     contract (gateway.md §5.3.2);
+  #   * gateway/apisix.yaml protected route shape goes through
+  #     gateway-csrf and Oathkeeper;
   #   * gateway-ready probes[] and the internal locations in
   #     config.yaml.template's http_server_configuration_snippet
   #     stay in agreement (gateway.md §4.1).
@@ -133,18 +101,15 @@ jobs:
   # ---------------------------------------------------------------
   # Contract-layer smoke test (todolist §15.1).
   # Boots the full stack via docker compose (dev overlay supplies
-  # throw-away dev secrets + jwt-keygen init container so CI doesn't
-  # need real keys), waits on /gateway/ready, and asserts:
+  # throw-away Ory secrets), waits on /gateway/ready, and asserts:
   #   * /api/internal/* and /gateway/internal/* are externally 404
   #     (no route declared — prevents leakage regression);
-  #   * /api/v1/{auth,analysis}/openapi.json reachable + parseable,
-  #     and their GATEWAY_*/INTERNAL_* errorCode enum values are a
-  #     subset of gateway/error-codes.json keys (C4 assertion tail);
+  #   * retired /api/v1/auth/* routes return 410;
   #   * legacy /api/v1/{chat,query,metadata}/* return 404;
   #   * gateway global response-rewrite injects X-Request-Id on
   #     both happy-path and 404 responses;
-  #   * register -> login -> gateway-auth -> auth introspect ->
-  #     X-Auth-* injection chain returns a proper envelope.
+  #   * Oathkeeper rejects unauthenticated requests and gateway-csrf
+  #     rejects unsafe requests without CSRF.
   # This is the only CI stage that exercises the full data plane,
   # so it runs last and blocks merge on failure.
   # ---------------------------------------------------------------
@@ -169,8 +134,8 @@ jobs:
           # The runner's MySQL (if any) is not bound on 13306, so
           # this avoids the "port already in use" path.
           MYSQL_PORT: "13306"
-          # Budget generously: cold docker build + Flyway/Alembic
-          # bootstrap + jwt-keygen can take ~3-4 minutes on a
+          # Budget generously: cold docker build + Kratos/Alembic
+          # bootstrap can take several minutes on a
           # fresh runner.
           SMOKE_READY_TIMEOUT_SEC: "480"
         run: bash scripts/smoke.sh

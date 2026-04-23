@@ -1,39 +1,23 @@
 {
   "$schema": "./error-codes.schema.json",
-  "description": "Single source of truth for infrastructure-prefix error codes (GATEWAY_* / INTERNAL_*). See docs/development/backend.md §6.3.1 — that section is rendered from this file by scripts/generate-error-code-registry.py. Business-domain prefixes (AUTH_* / ANALYSIS_* / CONVERSATION_* / SEMANTIC_*) live in each service's OpenAPI details.errorCode enum and are NOT duplicated here.",
+  "description": "Single source of truth for infrastructure-prefix error codes (GATEWAY_* / INTERNAL_*). Business-domain prefixes such as ANALYSIS_* / CONVERSATION_* / SEMANTIC_* live in each service's OpenAPI details.errorCode enum and are NOT duplicated here.",
   "codes": {
     "GATEWAY_IDENTITY_MISSING": {
       "httpStatus": 500,
       "category": "INTERNAL",
       "writtenBy": "business-service",
-      "trigger": "Protected route received a missing or malformed X-Auth-User-Id — gateway route mis-configured (gateway-auth not applied) or the request bypassed the gateway entirely.",
+      "trigger": "Protected route received a missing or malformed X-Auth-User-Id — Oathkeeper mutator was not applied or the request bypassed the gateway entirely.",
       "retryable": false,
       "docAnchor": "backend.md §3.3"
-    },
-    "GATEWAY_AUTH_REQUIRED": {
-      "httpStatus": 401,
-      "category": "AUTH",
-      "writtenBy": "gateway:gateway-auth",
-      "trigger": "introspect returned active=false or the access_token cookie was missing / malformed on a route that requires authentication.",
-      "retryable": false,
-      "docAnchor": "gateway.md §5.1"
     },
     "GATEWAY_CSRF_INVALID": {
       "httpStatus": 403,
       "category": "AUTH",
-      "writtenBy": "gateway:gateway-auth",
+      "writtenBy": "gateway:gateway-csrf",
       "trigger": "Unsafe HTTP method missing X-Xsrf-Token header, or header value did not match the XSRF-TOKEN cookie (double-submit failure).",
       "retryable": true,
-      "retryGuidance": "Fetch a fresh XSRF-TOKEN cookie (GET /api/v1/auth/csrf or any 2xx idempotent endpoint) and retry exactly once.",
+      "retryGuidance": "Ensure the browser has a fresh XSRF-TOKEN cookie, mirror it in X-XSRF-TOKEN, and retry exactly once.",
       "docAnchor": "gateway.md §5.2"
-    },
-    "GATEWAY_INTROSPECT_UNAVAILABLE": {
-      "httpStatus": 503,
-      "category": "UPSTREAM",
-      "writtenBy": "gateway:gateway-auth",
-      "trigger": "introspect subrequest timed out, connection failed, or returned a non-2xx / malformed envelope. Collapses every upstream contract-violation onto this single code.",
-      "retryable": true,
-      "docAnchor": "gateway.md §5.1"
     },
     "GATEWAY_NOT_READY": {
       "httpStatus": 503,

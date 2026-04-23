@@ -48,12 +48,9 @@ check_prerequisites() {
     log_step "Checking prerequisites..."
     echo ""
 
-    check_command java "Java (JDK 17+)"
-    check_command mvn "Maven"
     check_command python3 "Python 3.10+"
     check_command node "Node.js"
     check_command npm "npm"
-    check_command openssl "OpenSSL"
 
     # Optional: Docker
     if command -v docker &>/dev/null; then
@@ -118,13 +115,6 @@ setup_frontend() {
     fi
 }
 
-setup_jwt_keys() {
-    log_step "Generating development JWT keys..."
-    bash "$PROJECT_ROOT/scripts/generate-jwt-rsa-keys.sh" \
-        "$PROJECT_ROOT/.tmp/jwt-keys" \
-        "${JWT_DEFAULT_KID:-dev-rsa-1}"
-}
-
 setup_docker_env() {
     if [[ ! -f "$PROJECT_ROOT/.env" ]] && [[ -f "$PROJECT_ROOT/.env.example" ]]; then
         cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
@@ -132,34 +122,6 @@ setup_docker_env() {
         log_warn "  → Please edit it and set your LLM API key."
     elif [[ -f "$PROJECT_ROOT/.env" ]]; then
         log_info "Root .env file already exists."
-    fi
-}
-
-# ---- Database Initialization ----
-
-init_database() {
-    log_step "Checking MySQL database..."
-
-    local db_host="${DB_HOST:-localhost}"
-    local db_port="${DB_PORT:-3306}"
-    local db_user="${DB_USER:-pixels}"
-    local db_pass="${DB_PASS:-password}"
-
-    if ! command -v mysql &>/dev/null; then
-        log_warn "MySQL client not found. Skipping database initialization."
-        log_warn "  → If using Docker, run: docker compose up mysql"
-        log_warn "  → The schema will be auto-initialized from db/pixels_rover.sql"
-        return 0
-    fi
-
-    if mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" -e "USE pixels_rover;" 2>/dev/null; then
-        log_info "Database 'pixels_rover' already exists."
-    else
-        log_info "Initializing database from db/pixels_rover.sql..."
-        mysql -h "$db_host" -P "$db_port" -u root -p"${DB_ROOT_PASS:-rootpassword}" < "$PROJECT_ROOT/db/pixels_rover.sql" 2>/dev/null || {
-            log_warn "Could not auto-initialize database. Please run manually:"
-            log_warn "  mysql -u root -p < db/pixels_rover.sql"
-        }
     fi
 }
 
@@ -171,8 +133,8 @@ print_summary() {
     echo -e "${CYAN}  Pixels Rover — Development Environment${NC}"
     echo -e "${CYAN}============================================${NC}"
     echo ""
-    echo "  Full stack (auth + assistant + gateway + frontend):"
-    echo "    docker compose up --build"
+    echo "  Full stack (Ory + assistant + gateway + frontend):"
+    echo "    docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build"
     echo ""
     echo "  Frontend-only Vite dev loop (proxies /api → gateway on :80):"
     echo "    ./start.sh          # Frontend only, HMR; gateway must be up"
@@ -182,8 +144,8 @@ print_summary() {
     echo "    curl http://localhost:80/gateway/ready"
     echo ""
     echo "  Note: ./start.sh java / python / --prod are removed — running"
-    echo "        backends outside the gateway bypasses every auth / CSRF"
-    echo "        / CORS / X-Request-Id contract (see docs/development/gateway.md)."
+    echo "        backends outside the gateway bypasses Ory / CSRF / CORS"
+    echo "        / X-Request-Id contracts (see docs/development/gateway.md)."
     echo ""
     echo -e "${CYAN}============================================${NC}"
 }
@@ -199,16 +161,12 @@ case "$MODE" in
     full|*)
         check_prerequisites
         echo ""
-        setup_jwt_keys
-        echo ""
         setup_python_env
         setup_python_dotenv
         echo ""
         setup_frontend
         echo ""
         setup_docker_env
-        echo ""
-        init_database
         print_summary
         ;;
 esac

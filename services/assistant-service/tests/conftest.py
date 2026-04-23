@@ -43,54 +43,10 @@ from app.storage.registry import BackendRegistry
 os.environ.setdefault("ROVER_DATABASE_URL", "sqlite+aiosqlite://")
 
 # ---------------------------------------------------------------------------
-# RSA key pair for RS256 tests (same as in tests/test_auth.py)
-# ---------------------------------------------------------------------------
-
-RSA_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDv4T16LB1TXAbE
-CyjWC8x5axYM2hlr53lUk2f+lkT8NzFeW+lFh3D5M20hXpL29nnB6MGiBfLpXOpq
-b4EmMaCLrXL7uQwgkxrtKRf2oS7ij4RXUskgDSKM+Zv6VNdXGPzK3XSJozS3/XSJ
-O0Lc0fGmrumRWlbCMJ8cikDQaSum8ikfnb23/AWPauLI9bITzpDUIW3Xrr80SFeO
-yNUwB6B6q8cgYWztfB8PZ+Kb7G6sFLa2l7q1pOdSvcCpypodi57AUGtv+m5h3J1e
-fn8Ytv+VjuEdzDCVN9iKQrZt9pVAcl1MhAzC6tLb6ea6+VPCOzBU6Bt3BztaITyw
-54DuV7bHAgMBAAECggEAdgAAXG1//YYbA+wTafvC2YWOgsL012o1+p9KfGeSRtml
-rOucnCnMrqGYEN6zf83uRi+HtPqlLBubasEwMEggWCV6Fw7HwuxqRfi9g4J1jFiZ
-+tTMADrF4MBW9LUwevVdQTPgBGbm441H+svOj86sx1hqqChe3kbJtmHiEUNzCDtK
-npIpGXdu0ZuQnOMZhwcXJ7QjgBKbD0+B05GFKwAomw9AMkrIS4oXG68WXdXGcypb
-PNcOADWW2CpV51xzl8oMvbnLh/vAbQE/BQVqVQfViGqdrRlC8P3QL4CYYsySDNoL
-rbjfdf9d023SeqGUou7tY7c+JN9TSXexB/+d+W6coQKBgQD7ynRrCwAGRVwfAY/D
-Q8J/7A+fLu/tDQqNEJo2eIMptZBsHTd3BSFGVc3OskZ2pfovneSS3ZkwWUZvswpp
-OAlso0r0r7zIlDi7gilDD4XKZmuJDZ/frtnMg5mFbaQ21DLbPAAHijTEA0wGLy/s
-PaXlomkK44IShT0aYTCPfkNaYQKBgQDz48/eSUJl8qVmeYVZ9ACQ+D4fkwvYhL1v
-Po+/ByMtGvC2F9qXZ8g00ga5P8DgxQa1TXLG2EJrKVb/INOJAobzumZsVJO0/PE2
-tcvzbO53+e/4W9d1y3xV9+iaiyGsSH1lAssnHChIuG90sr5woDuKyFAMXNwbL9x+
-tpMmbS4yJwKBgQCRHmJyv2hINPmfNTsyg386U0e9q0PFEFsgao03D8Yo5+hRJ5Ws
-F1zSOOnhU4ahI5BKmWn/65A6+XlLL5m0gwOLhaHR3OelgygfiilV6UBnIxifaSbX
-uOL2qHJ3IHYg07Rr/uzVa6Z1wqCyf8fTFMTk0PJRwEZbfkd1SMbALTmMgQKBgEOu
-ZcIvHGEETEg60vnaj8mrSjoi6XelpphXiTae+XEL997gkcXQhCu8WSdRfOojYzAv
-FPn/i7cHWuAkMO/lpqO+h6vqcK8aPqpLGxUrlqXu01xdyFYlKRUGXiN9FtQjrcC5
-XL02wCsmG7AL5nOE0+E4o5Y6ss5Mouj7K6zPQbGjAoGAZORm55LNypfuNA7llStp
-aEb8uy06/e+Ey9AZvQqRu8NYfFoCwhQtXl5qNg6j7YuovxCtQCxiqe9zWdokYz+M
-cffB8SkxFazha72dVKUcwPRNrS/UlYv1Txf684hilFIOncTYLWszTG7F3aB91O2a
-/Lf0g2G//g1bw6VlhNAzsyw=
------END PRIVATE KEY-----"""
-
-RSA_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7+E9eiwdU1wGxAso1gvM
-eWsWDNoZa+d5VJNn/pZE/DcxXlvpRYdw+TNtIV6S9vZ5wejBogXy6Vzqam+BJjGg
-i61y+7kMIJMa7SkX9qEu4o+EV1LJIA0ijPmb+lTXVxj8yt10iaM0t/10iTtC3NHx
-pq7pkVpWwjCfHIpA0GkrpvIpH529t/wFj2riyPWyE86Q1CFt166/NEhXjsjVMAeg
-eqvHIGFs7XwfD2fim+xurBS2tpe6taTnUr3AqcqaHYuewFBrb/puYdydXn5/GLb/
-lY7hHcwwlTfYikK2bfaVQHJdTIQMwurS2+nmuvlTwjswVOgbdwc7WiE8sOeA7le2
-xwIDAQAB
------END PUBLIC KEY-----"""
-
-# ---------------------------------------------------------------------------
 # Test settings
 # ---------------------------------------------------------------------------
 
-TEST_JWT_ISSUER = "pixels-rover-auth-service"
-TEST_RSA_KID = "rsa-key-1"
+TEST_IDENTITY_ISSUER = "pixels-rover-oathkeeper-test"
 
 
 def make_test_settings(*, algorithm: str = "HS256") -> Settings:
@@ -103,7 +59,7 @@ def make_test_settings(*, algorithm: str = "HS256") -> Settings:
 
 
 # ---------------------------------------------------------------------------
-# Token helpers
+# Synthetic identity projection helpers
 # ---------------------------------------------------------------------------
 
 
@@ -138,36 +94,14 @@ def make_access_token(
     *,
     user_id: int | str = 1,
     email: str = "testuser@example.com",
-    issuer: str = TEST_JWT_ISSUER,
+    issuer: str = TEST_IDENTITY_ISSUER,
     secret: str = "unused",
     algorithm: str = "HS256",
     extra_claims: dict | None = None,
     headers: dict | None = None,
 ) -> str:
-    """Create a synthetic gateway token payload for tests."""
+    """Create a synthetic payload that the test helper projects into identity headers."""
     _ = secret, algorithm, headers
-    payload = {
-        "sub": email,
-        "uid": user_id,
-        "type": "access",
-        "iss": issuer,
-        "sid": f"session-{user_id}",
-    }
-    if extra_claims:
-        payload.update(extra_claims)
-    return _encode_gateway_token(payload)
-
-
-def make_rs256_access_token(
-    *,
-    user_id: int | str = 1,
-    email: str = "testuser@example.com",
-    issuer: str = TEST_JWT_ISSUER,
-    kid: str = TEST_RSA_KID,
-    extra_claims: dict | None = None,
-) -> str:
-    """Alias kept for legacy tests that now model gateway identity projection."""
-    _ = kid
     payload = {
         "sub": email,
         "uid": user_id,
@@ -191,7 +125,7 @@ def make_expired_token(
         "sub": email,
         "uid": user_id,
         "type": "access",
-        "iss": TEST_JWT_ISSUER,
+        "iss": TEST_IDENTITY_ISSUER,
         "exp": 0,
         "sid": f"session-{user_id}",
     }
@@ -204,20 +138,20 @@ def make_refresh_token(
     email: str = "testuser@example.com",
     secret: str = "unused",
 ) -> str:
-    """Create a synthetic refresh token payload for gateway tests."""
+    """Create a rejected non-access payload for gateway identity tests."""
     _ = secret
     payload = {
         "sub": email,
         "uid": user_id,
         "type": "refresh",
-        "iss": TEST_JWT_ISSUER,
+        "iss": TEST_IDENTITY_ISSUER,
         "sid": f"session-{user_id}",
     }
     return _encode_gateway_token(payload)
 
 
 def auth_header(token: str) -> dict[str, str]:
-    """Simulate APISIX projecting a validated token into gateway identity headers."""
+    """Simulate Oathkeeper projecting a validated session into identity headers."""
     payload = _decode_gateway_token(token)
     if not payload:
         return {
@@ -225,7 +159,7 @@ def auth_header(token: str) -> dict[str, str]:
             "X-Auth-User-Email": "",
         }
 
-    if payload.get("iss") != TEST_JWT_ISSUER:
+    if payload.get("iss") != TEST_IDENTITY_ISSUER:
         return {
             "X-Auth-User-Id": "",
             "X-Auth-User-Email": "",
@@ -468,14 +402,8 @@ def event_loop():
 
 @pytest_asyncio.fixture
 async def test_settings():
-    """Provide test settings (HS256 by default)."""
+    """Provide test settings."""
     return make_test_settings(algorithm="HS256")
-
-
-@pytest_asyncio.fixture
-async def test_settings_rs256():
-    """Provide test settings with RS256."""
-    return make_test_settings(algorithm="RS256")
 
 
 @pytest_asyncio.fixture
@@ -530,7 +458,7 @@ async def async_client(test_settings, mock_backend_registry) -> AsyncGenerator[A
     """
     Provide an httpx AsyncClient wired to a fresh FastAPI app with:
     - In-memory SQLite database (shared across connections via StaticPool)
-    - Overridden settings (test JWT secret)
+    - Overridden settings
     - Mock backend registry (no real DuckDB / Pixels)
     """
     from app.database import Base
@@ -543,31 +471,6 @@ async def async_client(test_settings, mock_backend_registry) -> AsyncGenerator[A
         await conn.run_sync(Base.metadata.create_all)
 
     app = create_test_app(test_settings, mock_backend_registry, test_session_factory)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        yield client
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def async_client_rs256(test_settings_rs256, mock_backend_registry) -> AsyncGenerator[AsyncClient, None]:
-    """
-    Same as async_client but configured for RS256 JWT verification.
-    """
-    from app.database import Base
-    _import_all_models()
-
-    engine = _build_shared_memory_engine()
-    test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    app = create_test_app(test_settings_rs256, mock_backend_registry, test_session_factory)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:

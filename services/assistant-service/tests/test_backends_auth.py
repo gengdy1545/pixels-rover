@@ -48,7 +48,7 @@ class TestListBackendsAuth:
     async def test_rejects_invalid_identity(self, async_client):
         resp = await async_client.get(
             "/api/v1/analysis/backends",
-            headers=auth_header("invalid-jwt-token"),
+            headers=auth_header("invalid-identity-payload"),
         )
         _assert_gateway_identity_missing(resp)
 

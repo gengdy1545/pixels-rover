@@ -3,7 +3,26 @@
 # All external traffic enters through APISIX on GATEWAY_PORT. APISIX keeps
 # routing, static assets, CORS/CSP/security headers, and /gateway/live|ready.
 # Identity is owned by Ory Kratos; protected API access is mediated by the
-# CSRF policy adapter plus Ory Oathkeeper before requests reach backend services.
+# APISIX gateway-csrf plugin plus Ory Oathkeeper before requests reach backend services.
+
+x-kratos-environment: &kratos-environment
+  DSN: "mysql://pixels:${MYSQL_PASSWORD:-password}@tcp(mysql:3306)/pixels_kratos?parseTime=true&multiStatements=true"
+  SERVE_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  SERVE_PUBLIC_CORS_ALLOWED_ORIGINS_0: ${PUBLIC_BASE_URL:-}
+  SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: ${PUBLIC_BASE_URL:-}/home
+  SELFSERVICE_ALLOWED_RETURN_URLS_0: ${PUBLIC_BASE_URL:-}
+  SELFSERVICE_ALLOWED_RETURN_URLS_1: ${PUBLIC_BASE_URL:-}/home
+  SELFSERVICE_ALLOWED_RETURN_URLS_2: ${PUBLIC_BASE_URL:-}/login
+  SELFSERVICE_ALLOWED_RETURN_URLS_3: ${PUBLIC_BASE_URL:-}/register
+  SELFSERVICE_FLOWS_ERROR_UI_URL: ${PUBLIC_BASE_URL:-}/ui/error
+  SELFSERVICE_FLOWS_LOGIN_UI_URL: ${PUBLIC_BASE_URL:-}/ui/login
+  SELFSERVICE_FLOWS_REGISTRATION_UI_URL: ${PUBLIC_BASE_URL:-}/ui/registration
+  SELFSERVICE_FLOWS_SETTINGS_UI_URL: ${PUBLIC_BASE_URL:-}/ui/settings
+  SELFSERVICE_FLOWS_RECOVERY_UI_URL: ${PUBLIC_BASE_URL:-}/ui/recovery
+  SELFSERVICE_FLOWS_VERIFICATION_UI_URL: ${PUBLIC_BASE_URL:-}/ui/verification
+  SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: ${PUBLIC_BASE_URL:-}/login
+  SECRETS_DEFAULT_0: ${KRATOS_SECRET_DEFAULT:-}
+  SECRETS_COOKIE_0: ${KRATOS_SECRET_COOKIE:-}
 
 services:
   mysql:
@@ -26,19 +45,38 @@ services:
       start_period: 30s
       retries: 5
 
+  required-env-guard:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: pixels-rover-required-env-guard
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        python3 /usr/local/apisix/conf/validate-required-env.py --yaml /usr/local/apisix/conf/required-env.yaml --service ory-deployment
+        python3 /usr/local/apisix/conf/validate-required-env.py --yaml /usr/local/apisix/conf/required-env.yaml --service kratos
+        python3 /usr/local/apisix/conf/validate-required-env.py --yaml /usr/local/apisix/conf/required-env.yaml --service ory-ui
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-}
+      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-}
+      ORY_UI_COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-}
+    volumes:
+      - ./config/required-env.yaml:/usr/local/apisix/conf/required-env.yaml:ro
+
   kratos-migrate:
     image: ${KRATOS_IMAGE:-oryd/kratos:v26.2.0}
     container_name: pixels-rover-kratos-migrate
     depends_on:
+      required-env-guard:
+        condition: service_completed_successfully
       mysql:
         condition: service_started
-    environment:
-      DSN: "mysql://pixels:${MYSQL_PASSWORD:-password}@tcp(mysql:3306)/pixels_kratos?parseTime=true&multiStatements=true"
-      KRATOS_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
-      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-}
-      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-}
+    environment: *kratos-environment
     volumes:
-      - ./ory/kratos:/etc/config/kratos:ro
+      - ./config/ory/kratos:/etc/config/kratos:ro
     command: ["migrate", "sql", "-e", "--yes", "--config", "/etc/config/kratos/kratos.yml"]
     restart: "no"
 
@@ -49,17 +87,13 @@ services:
     depends_on:
       kratos-migrate:
         condition: service_completed_successfully
-    environment:
-      DSN: "mysql://pixels:${MYSQL_PASSWORD:-password}@tcp(mysql:3306)/pixels_kratos?parseTime=true&multiStatements=true"
-      KRATOS_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
-      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-}
-      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-}
+    environment: *kratos-environment
     expose:
       - "4433"
       - "4434"
     volumes:
-      - ./ory/kratos:/etc/config/kratos:ro
-    command: ["serve", "--dev", "--config", "/etc/config/kratos/kratos.yml"]
+      - ./config/ory/kratos:/etc/config/kratos:ro
+    command: ["serve", "--config", "/etc/config/kratos/kratos.yml"]
 
   oathkeeper:
     image: ${OATHKEEPER_IMAGE:-oryd/oathkeeper:v26.2.0}
@@ -74,24 +108,8 @@ services:
       - "4455"
       - "4456"
     volumes:
-      - ./ory/oathkeeper:/etc/config/oathkeeper:ro
+      - ./config/ory/oathkeeper:/etc/config/oathkeeper:ro
     command: ["serve", "--config", "/etc/config/oathkeeper/oathkeeper.yml"]
-
-  ory-policy-adapter:
-    build:
-      context: ./services/ory-policy-adapter
-      dockerfile: Dockerfile
-    container_name: pixels-rover-ory-policy-adapter
-    restart: unless-stopped
-    depends_on:
-      oathkeeper:
-        condition: service_started
-    environment:
-      OATHKEEPER_PROXY_HOST: oathkeeper
-      OATHKEEPER_PROXY_PORT: 4455
-      PORT: 8080
-    expose:
-      - "8080"
 
   ory-ui:
     image: ${ORY_UI_IMAGE:-oryd/kratos-selfservice-ui-node:v26.2.0}
@@ -104,11 +122,11 @@ services:
       PORT: 4455
       BASE_PATH: /ui
       KRATOS_PUBLIC_URL: http://kratos:4433
-      KRATOS_BROWSER_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      KRATOS_BROWSER_URL: ${PUBLIC_BASE_URL:-}
       COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-}
       CSRF_COOKIE_NAME: pixels_rover_ui_csrf
       CSRF_COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-}
-      DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES: ${ORY_UI_DISABLE_SECURE_CSRF_COOKIES:-true}
+      DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES: ${ORY_UI_DISABLE_SECURE_CSRF_COOKIES:-false}
     expose:
       - "4455"
 
@@ -129,7 +147,7 @@ services:
       ROVER_DUCKDB_PATH: ":memory:"
       ROVER_PIXELS_HOST: ${PIXELS_HOST:-host.docker.internal}
       ROVER_PIXELS_PORT: ${PIXELS_PORT:-18890}
-      ROVER_DEBUG: ${DEBUG:-false}
+      ROVER_DEBUG: ${ROVER_DEBUG:-false}
     expose:
       - "8090"
     volumes:
@@ -166,8 +184,6 @@ services:
       kratos:
         condition: service_started
       oathkeeper:
-        condition: service_started
-      ory-policy-adapter:
         condition: service_started
       ory-ui:
         condition: service_started

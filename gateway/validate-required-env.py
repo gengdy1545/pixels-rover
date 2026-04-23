@@ -131,8 +131,7 @@ def _validate_entry(entry: dict, failures: list[str]) -> None:
             failures.append(
                 f"{name} = {value!r} is not a regular file "
                 f"(validator runs AFTER bind-mount; check your compose "
-                f"volume and host-side provisioning — "
-                f"see docs/runbooks/jwt-key-provisioning.md)."
+                f"volume and host-side provisioning)."
             )
         else:
             try:
