@@ -1,6 +1,7 @@
 import type { ApiErrorResponse } from '../types/common';
 import type { SSECallbacks, SSEConnection, SSEEventName, SSEEventMap } from '../types/sse';
-import { buildCommonHeaders, refreshAccessToken } from './client';
+import { redirectToLogin } from '../storage/navigation';
+import { buildCommonHeaders } from './client';
 import { apiErrorFromEnvelope } from './apiError';
 import type { ApiError } from './apiError';
 
@@ -12,7 +13,7 @@ import type { ApiError } from './apiError';
  * Open a POST-based SSE stream.
  *
  * - Injects CSRF token and X-Request-Id via `buildCommonHeaders()`.
- * - Handles 401 by refreshing the token and retrying once.
+ * - Handles 401 by sending the browser to the Kratos login flow.
  * - Returns an `SSEConnection` handle for user cancellation.
  * - Calls `onDisconnect` on network errors (distinguishable from business errors).
  */
@@ -77,11 +78,10 @@ async function consumeStream(
 
     let response = await fetch(buildRequest());
 
-    // Handle 401: refresh token and retry once (reuses ``streamRequestId``
-    // that was stashed by the first ``buildRequest()`` call).
     if (response.status === 401) {
-      await refreshAccessToken();
-      response = await fetch(buildRequest());
+      redirectToLogin();
+      callbacks.onError?.(await extractHttpError(response));
+      return;
     }
 
     if (!response.ok) {

@@ -136,7 +136,7 @@ def gateway_identity_headers(
 
 def make_access_token(
     *,
-    user_id: int = 1,
+    user_id: int | str = 1,
     email: str = "testuser@example.com",
     issuer: str = TEST_JWT_ISSUER,
     secret: str = "unused",
@@ -160,7 +160,7 @@ def make_access_token(
 
 def make_rs256_access_token(
     *,
-    user_id: int = 1,
+    user_id: int | str = 1,
     email: str = "testuser@example.com",
     issuer: str = TEST_JWT_ISSUER,
     kid: str = TEST_RSA_KID,
@@ -182,7 +182,7 @@ def make_rs256_access_token(
 
 def make_expired_token(
     *,
-    user_id: int = 1,
+    user_id: int | str = 1,
     email: str = "testuser@example.com",
     secret: str = "unused",
 ) -> str:
@@ -200,7 +200,7 @@ def make_expired_token(
 
 def make_refresh_token(
     *,
-    user_id: int = 1,
+    user_id: int | str = 1,
     email: str = "testuser@example.com",
     secret: str = "unused",
 ) -> str:
@@ -221,25 +221,25 @@ def auth_header(token: str) -> dict[str, str]:
     payload = _decode_gateway_token(token)
     if not payload:
         return {
-            "X-Auth-User-Id": "not-an-int",
+            "X-Auth-User-Id": "",
             "X-Auth-User-Email": "",
         }
 
     if payload.get("iss") != TEST_JWT_ISSUER:
         return {
-            "X-Auth-User-Id": "not-an-int",
+            "X-Auth-User-Id": "",
             "X-Auth-User-Email": "",
         }
 
     if payload.get("type") != "access":
         return {
-            "X-Auth-User-Id": "not-an-int",
+            "X-Auth-User-Id": "",
             "X-Auth-User-Email": "",
         }
 
     if payload.get("exp") == 0:
         return {
-            "X-Auth-User-Id": "not-an-int",
+            "X-Auth-User-Id": "",
             "X-Auth-User-Email": "",
         }
 

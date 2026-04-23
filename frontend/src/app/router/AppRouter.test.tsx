@@ -70,7 +70,7 @@ describe('AppRouter', () => {
 
   it('should show home page for authenticated user', async () => {
     useAuthStore.setState({
-      user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
+      user: { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
       isLoading: false,
     });
@@ -87,7 +87,7 @@ describe('AppRouter', () => {
 
   it('should redirect authenticated user from /login to /home', async () => {
     useAuthStore.setState({
-      user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
+      user: { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
       isLoading: false,
     });
@@ -121,7 +121,7 @@ describe('AppRouter', () => {
 
   it('should redirect / to /home', async () => {
     useAuthStore.setState({
-      user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
+      user: { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
       isLoading: false,
     });

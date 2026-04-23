@@ -1,15 +1,13 @@
 # Pixels Rover — required environment variables (SSOT).
 #
 # Single source of truth for every "if this env var is missing / malformed
-# the system is silently broken" declaration across the three services
-# (auth-service, assistant-service, gateway). Five consumers read this
-# file — change this list in lockstep when you add a new consumer:
+# the system is silently broken" declaration across the entrypoint-validated
+# services plus Ory deployment secrets. Four consumers read this file:
 #
 #   1. scripts/generate-env-example.py              — renders .env.example
 #   2. gateway/validate-required-env.py             — gateway entrypoint
-#   3. services/auth-service/src/main/java/.../bootstrap/RequiredEnvValidator.java
-#   4. services/assistant-service/app/required_env.py
-#   5. scripts/smoke.sh                             — cold-boot pre-flight (future PR)
+#   3. services/assistant-service/app/required_env.py
+#   4. scripts/smoke.sh                             — cold-boot pre-flight (future PR)
 #
 # scripts/check-contracts.py enforces all five actually reference this
 # path (`required-env-yaml-consumers-registered`) AND that every entry
@@ -47,39 +45,17 @@ services:
 
   # -------------------------------------------------------------------
   # gateway — APISIX Standalone YAML. Entrypoint validator
-  # (gateway/validate-required-env.py) runs BEFORE apisix template
-  # render / envsubst, so missing vars produce a single FATAL log line
-  # with zero upstream side-effects.
+  # (gateway/validate-required-env.py) runs BEFORE template render /
+  # envsubst, so missing vars produce a single FATAL log line with zero
+  # upstream side-effects.
   # -------------------------------------------------------------------
   gateway:
-    - name: INTERNAL_INTROSPECTION_SECRET
-      description: >-
-        Shared secret the gateway sends in X-Internal-Auth when it calls
-        auth-service's /api/internal/auth/introspect. auth-service rejects
-        introspect requests whose header does not match.
-      required: true
-      forbidden_values: ["change-me", "<set-me>"]
-      min_utf8_bytes: 16
-      sensitive: true
-
-    - name: INTERNAL_GATEWAY_ADMIN_SECRET
-      description: >-
-        Shared secret the gateway sends in X-Internal-Auth when auth-service
-        invokes POST /gateway/internal/invalidate_session (§7.4 session
-        invalidation / A1+A3). Distinct from INTROSPECTION_SECRET so the
-        two calling directions can be rotated independently.
-      required: true
-      forbidden_values: ["change-me", "<set-me>"]
-      min_utf8_bytes: 16
-      sensitive: true
-
     - name: CORS_ALLOWED_ORIGINS
       description: >-
         Comma-separated list of allowed origins for CORS pre-flight
-        responses. Gateway rejects requests from any other Origin with
-        403 GATEWAY_CORS_DENIED (see gateway.md §6.6). "*" is forbidden
-        in production; use docker-compose.dev.yml override to relax for
-        local dev.
+        responses. APISIX renders this value into its cors plugin. "*" is
+        forbidden in production; use docker-compose.dev.yml for local
+        defaults.
       required: true
       forbidden_values: ["*"]
 
@@ -93,83 +69,40 @@ services:
       required: true
       enum: [production, development]
 
-    - name: GATEWAY_OPENAPI_PUBLIC
-      description: >-
-        OpenAPI exposure profile selector (gateway.md §6.7). "true"
-        serves /api/v1/{auth,analysis}/openapi.json anonymously;
-        "false" requires a valid session. No default — every deployment
-        must decide explicitly. NEVER ship "true" to production.
-      required: true
-      enum: ["true", "false"]
-      env_example: "false"
-
   # -------------------------------------------------------------------
-  # auth-service — Java / Spring Boot. Validator
-  # (io.pixelsdb.pixels.rover.bootstrap.RequiredEnvValidator) runs as a
-  # Spring @Component with highest-priority ordering, fails the boot
-  # with a FATAL log line before JwtTokenProvider is constructed.
+  # kratos — Ory Kratos identity/session authority. Ory reads these
+  # directly from docker-compose.yml; this block exists so .env.example
+  # generation keeps deployment secrets visible and uncommitted.
   # -------------------------------------------------------------------
-  auth-service:
-    - name: JWT_ALGORITHM
+  kratos:
+    - name: KRATOS_SECRET_DEFAULT
       description: >-
-        Signing algorithm for access + refresh tokens. "HS256" is
-        symmetric (single shared secret); "RS256" is asymmetric (private
-        key signs, public key verifies, and enables rotation via
-        jwt.public-keys-directory). See docs/design/jwt-rotation.md.
+        Ory Kratos default cryptographic secret. Rotate with care because
+        changing it can invalidate encrypted/signature-protected state.
       required: true
-      enum: [HS256, RS256]
-
-    - name: JWT_SECRET
-      description: >-
-        HS256 shared secret, Base64-encoded (jjwt decodes before use).
-        Minimum 32 UTF-8 bytes. MUST be empty when JWT_ALGORITHM=RS256
-        (mutual exclusion; validator refuses boot on co-presence).
-      required_when: "JWT_ALGORITHM=HS256"
-      forbidden_when: "JWT_ALGORITHM=RS256"
       forbidden_values: ["change-me", "<set-me>"]
       min_utf8_bytes: 32
       sensitive: true
 
-    - name: JWT_PRIVATE_KEY_PATH
+    - name: KRATOS_SECRET_COOKIE
       description: >-
-        RS256 private-key PEM path inside the auth-service container.
-        Validator opens and parses the file at boot; a missing /
-        unreadable / malformed PEM fails the boot. In docker compose
-        the key directory is bind-mounted from ./keys/jwt/ (prod) or a
-        jwt-keys named volume populated by the dev override (see
-        docs/runbooks/jwt-key-provisioning.md).
-      required_when: "JWT_ALGORITHM=RS256"
-      forbidden_when: "JWT_ALGORITHM=HS256"
-      file_must_exist: true
-
-    - name: JWT_PUBLIC_KEY_PATH
-      description: >-
-        RS256 public-key PEM path (used as the ACTIVE verify key).
-        Validator parses the PEM AND performs a sign→verify self-test
-        using JWT_PRIVATE_KEY_PATH to prove the pair is a valid RSA
-        keypair before admission.
-      required_when: "JWT_ALGORITHM=RS256"
-      forbidden_when: "JWT_ALGORITHM=HS256"
-      file_must_exist: true
-
-    - name: JWT_ACTIVE_KID
-      description: >-
-        Key-id claim stamped into the JWT header ("kid"). Clients /
-        introspection code use it to pick the correct verify key.
-        Forbidden placeholder values catch operators who leave the
-        dev-time kid in a production config.
-      required_when: "JWT_ALGORITHM=RS256"
-      forbidden_when: "JWT_ALGORITHM=HS256"
-      forbidden_values: ["default-hmac", "dev-rsa-1", "<set-me>"]
-
-    - name: INTERNAL_INTROSPECTION_SECRET
-      description: >-
-        MUST match the value shipped to the gateway (see gateway.*).
-        auth-service's SecurityConfig rejects /api/internal/auth/introspect
-        callers whose X-Internal-Auth header does not equal this value.
+        Ory Kratos cookie signing/encryption secret for browser sessions.
       required: true
       forbidden_values: ["change-me", "<set-me>"]
-      min_utf8_bytes: 16
+      min_utf8_bytes: 32
+      sensitive: true
+
+  # -------------------------------------------------------------------
+  # ory-ui — Ory Kratos reference self-service UI.
+  # -------------------------------------------------------------------
+  ory-ui:
+    - name: ORY_UI_COOKIE_SECRET
+      description: >-
+        Cookie and CSRF secret for the Ory self-service UI container.
+        Must be deployment-local and must not be committed.
+      required: true
+      forbidden_values: ["change-me", "<set-me>"]
+      min_utf8_bytes: 32
       sensitive: true
 
   # -------------------------------------------------------------------

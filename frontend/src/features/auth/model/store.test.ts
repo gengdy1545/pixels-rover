@@ -46,7 +46,7 @@ describe('useAuthStore', () => {
   });
 
   it('setUser should update user and isAuthenticated', () => {
-    const mockUser = { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' };
+    const mockUser = { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' };
     useAuthStore.getState().setUser(mockUser);
 
     const state = useAuthStore.getState();
@@ -56,8 +56,8 @@ describe('useAuthStore', () => {
   });
 
   it('checkAuth should set user when /me succeeds', async () => {
-    const mockUser = { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' };
-    // 客户端层已经 unwrap ApiResponse → me() 直接 resolve UserInfo
+    const mockUser = { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' };
+    // Kratos whoami is mapped directly to UserInfo by authApi.me().
     vi.mocked(authApi.me).mockResolvedValue(mockUser);
 
     await useAuthStore.getState().checkAuth();
@@ -72,7 +72,7 @@ describe('useAuthStore', () => {
     vi.mocked(authApi.me).mockRejectedValue(new Error('Unauthorized'));
 
     useAuthStore.setState({
-      user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
+      user: { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
     });
 
@@ -88,7 +88,7 @@ describe('useAuthStore', () => {
     vi.mocked(authApi.logout).mockResolvedValue(undefined as never);
 
     useAuthStore.setState({
-      user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
+      user: { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
     });
 
@@ -104,7 +104,7 @@ describe('useAuthStore', () => {
     vi.mocked(authApi.logout).mockRejectedValue(new Error('Network error'));
 
     useAuthStore.setState({
-      user: { id: 1, name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
+      user: { id: 'user-1', name: 'Alice', email: 'alice@example.com', affiliation: 'PixelsDB' },
       isAuthenticated: true,
     });
 

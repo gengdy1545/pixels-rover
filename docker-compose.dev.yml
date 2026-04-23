@@ -1,98 +1,31 @@
-# Pixels Rover — LOCAL DEVELOPMENT overlay for docker-compose.yml.
+# Pixels Rover — local-development overlay.
 #
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-#
-# What this file adds on top of the production-shaped baseline:
-#
-#   1. jwt-keygen init container — runs scripts/generate-jwt-rsa-keys.sh
-#      into a throw-away named volume so first-time local boots don't
-#      need any host-side openssl dance. Production MUST NOT run this
-#      overlay: docker-compose.yml bind-mounts ./keys/jwt/ read-only as
-#      the canonical, operator-provisioned key source of truth
-#      (B5 / docs/runbooks/jwt-key-provisioning.md).
-#
-#   2. Named volume `jwt-keys` shared by jwt-keygen and auth-service.
-#      This replaces the production bind-mount of ./keys/jwt/ just for
-#      this overlay.
-#
-#   3. dev-only introspection + admin secrets, dev-only LLM API key
-#      placeholder, CORS=*, CSP=development, OpenAPI public — only the
-#      minimum needed so `docker compose up` actually boots from a
-#      bare .env. Override these from your .env for realistic tests.
-#
-# Invariants:
-#   * This file NEVER exposes new ports, mounts, or upstreams. It only
-#     re-laxes existing bindings so devs can iterate without first
-#     provisioning real secrets. Any new contract goes into the
-#     baseline docker-compose.yml.
-#   * RequiredEnvValidator (§14) still runs in the dev overlay —
-#     "relaxed" means the overlay supplies defaults that PASS the
-#     validator (enum match, ≥32 UTF-8 bytes, not "change-me"), not
-#     that validation is skipped.
+# Supplies non-production defaults that satisfy required-env validation for
+# first-time local boots. Do not use this overlay for production.
+
 services:
-  # ---------- JWT Key Generator (init container; DEV-ONLY) ----------
-  jwt-keygen:
-    image: alpine:3.20
-    container_name: pixels-rover-jwt-keygen
-    volumes:
-      - jwt-keys:/keys
-      - ./scripts/generate-jwt-rsa-keys.sh:/generate.sh:ro
-    entrypoint: ["/bin/sh", "/generate.sh", "/keys", "${JWT_KID:-dev-rsa-1}"]
-    restart: "no"
-
-  # ---------- Auth Service ----------
-  auth-service:
-    depends_on:
-      mysql:
-        condition: service_started
-      # The dev overlay wires jwt-keygen BACK into the dependency graph
-      # so the keypair exists before auth-service boots.
-      jwt-keygen:
-        condition: service_completed_successfully
+  kratos-migrate:
     environment:
-      # Dev-grade JWT config (RS256 paired with the kid that jwt-keygen
-      # provisions inside /jwt-keys). These names intentionally pass
-      # forbidden_values checks — "dev-rsa-1" is only flagged when
-      # JWT_ALGORITHM=RS256 AND no explicit override, but we set it
-      # here plus the override is expected for deploy-ready keys.
-      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
-      JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:-dev-local-kid-1}
-      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/jwt-keys/${JWT_KID:-dev-rsa-1}-private.pem}
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/jwt-keys/${JWT_KID:-dev-rsa-1}-public.pem}
-      JWT_SECRET: ${JWT_SECRET:-}
-      # 32+ UTF-8 bytes, non-placeholder — satisfies required-env.yaml.
-      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-dev-local-introspection-secret-0001}
-    volumes:
-      # Replace the production bind-mount with the dev named volume
-      # populated by jwt-keygen. `!reset []` not needed — compose merges
-      # volume lists, and a duplicate target path is resolved by the
-      # LAST mapping winning.
-      - jwt-keys:/jwt-keys:ro
+      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-dev-local-kratos-default-secret-00000001}
+      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-dev-local-kratos-cookie-secret-00000001}
 
-  # ---------- Assistant Service ----------
+  kratos:
+    environment:
+      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-dev-local-kratos-default-secret-00000001}
+      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-dev-local-kratos-cookie-secret-00000001}
+
+  ory-ui:
+    environment:
+      COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-dev-local-ory-ui-cookie-secret-000001}
+      CSRF_COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-dev-local-ory-ui-cookie-secret-000001}
+      DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES: ${ORY_UI_DISABLE_SECURE_CSRF_COOKIES:-true}
+
   assistant-service:
     environment:
-      # LLM API key placeholder that still passes forbidden_values
-      # (sk-your-api-key-here would be rejected). Operators supply
-      # a real key via .env when they want actual LLM traffic.
-      ROVER_LLM_API_KEY: ${LLM_API_KEY:-dev-local-llm-stub-key-does-not-call-out}
+      ROVER_LLM_API_KEY: ${ROVER_LLM_API_KEY:-dev-local-llm-stub-key-does-not-call-out}
+      ROVER_DATABASE_URL: ${ROVER_DATABASE_URL:-mysql+aiomysql://pixels:${MYSQL_PASSWORD:-password}@mysql:3306/pixels_analysis}
 
-  # ---------- Gateway ----------
   gateway:
     environment:
-      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET:-dev-local-introspection-secret-0001}
-      INTERNAL_GATEWAY_ADMIN_SECRET: ${INTERNAL_GATEWAY_ADMIN_SECRET:-dev-local-gateway-admin-secret-0001}
-      # "*" is explicitly forbidden by required-env.yaml; dev uses the
-      # Vite origin set instead. Override CORS_ALLOWED_ORIGINS in .env
-      # for cross-browser / ngrok testing.
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost:5173,http://localhost:3000}
       GATEWAY_CSP_PROFILE: ${GATEWAY_CSP_PROFILE:-development}
-      # OpenAPI exposure defaults to "true" in dev so iterating on
-      # /openapi.json doesn't require a fresh login, but the operator
-      # can still force "false" via .env for realistic rehearsals.
-      GATEWAY_OPENAPI_PUBLIC: ${GATEWAY_OPENAPI_PUBLIC:-true}
-
-volumes:
-  jwt-keys:
-    driver: local

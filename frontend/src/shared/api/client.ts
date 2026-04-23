@@ -2,7 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { AxiosRequestConfig } from 'axios';
 import type { ApiErrorResponse, ApiSuccessResponse } from '../types/common';
 import { ensureRequestId } from '../storage/requestId';
-import { getCookie } from '../storage/cookie';
+import { ensureXsrfCookie } from '../storage/cookie';
 import { redirectToLogin } from '../storage/navigation';
 import { ApiError, apiErrorFromEnvelope } from './apiError';
 
@@ -18,30 +18,6 @@ const httpClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
-
-// ════════════════════════════════════════
-// Token refresh queue
-// ════════════════════════════════════════
-
-let isRefreshing = false;
-let pendingRequests: Array<(success: boolean) => void> = [];
-
-function resolvePendingRequests(success: boolean) {
-  pendingRequests.forEach((callback) => callback(success));
-  pendingRequests = [];
-}
-
-/**
- * Refresh the access token by calling the refresh endpoint.
- * The refresh_token is sent automatically via HttpOnly Cookie.
- */
-export async function refreshAccessToken(): Promise<void> {
-  await axios.post('/api/v1/auth/refresh', {}, {
-    withCredentials: true,
-    headers: buildCommonHeaders(),
-  });
-  // New tokens are set as HttpOnly cookies by the server — nothing to store locally.
-}
 
 // ════════════════════════════════════════
 // Common header injection (shared by both Axios and fetch-based SSE)
@@ -61,10 +37,7 @@ export function buildCommonHeaders(
   existingRequestId?: string | null,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
-  const csrfToken = getCookie('XSRF-TOKEN');
-  if (csrfToken) {
-    headers['X-XSRF-TOKEN'] = csrfToken;
-  }
+  headers['X-XSRF-TOKEN'] = ensureXsrfCookie();
   headers['X-Request-Id'] = ensureRequestId(existingRequestId);
   return headers;
 }
@@ -75,16 +48,10 @@ export function buildCommonHeaders(
 
 httpClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const csrfToken = getCookie('XSRF-TOKEN');
-    if (csrfToken && config.headers) {
-      config.headers['X-XSRF-TOKEN'] = csrfToken;
+    if (config.headers) {
+      config.headers['X-XSRF-TOKEN'] = ensureXsrfCookie();
     }
     if (config.headers) {
-      // X-Request-Id reuse invariant (frontend.md §4.6): a 401→refresh→retry
-      // cycle flows through this interceptor twice with the SAME config
-      // object, and ensureRequestId() keeps the header value verbatim if
-      // already set. Never mint a new id on retry — doing so would break
-      // log correlation between the original attempt and its retry.
       const current = config.headers['X-Request-Id'];
       config.headers['X-Request-Id'] = ensureRequestId(
         typeof current === 'string' ? current : null,
@@ -108,47 +75,8 @@ httpClient.interceptors.request.use(
 httpClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError<ApiErrorResponse>) => {
-    const originalRequest = error.config as
-      | (InternalAxiosRequestConfig & { _retry?: boolean })
-      | undefined;
-
-    // 401 auth-refresh fast path: run it BEFORE materializing an ApiError so
-    // the caller never sees a transient 401 when the refresh succeeds.
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          pendingRequests.push((success) => {
-            if (!success) {
-              reject(
-                new ApiError({
-                  httpStatus: 401,
-                  message: 'Authentication required',
-                  details: { errorCode: 'GATEWAY_AUTH_REQUIRED', category: 'AUTH' },
-                }),
-              );
-              return;
-            }
-            resolve(httpClient(originalRequest));
-          });
-        });
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      return refreshAccessToken()
-        .then(() => {
-          resolvePendingRequests(true);
-          return httpClient(originalRequest);
-        })
-        .catch((refreshError) => {
-          resolvePendingRequests(false);
-          redirectToLogin();
-          return Promise.reject(refreshError);
-        })
-        .finally(() => {
-          isRefreshing = false;
-        });
+    if (error.response?.status === 401) {
+      redirectToLogin();
     }
 
     // Non-recoverable: materialize a structured ApiError. Callers can then

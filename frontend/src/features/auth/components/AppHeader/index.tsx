@@ -13,7 +13,6 @@
 import React, { useEffect } from 'react';
 import { Dropdown, Avatar, Space } from 'antd';
 import { UserOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../model/store';
 import type { MenuProps } from 'antd';
 import './index.css';
@@ -25,7 +24,6 @@ interface HeaderProps {
 
 const AppHeader: React.FC<HeaderProps> = ({ collapsed, onToggleCollapse }) => {
   const { user, checkAuth, logout } = useAuthStore();
-  const navigate = useNavigate();
 
   useEffect(() => {
     if (!user) {
@@ -35,7 +33,6 @@ const AppHeader: React.FC<HeaderProps> = ({ collapsed, onToggleCollapse }) => {
 
   const handleLogout = async () => {
     await logout();
-    navigate('/login');
   };
 
   const menuItems: MenuProps['items'] = [

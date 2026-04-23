@@ -61,10 +61,9 @@ const RETRYABLE_INFRA_ERROR_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
  *   try again rather than clear state and bounce to login.
  * - `RATE_LIMIT` — retryable after the server-specified `retryAfterSec`
  *   hint (when present on `details`).
- * - `AUTH` — NOT retryable at the coarse level; the axios client already
- *   handles the single legitimate auto-retry (access-token refresh). Any
- *   `AUTH` that surfaces to UI means "user intervention required" — e.g.
- *   captcha refresh or re-login — and a blind retry would just loop.
+ * - `AUTH` — NOT retryable at the coarse level. Kratos/Oathkeeper auth
+ *   failures require user intervention (usually the browser login flow), and
+ *   a blind retry would just loop.
  * - `USER_INPUT` — not retryable; wait for the user to correct the form.
  * - `INTERNAL` — not retryable; the server hit an unhandled case and
  *   another attempt with the same payload is likely to reproduce.
@@ -116,9 +115,9 @@ export function isRetryable(error: ApiError): boolean {
  *
  * The enum is slightly finer-grained than the raw `ErrorCategory` so the
  * UX can distinguish "we don't know what happened" (`unknown`) from
- * "server told us INTERNAL" (`server-error`), and "auto-refresh already
- * failed" (`auth-required`) from generic AUTH codes that came from a
- * specific flow (captcha, demo-mode).
+ * "server told us INTERNAL" (`server-error`), and "auth boundary rejected
+ * the request" (`auth-required`) from generic AUTH codes that came from a
+ * specific flow.
  */
 export type ApiErrorBucket =
   | 'auth-required'

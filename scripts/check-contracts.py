@@ -162,12 +162,16 @@ def _splice_openapi_fragment(template_text: str, profile: str) -> str:
 def _load_apisix_yaml(profile: str = "protected") -> dict:
     """Return the apisix route table as it would exist at runtime.
 
-    Mirrors entrypoint.sh: reads ``apisix.yaml.template`` and splices
-    the requested OpenAPI fragment (default = protected, the PROD
-    baseline) into place. Returns the parsed YAML dict.
+    Current gateway rendering is a straight envsubst. Older templates used
+    an OpenAPI fragment marker; keep the splice path for historical branches
+    but parse the template directly when the marker is absent.
     """
     template_text = _APISIX_TEMPLATE_PATH.read_text(encoding="utf-8")
-    rendered = _splice_openapi_fragment(template_text, profile)
+    rendered = (
+        _splice_openapi_fragment(template_text, profile)
+        if _OPENAPI_MARKER in template_text
+        else template_text
+    )
     return yaml.safe_load(rendered) or {}
 
 
@@ -478,6 +482,13 @@ _SHARED_DICT_MIN_MB = 8
 def check_shared_dicts_declared() -> CheckResult:
     result = CheckResult("shared-dicts-declared", "lua_shared_dict declarations")
     text = _load_config_template()
+    apisix = _load_apisix_yaml()
+    gateway_auth_in_runtime = "gateway-auth" in text or any(
+        isinstance(route, dict) and "gateway-auth" in (route.get("plugins") or {})
+        for route in apisix.get("routes") or []
+    )
+    if not gateway_auth_in_runtime:
+        return result
     for name in _SHARED_DICTS:
         m = re.search(
             rf"lua_shared_dict\s+{re.escape(name)}\s+(\d+)([kKmM]);",
@@ -590,9 +601,13 @@ def check_no_external_internal_routes() -> CheckResult:
     for route in apisix.get("routes") or []:
         uri = route.get("uri") or ""
         if any(uri.startswith(p) for p in banned_prefixes):
+            plugins = route.get("plugins") or {}
+            deny_only = "serverless-pre-function" in plugins and not route.get("upstream_id")
+            if deny_only:
+                continue
             result.failures.append(
                 f"route {route.get('id', uri)!r} exposes {uri!r} — "
-                "internal prefixes must NOT have external routes"
+                "internal prefixes must only have explicit deny routes"
             )
     return result
 
@@ -667,6 +682,8 @@ def check_openapi_route_priority() -> CheckResult:
     # 1. Parse template (sans openapi routes) to find deepest business
     #    prefix per domain.
     template_text = _APISIX_TEMPLATE_PATH.read_text(encoding="utf-8")
+    if _OPENAPI_MARKER not in template_text:
+        return result
     try:
         # Splicing with an empty-fragment stand-in would need another
         # scaffold; easier to splice protected and then strip openapi
@@ -2407,7 +2424,7 @@ def check_auth_openapi_error_code_enum_matches_source() -> CheckResult:
 # ---------------------------------------------------------------------------
 
 _FRONTEND_TYPES_DIR = REPO_ROOT / "frontend" / "src" / "shared" / "types"
-# Known allowed owners: business services + the two pseudo-owners below.
+# Known allowed owners: business/identity services + the two pseudo-owners below.
 #   "gateway" — infra-prefix codes / envelope shapes not tied to a backend;
 #   "shared"  — genuinely cross-service envelope (currently: api.d.ts facade).
 # Anything else must be an actual service identifier, keeping the mapping
@@ -2415,6 +2432,7 @@ _FRONTEND_TYPES_DIR = REPO_ROOT / "frontend" / "src" / "shared" / "types"
 _ALLOWED_OWNERS = {
     "assistant-service",
     "auth-service",
+    "kratos",
     "gateway",
     "shared",
 }
@@ -2426,7 +2444,7 @@ _ALLOWED_OWNERS = {
     "`frontend/src/shared/types/**/*.{ts,d.ts}` (excluding tests and pure "
     "aggregators that do not declare types) MUST carry a top-of-file JSDoc "
     "block with an `owning-service:` tag matching one of "
-    "{assistant-service, auth-service, gateway, shared} and at least one "
+    "{assistant-service, auth-service, kratos, gateway, shared} and at least one "
     "`source-of-truth` / `Source of truth` tag pointing at the OpenAPI schema "
     "name or SSOT file + symbol (frontend.md §4.6 hard rule). The `shared` "
     "owner is reserved for cross-service envelope definitions and aggregator "

@@ -1,46 +1,13 @@
-# APISIX Standalone YAML — single source of truth for gateway routing.
+# APISIX Standalone YAML — routing and edge security headers only.
 #
-# Scope (see docs/development/gateway.md §1):
-#   * deployment.role = data_plane + config_provider = yaml in
-#     config.yaml.template. This file is the only place where routes,
-#     upstreams, and global_rules are declared.
-#   * Secrets referenced as ${VAR_NAME} are substituted by
-#     entrypoint.sh at container start via envsubst. The rendered file
-#     lives at /usr/local/apisix/conf/apisix.yaml.
-#   * Any change to routing / auth / CORS / CSP must go through this
-#     file + PR diff. There is NO Admin API, NO etcd, NO bootstrap.sh.
-#   * Route priorities follow gateway.md §6.2 (deeper prefix beats
-#     shallower by >= 10; frontend /* stays at priority 1).
-#
-# Render pipeline (entrypoint.sh):
-#   * This file is a *template* — on container boot `entrypoint.sh`
-#     reads it, splices in one of the mutually-exclusive OpenAPI
-#     route fragments (fragments/openapi-{public,protected}.yaml) at
-#     the `#__OPENAPI_ROUTES__` marker line according to
-#     `GATEWAY_OPENAPI_PUBLIC`, then writes the result to
-#     /usr/local/apisix/conf/apisix.yaml. See gateway.md §6.7 for
-#     why runtime-conditional routing is rejected and why the two
-#     profiles are pre-rendered instead.
-#   * The marker line MUST appear exactly once, at top level indent
-#     under `routes:`. `scripts/check-contracts.py` enforces this.
-#
-# Change-control (hard rules):
-#   * Adding a new backend service requires simultaneous edits to
-#     (a) this file: new upstream + per-domain routes + gateway-ready
-#         plugin `probes[]`;
-#     (b) config.yaml.template: new /__ready_probe/<service> internal
-#         location with timeouts mirroring `probes[i].timeout_ms`;
-#     (c) docker-compose.yml: new service definition.
-#     See gateway.md §7 for the checklist.
-#   * Secrets are ${VAR} placeholders ONLY. Never commit rendered
-#     values. entrypoint.sh fails fast on missing env vars.
+# Identity/session decisions are delegated to Ory Kratos + Ory Oathkeeper.
+# APISIX remains the single external entrypoint and owns:
+#   * /gateway/live and /gateway/ready
+#   * public Ory UI / Kratos browser-flow exposure
+#   * routing to the Oathkeeper-protected API edge
+#   * CORS, CSP, security response headers, and X-Request-Id
 
 routes:
-  # ------------------------------------------------------------------
-  # Gateway liveness (pure local, no upstream touch).
-  # Used by Docker HEALTHCHECK and K8s livenessProbe. Failure -> restart.
-  # See gateway.md §4.1.
-  # ------------------------------------------------------------------
   - id: gateway-live
     uri: /gateway/live
     methods: [GET]
@@ -57,18 +24,10 @@ routes:
               return ngx.exit(200)
             end
     upstream:
-      # Placeholder; the serverless function short-circuits in rewrite phase
-      # so this upstream is never dialed. We still need a declaration because
-      # APISIX Standalone YAML schema requires either upstream or upstream_id.
       type: roundrobin
       nodes:
         "127.0.0.1:65535": 1
 
-  # ------------------------------------------------------------------
-  # Gateway readiness (system-level aggregation). Probes each upstream's
-  # /internal/ready via nginx internal locations. See gateway.md §4.1
-  # and backend.md §7.2. Failure here MUST NOT trigger container restart.
-  # ------------------------------------------------------------------
   - id: gateway-ready
     uri: /gateway/ready
     methods: [GET]
@@ -76,184 +35,147 @@ routes:
     plugins:
       gateway-ready:
         probes:
-          - name: auth-service
-            uri: /__ready_probe/auth
+          - name: kratos
+            uri: /__ready_probe/kratos
+            timeout_ms: 1000
+          - name: oathkeeper
+            uri: /__ready_probe/oathkeeper
+            timeout_ms: 1000
+          - name: ory-policy-adapter
+            uri: /__ready_probe/policy-adapter
+            timeout_ms: 1000
+          - name: ory-ui
+            uri: /__ready_probe/ory-ui
             timeout_ms: 1000
           - name: assistant-service
             uri: /__ready_probe/assistant
             timeout_ms: 1000
-        total_timeout_ms: 2000
+        total_timeout_ms: 5000
     upstream:
       type: roundrobin
       nodes:
         "127.0.0.1:65535": 1
 
-  # ------------------------------------------------------------------
-  # OpenAPI per-service namespace routes (gateway.md §6.7).
-  #
-  # The next line is a template splice marker; the actual route
-  # definitions come from fragments/openapi-{public,protected}.yaml
-  # and are selected by entrypoint.sh based on
-  # GATEWAY_OPENAPI_PUBLIC. Do NOT edit the marker text; do NOT move
-  # it out of the `routes:` list. The marker MUST be the ONLY
-  # location declaring OpenAPI routes — inline duplicates here or in
-  # the other fragment would produce duplicate route ids when the
-  # protected fragment is also spliced, and APISIX Standalone YAML
-  # rejects duplicate ids.
-  # ------------------------------------------------------------------
-#__OPENAPI_ROUTES__
-
-  # ------------------------------------------------------------------
-  # Auth-service — public routes (no login required)
-  # ------------------------------------------------------------------
-  - id: auth-login
-    name: auth-login
-    uri: /api/v1/auth/login
-    methods: [POST, OPTIONS]
-    priority: 950
+  - id: deny-api-internal
+    uri: /api/internal/*
+    priority: 9990
     plugins:
-      gateway-auth:
-        require_auth: false
-        csrf_protect: false
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: auth-service
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              ngx.status = 404
+              return ngx.exit(404)
+            end
+    upstream:
+      type: roundrobin
+      nodes:
+        "127.0.0.1:65535": 1
 
-  - id: auth-register
-    name: auth-register
-    uri: /api/v1/auth/register
-    methods: [POST, OPTIONS]
-    priority: 950
+  - id: deny-gateway-internal
+    uri: /gateway/internal/*
+    priority: 9990
     plugins:
-      gateway-auth:
-        require_auth: false
-        csrf_protect: false
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: auth-service
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              ngx.status = 404
+              return ngx.exit(404)
+            end
+    upstream:
+      type: roundrobin
+      nodes:
+        "127.0.0.1:65535": 1
 
-  - id: auth-captcha
-    name: auth-captcha
-    uri: /api/v1/auth/captcha
-    methods: [GET, OPTIONS]
-    priority: 950
-    plugins:
-      gateway-auth:
-        require_auth: false
-        csrf_protect: false
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: auth-service
+  # Ory self-service UI and Kratos public browser-flow endpoints.
+  - id: ory-ui-root
+    uri: /ui
+    methods: [GET]
+    priority: 970
+    upstream_id: ory-ui
 
-  # Refresh is public (must work with expired access_token) but MUST
-  # enforce CSRF — see gateway.md §5.2.2 for the three-fold rationale.
-  - id: auth-refresh
-    name: auth-refresh
-    uri: /api/v1/auth/refresh
-    methods: [POST, OPTIONS]
+  - id: ory-ui-assets
+    uri: /ui/*
+    priority: 980
+    upstream_id: ory-ui
+
+  - id: kratos-self-service
+    uri: /self-service/*
+    priority: 960
+    upstream_id: kratos-public
+
+  - id: kratos-sessions
+    uri: /sessions/*
+    priority: 959
+    upstream_id: kratos-public
+
+  - id: kratos-schemas
+    uri: /schemas/*
+    priority: 958
+    upstream_id: kratos-public
+
+  # Old first-party auth API is intentionally retired in the one-shot Ory cutover.
+  - id: auth-api-retired-root
+    uri: /api/v1/auth
     priority: 940
     plugins:
-      gateway-auth:
-        require_auth: false
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: auth-service
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              ngx.header.content_type = "application/json"
+              ngx.status = 410
+              ngx.say('{"code":410,"message":"Legacy auth API retired. Use Ory Kratos browser flows under /self-service/* and the Ory UI under /ui/*."}')
+              return ngx.exit(410)
+            end
+    upstream:
+      type: roundrobin
+      nodes:
+        "127.0.0.1:65535": 1
 
-  # ------------------------------------------------------------------
-  # Auth-service — protected routes (catch-all, lower priority than
-  # the explicit public routes above)
-  # ------------------------------------------------------------------
-  - id: auth-protected
-    name: auth-protected
+  - id: auth-api-retired
     uri: /api/v1/auth/*
-    priority: 900
+    priority: 950
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: auth-service
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              ngx.header.content_type = "application/json"
+              ngx.status = 410
+              ngx.say('{"code":410,"message":"Legacy auth API retired. Use Ory Kratos browser flows under /self-service/* and the Ory UI under /ui/*."}')
+              return ngx.exit(410)
+            end
+    upstream:
+      type: roundrobin
+      nodes:
+        "127.0.0.1:65535": 1
 
-  # ------------------------------------------------------------------
-  # Assistant-service — analysis backends (more specific than
-  # /api/v1/analysis*; MUST stay at higher priority — see §6.2).
-  # ------------------------------------------------------------------
   - id: analysis-backends-root
-    name: analysis-backends-root
     uri: /api/v1/analysis/backends
     methods: [GET, OPTIONS]
-    priority: 890
+    priority: 910
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: assistant-service
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
+    upstream_id: oathkeeper-proxy
 
   - id: analysis-backends-detail
-    name: analysis-backends-detail
     uri: /api/v1/analysis/backends/*
-    priority: 885
+    priority: 920
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: assistant-service
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
+    upstream_id: oathkeeper-proxy
 
-  # ------------------------------------------------------------------
-  # Assistant-service — analysis submit (SSE).
-  #
-  # SSE route contract (gateway.md §6.3 + §5.3.4):
-  #   * `timeout.read = 900` (15 min baseline; ≤ 30 min hard cap per
-  #     §6.3) — this read timeout is ALSO the upper bound for the
-  #     "user logged out but in-flight SSE still alive" window
-  #     (§5.3.4); `invalidate_session` does NOT kill in-flight SSE,
-  #     so the read_timeout doubles as the security collapse window.
-  #     Raising this value requires re-evaluating §5.3.4 — not a
-  #     single-PR change.
-  #   * `proxy-control.request_buffering = false` — disable nginx
-  #     request body buffering. Strictly speaking SSE submit body is
-  #     small (a JSON question), but we set it for documented intent
-  #     so future "long upload then SSE" patterns inherit the right
-  #     baseline.
-  #   * Response-side `proxy_buffering` is disabled per-response by
-  #     the upstream sending `X-Accel-Buffering: no`
-  #     (services/assistant-service/app/api/analysis.py). We rely on
-  #     the upstream-driven signal rather than route-level config
-  #     because APISIX standalone YAML doesn't expose
-  #     `proxy_buffering off` as a first-class field; the upstream
-  #     header is the canonical nginx mechanism.
-  # check-contracts.py `sse-routes-explicit-timeout-and-buffering`
-  # enforces these as machine assertions.
-  # ------------------------------------------------------------------
   - id: analysis-submit
-    name: analysis-submit
     uri: /api/v1/analysis
     methods: [POST, OPTIONS]
     priority: 880
@@ -262,94 +184,50 @@ routes:
       send: 60
       read: 900
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
       proxy-control:
         request_buffering: false
-    upstream_id: assistant-service
-
-  # ------------------------------------------------------------------
-  # Assistant-service — analysis detail (non-SSE GET; default timeouts)
-  # ------------------------------------------------------------------
+    upstream_id: oathkeeper-proxy
 
   - id: analysis-detail
-    name: analysis-detail
     uri: /api/v1/analysis/*
-    priority: 870
+    priority: 890
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: assistant-service
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
+    upstream_id: oathkeeper-proxy
 
-  # ------------------------------------------------------------------
-  # Assistant-service — conversations
-  # ------------------------------------------------------------------
   - id: conversations-root
-    name: conversations-root
     uri: /api/v1/conversations
     methods: [GET, POST, OPTIONS]
     priority: 860
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: assistant-service
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
+    upstream_id: oathkeeper-proxy
 
   - id: conversations-detail
-    name: conversations-detail
     uri: /api/v1/conversations/*
     priority: 850
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: assistant-service
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
+    upstream_id: oathkeeper-proxy
 
-  # ------------------------------------------------------------------
-  # Assistant-service — semantic layer
-  # ------------------------------------------------------------------
   - id: semantic-protected
-    name: semantic-protected
     uri: /api/v1/semantic/*
     priority: 840
     plugins:
-      gateway-auth:
-        require_auth: true
-        csrf_protect: true
-        introspection_url: http://auth-service:8081/api/internal/auth/introspect
-        positive_cache_ttl: 5
-        negative_cache_ttl: 5
-        introspect_timeout_ms: 800
-        introspect_total_budget_ms: 1500
-    upstream_id: assistant-service
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
+    upstream_id: oathkeeper-proxy
 
-  # ------------------------------------------------------------------
-  # Frontend catch-all. MUST stay at priority=1 (gateway.md §6.2).
-  # Any route above this will be matched first; this only fires when
-  # no /api/v1/** or /gateway/** prefix matched.
-  # ------------------------------------------------------------------
   - id: frontend
     name: frontend
     uri: /*
@@ -357,17 +235,23 @@ routes:
     upstream_id: frontend
 
 upstreams:
-  - id: auth-service
-    name: auth-service
+  - id: oathkeeper-proxy
+    name: oathkeeper-proxy
     type: roundrobin
     nodes:
-      "auth-service:8081": 1
+      "ory-policy-adapter:8080": 1
 
-  - id: assistant-service
-    name: assistant-service
+  - id: kratos-public
+    name: kratos-public
     type: roundrobin
     nodes:
-      "assistant-service:8090": 1
+      "kratos:4433": 1
+
+  - id: ory-ui
+    name: ory-ui
+    type: roundrobin
+    nodes:
+      "ory-ui:4455": 1
 
   - id: frontend
     name: frontend
@@ -375,11 +259,17 @@ upstreams:
     nodes:
       "frontend:80": 1
 
-# Global rules apply to every matching request regardless of route.
-# Security headers are injected here (gateway.md §6.6).
-# X-Request-Id is generated by the request-id plugin and echoed back
-# to the client for tracing.
 global_rules:
+  - id: cors
+    plugins:
+      cors:
+        allow_origins: "${CORS_ALLOWED_ORIGINS}"
+        allow_methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+        allow_headers: "Authorization,Content-Type,Cookie,X-Request-Id,X-XSRF-TOKEN,X-CSRF-Token"
+        expose_headers: "X-Request-Id"
+        allow_credential: true
+        max_age: 3600
+
   - id: security-headers
     plugins:
       response-rewrite:
@@ -389,15 +279,7 @@ global_rules:
             X-Content-Type-Options: nosniff
             Referrer-Policy: strict-origin-when-cross-origin
             Permissions-Policy: "camera=(), microphone=(), geolocation=(), payment=()"
-            # Production CSP baseline. The development CSP profile (ws:
-            # / unsafe-eval for Vite HMR) is a documented future
-            # addition via template fragments; see gateway.md §6.6.
-            Content-Security-Policy: "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-            # HSTS is commented out until TLS termination lands at the
-            # gateway. Enabling it before HTTPS is available in the
-            # deployment would brick the site per browser cache; see
-            # gateway.md §6.6 runtime note.
-            # Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+            Content-Security-Policy: "${GATEWAY_CSP_HEADER}"
 
   - id: request-id
     plugins:

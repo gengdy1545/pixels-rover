@@ -1,0 +1,59 @@
+serve:
+  proxy:
+    port: 4455
+    host: 0.0.0.0
+  api:
+    port: 4456
+    host: 0.0.0.0
+
+access_rules:
+  matching_strategy: regexp
+  repositories:
+    - file:///etc/config/oathkeeper/rules.yml
+
+authenticators:
+  cookie_session:
+    enabled: true
+    config:
+      check_session_url: http://kratos:4433/sessions/whoami
+      only:
+        - ory_kratos_session
+      subject_from: identity.id
+      extra_from: "@this"
+      preserve_path: true
+      preserve_query: true
+      forward_http_headers:
+        - Cookie
+        - X-Request-Id
+        - X-Forwarded-For
+        - X-Forwarded-Host
+        - X-Forwarded-Proto
+
+authorizers:
+  allow:
+    enabled: true
+
+mutators:
+  noop:
+    enabled: true
+  header:
+    enabled: true
+    config:
+      headers:
+        X-Auth-User-Id: "{{ print .Subject }}"
+        X-Auth-User-Email: "{{ print .Extra.identity.traits.email }}"
+        X-Auth-Session-Id: "{{ print .Extra.id }}"
+
+errors:
+  fallback:
+    - json
+  handlers:
+    json:
+      enabled: true
+      config:
+        verbose: false
+
+log:
+  level: info
+  format: text
+  leak_sensitive_values: false

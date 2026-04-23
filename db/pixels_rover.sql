@@ -15,9 +15,9 @@ SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0;
 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
 
 -- -----------------------------------------------------
--- Logical database: pixels_auth (owned by auth-service; tables managed by Flyway)
+-- Logical database: pixels_kratos (owned by Ory Kratos; tables managed by Kratos migrations)
 -- -----------------------------------------------------
-CREATE SCHEMA IF NOT EXISTS `pixels_auth` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+CREATE SCHEMA IF NOT EXISTS `pixels_kratos` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- -----------------------------------------------------
 -- Logical database: pixels_analysis (owned by assistant-service; tables managed by Alembic)
@@ -27,7 +27,7 @@ CREATE SCHEMA IF NOT EXISTS `pixels_analysis` DEFAULT CHARACTER SET utf8mb4 COLL
 -- -----------------------------------------------------
 -- Application user grants
 -- -----------------------------------------------------
-GRANT ALL PRIVILEGES ON `pixels_auth`.* TO 'pixels'@'%';
+GRANT ALL PRIVILEGES ON `pixels_kratos`.* TO 'pixels'@'%';
 GRANT ALL PRIVILEGES ON `pixels_analysis`.* TO 'pixels'@'%';
 
 SET SQL_MODE=@OLD_SQL_MODE;

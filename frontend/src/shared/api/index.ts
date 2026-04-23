@@ -3,7 +3,7 @@
 // ════════════════════════════════════════
 //
 // 这一层只放"任何 feature 都会复用的 HTTP/SSE 基础能力"：
-//   - axios 实例 + envelope 解包 + 401 重放队列（client.ts）
+//   - axios 实例 + envelope 解包 + 401 登录跳转（client.ts）
 //   - 通用 SSE 客户端（sse.ts）
 //   - `ApiError` 结构化异常（apiError.ts）
 //   - HTTP / SSE / envelope 的类型 re-export
@@ -25,7 +25,7 @@
 export { openSSEStream } from './sse';
 
 // HTTP client (for advanced usage)
-export { httpClient, refreshAccessToken, buildCommonHeaders } from './client';
+export { httpClient, buildCommonHeaders } from './client';
 export { get, post, put, patch, del, postVoid, putVoid } from './client';
 
 // Structured error class -- always thrown by the client / SSE layer on any

@@ -29,7 +29,7 @@ from app.schemas.conversation import (
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
 
-async def _get_owned_thread(db: AsyncSession, thread_id: str, user_id: int) -> ConversationThread:
+async def _get_owned_thread(db: AsyncSession, thread_id: str, user_id: str) -> ConversationThread:
     result = await db.execute(
         select(ConversationThread).where(
             ConversationThread.id == thread_id,

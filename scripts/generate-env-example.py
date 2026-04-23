@@ -63,11 +63,10 @@ HEADER = """\
 #   3. Commit both files in the same PR.
 #
 # Layout:
-#   * Required block — one banner per service (gateway / auth-service /
-#     assistant-service). Each var has its description, constraints,
-#     and assignment line; `sensitive: true` entries render as `KEY=`
-#     (empty) — you MUST fill them in your local .env before
-#     `docker compose up`.
+#   * Required block — one banner per service / deployment component. Each
+#     var has its description, constraints, and assignment line;
+#     `sensitive: true` entries render as `KEY=` (empty) — you MUST fill
+#     them in your local .env before `docker compose up`.
 #   * Optional block (footer) — commonly-tuned knobs that docker-compose.yml
 #     already carries sensible defaults for. Listed here for operator
 #     convenience; safe to leave unset.
@@ -103,21 +102,8 @@ FOOTER = """\
 # PIXELS_HOST=host.docker.internal
 # PIXELS_PORT=18890
 
-# Cookie behaviour. COOKIE_SECURE=true REQUIRES HTTPS at the edge.
-# COOKIE_SECURE=false
-# COOKIE_SAME_SITE=Lax
-# COOKIE_DOMAIN=
-
 # Debug toggles.
 # DEBUG=false
-
-# docker-compose.dev.yml override ONLY — ignored by the production
-# compose file. The dev override runs a throw-away jwt-keygen container
-# that provisions RS256 keys for <JWT_KID>-{private,public}.pem so the
-# first-time local boot doesn't require manual openssl steps. For
-# production, use the bind-mounted ./keys/jwt/ directory instead (see
-# docs/runbooks/jwt-key-provisioning.md).
-# JWT_KID=dev-rsa-1
 """
 
 

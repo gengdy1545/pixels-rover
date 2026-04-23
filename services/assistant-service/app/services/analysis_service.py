@@ -54,7 +54,7 @@ class AnalysisService:
     async def run_analysis_stream(
         self,
         question: str,
-        user_id: int,
+        user_id: str,
         envelope: TaskEnvelope,
         db: AsyncSession,
         thread_id: str,

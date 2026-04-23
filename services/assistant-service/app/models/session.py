@@ -9,7 +9,7 @@ class AnalysisSession(Base):
     __tablename__ = "analysis_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[str] = mapped_column(String(128))
     thread_id: Mapped[str] = mapped_column(String(36), index=True)
     # Auth session id at the time this analysis was submitted (gateway
     # header X-Auth-Session-Id; see backend.md §3.1 / §7.2 and todolist

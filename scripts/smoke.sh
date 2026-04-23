@@ -22,22 +22,20 @@
 #   2. readiness         — poll /gateway/ready with backoff + per-iteration
 #                          `docker compose ps` watchdog that fails-fast on any
 #                          container exit
-#   3. schema existence  — SHOW DATABASES assertion for pixels_auth +
+#   3. schema existence  — SHOW DATABASES assertion for pixels_kratos +
 #                          pixels_analysis (bottom-line check; primary defence
-#                          is the B1+B2 Alembic/Flyway migrators exiting 1)
+#                          is the Kratos/Alembic migrators exiting 1)
 #   4. contracts         — (a) /api/internal/* + /gateway/internal/* externally
 #                              rejected (404; gateway declares no such routes)
-#                          (b) /api/v1/<svc>/openapi.json reachable + parseable
-#                              + the GATEWAY_* / INTERNAL_* errorCode enum it
-#                              advertises is a subset of gateway/error-codes.json
+#                          (b) legacy /api/v1/auth/* returns 410 after the
+#                              one-shot Ory cutover
 #                          (c) legacy /api/v1/chat|query|metadata 404
 #                          (d) gateway global X-Request-Id injection on both
 #                              happy-path and 404 responses
-#   5. auth chain        — register a random user, login, call a CSRF-exempt
-#                          protected route, verify 200 + envelope shape. This
-#                          is the only stage that exercises gateway-auth ->
-#                          auth-service /api/internal/auth/introspect ->
-#                          gateway X-Auth-* injection in one shot.
+#   5. auth boundary     — unauthenticated protected API requests are rejected
+#                          by Oathkeeper, forged X-Auth-* headers do not bypass
+#                          auth, and unsafe methods are stopped by the thin
+#                          CSRF policy adapter before Oathkeeper.
 #
 # Consumption of config/required-env.yaml (§14 SSOT):
 #   The script sources the SSOT indirectly — it relies on the three startup-
@@ -112,7 +110,7 @@ cleanup() {
     stage "FAILURE — dumping compose state + per-service logs (last 50 lines)"
     docker compose "${SMOKE_COMPOSE_FILES[@]}" ps || true
     local svc
-    for svc in mysql auth-service assistant-service gateway; do
+    for svc in mysql kratos-migrate kratos oathkeeper ory-policy-adapter ory-ui assistant-service frontend gateway; do
       echo
       echo "$C_YELLOW--- $svc ---$C_RESET" >&2
       docker compose "${SMOKE_COMPOSE_FILES[@]}" logs --tail=50 "$svc" || true
@@ -164,7 +162,7 @@ if (( SMOKE_SKIP_BOOT == 1 )); then
   stage "Stage 1: compose up (SKIPPED via SMOKE_SKIP_BOOT=1 — expecting an already-running stack)"
 else
   stage "Stage 1: compose up (dev overlay, GATEWAY_PORT=$SMOKE_GATEWAY_PORT)"
-  # Tear down any previous state so jwt-keygen re-runs from a clean volume.
+  # Tear down any previous state so one-shot migrators rerun from a clean volume.
   docker compose "${SMOKE_COMPOSE_FILES[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
 
   build_args=()
@@ -201,7 +199,7 @@ assert_containers_running() {
   local bad
   bad="$(printf '%s' "$normalised" | jq -r '
     .[]
-    | select(.Service != "jwt-keygen")
+    | select(.Service != "kratos-migrate")
     | select((.State // "") != "running")
     | "\(.Service)=\(.State // "?")"
   ')"
@@ -254,9 +252,9 @@ schema_probe() {
     die "expected database '$db' missing (migrator should have created it)"
   fi
 }
-schema_probe pixels_auth
+schema_probe pixels_kratos
 schema_probe pixels_analysis
-ok "pixels_auth + pixels_analysis both present"
+ok "pixels_kratos + pixels_analysis both present"
 
 # ---------------------------------------------------------------------------
 # Stage 4 — contract assertions.
@@ -300,64 +298,17 @@ for hidden in \
   ok "$hidden externally rejected with 404"
 done
 
-# -- 4b: OpenAPI reachability + parse + GATEWAY_*/INTERNAL_* errorCode subset --
-errcodes_json="$(cat gateway/error-codes.json)"
-for spec_path in /api/v1/auth/openapi.json /api/v1/analysis/openapi.json; do
-  body="$(smoke_request GET "$spec_path")"
-  if [[ "$SMOKE_LAST_STATUS" != "200" ]]; then
-    die "OpenAPI spec $spec_path not reachable (status=$SMOKE_LAST_STATUS)"
+# -- 4b: legacy auth API is explicitly retired --
+for retired in \
+    /api/v1/auth/login \
+    /api/v1/auth/register \
+    /api/v1/auth/refresh \
+    /api/v1/auth/captcha; do
+  body="$(smoke_request POST "$retired")"
+  if [[ "$SMOKE_LAST_STATUS" != "410" ]]; then
+    die "expected 410 for retired $retired (got $SMOKE_LAST_STATUS body=$body)"
   fi
-  if ! printf '%s' "$body" | jq -e '.openapi' >/dev/null 2>&1; then
-    die "OpenAPI spec $spec_path returned non-JSON or missing .openapi field"
-  fi
-
-  # Infra error-code subset check (C4 assertion tail). Extract every string
-  # that looks like a GATEWAY_* or INTERNAL_* enum value anywhere inside the
-  # spec's errorCode enums, then assert ⊆ error-codes.json keys.
-  spec_tmp="$(mktemp)"
-  printf '%s' "$body" >"$spec_tmp"
-  subset_report="$(SMOKE_SPEC_FILE="$spec_tmp" SMOKE_ERRCODES_JSON="$errcodes_json" \
-    python3 - <<'PY'
-import json, os
-registry = json.loads(os.environ["SMOKE_ERRCODES_JSON"])["codes"]
-with open(os.environ["SMOKE_SPEC_FILE"], "r", encoding="utf-8") as fh:
-    spec = json.load(fh)
-
-def walk(node):
-    if isinstance(node, dict):
-        if "errorCode" in node and isinstance(node["errorCode"], dict):
-            enum = node["errorCode"].get("enum")
-            if isinstance(enum, list):
-                for v in enum:
-                    if isinstance(v, str):
-                        yield v
-        for v in node.values():
-            yield from walk(v)
-    elif isinstance(node, list):
-        for v in node:
-            yield from walk(v)
-
-found = set(walk(spec))
-infra = {v for v in found if v.startswith("GATEWAY_") or v.startswith("INTERNAL_")}
-missing = sorted(infra - set(registry.keys()))
-if missing:
-    print("MISSING: " + ",".join(missing))
-else:
-    print("OK:" + str(len(infra)))
-PY
-)"
-  rm -f "$spec_tmp"
-  case "$subset_report" in
-    OK:*)
-      ok "$spec_path: ${subset_report#OK:} GATEWAY_*/INTERNAL_* enum values, all ⊆ error-codes.json"
-      ;;
-    MISSING:*)
-      die "$spec_path advertises errorCode values not in gateway/error-codes.json: ${subset_report#MISSING: }"
-      ;;
-    *)
-      die "internal: unexpected subset-report output for $spec_path: $subset_report"
-      ;;
-  esac
+  ok "$retired retired with 410"
 done
 
 # -- 4c: legacy route sunset --
@@ -384,79 +335,56 @@ rid_404="$(smoke_header X-Request-Id)"
 ok "404 response carries X-Request-Id=$rid_404"
 
 # ---------------------------------------------------------------------------
-# Stage 5 — end-to-end auth chain.
+# Stage 5 — auth boundary.
 # ---------------------------------------------------------------------------
-stage "Stage 5: end-to-end auth chain (register -> login -> gateway-auth -> introspect -> X-Auth-*)"
+stage "Stage 5: auth boundary (Oathkeeper + CSRF policy adapter)"
 
-rand_suffix="$(tr -dc 'a-z0-9' </dev/urandom | head -c 8 || true)"
-smoke_user="smoke_${rand_suffix}"
-# 12-character password: letters + digits. The default validation in
-# auth-service's RegisterRequest accepts this.
-smoke_pass="SmokePass_${rand_suffix}"
-
-register_payload=$(cat <<JSON
-{"username":"$smoke_user","password":"$smoke_pass","nickname":"Smoke $rand_suffix","email":"$smoke_user@smoke.invalid"}
-JSON
-)
-body="$(smoke_request POST /api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  --data-raw "$register_payload")"
-if [[ "$SMOKE_LAST_STATUS" != "200" ]]; then
-  die "register failed (status=$SMOKE_LAST_STATUS body=$body)"
-fi
-ok "register succeeded for user $smoke_user"
-
-login_payload=$(cat <<JSON
-{"username":"$smoke_user","password":"$smoke_pass"}
-JSON
-)
-SMOKE_COOKIE_JAR="$(mktemp)"
 body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
-  -X POST \
-  -H 'Content-Type: application/json' \
-  -c "$SMOKE_COOKIE_JAR" \
-  --data-raw "$login_payload" \
-  --max-time 15 \
-  "$SMOKE_GATEWAY_URL/api/v1/auth/login")"
-login_status="${body##*__STATUS__}"
-login_body="${body%__STATUS__*}"
-if [[ "$login_status" != "200" ]]; then
-  die "login failed (status=$login_status body=$login_body)"
-fi
-ok "login succeeded; cookies persisted to jar"
-
-# Pull XSRF-TOKEN out of the jar so the CSRF double-submit header is ready
-# if a later stage wants to call a mutating protected endpoint.
-xsrf_token="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$SMOKE_COOKIE_JAR" | tail -n1)"
-[[ -n "$xsrf_token" ]] || warn "login did not set XSRF-TOKEN cookie — CSRF defence wiring may have regressed"
-
-# Protected GET: the gateway-auth plugin MUST (1) read the access_token cookie,
-# (2) call /api/internal/auth/introspect, (3) inject X-Auth-User-Id into the
-# proxied request, and (4) assistant-service's IdentityHeaderValidationFilter
-# MUST accept the injected header and return a real response envelope.
-#
-# /api/v1/analysis/backends is the cheapest protected route in the assistant
-# namespace — it returns the list of configured analysis backends and never
-# talks to the LLM, so it's appropriate for a contract-layer probe.
-body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
-  -b "$SMOKE_COOKIE_JAR" \
-  ${xsrf_token:+-H "X-XSRF-TOKEN: $xsrf_token"} \
   --max-time 15 \
   "$SMOKE_GATEWAY_URL/api/v1/analysis/backends")"
 protected_status="${body##*__STATUS__}"
 protected_body="${body%__STATUS__*}"
-
-if [[ "$protected_status" != "200" ]]; then
-  die "protected GET /api/v1/analysis/backends failed (status=$protected_status body=$protected_body)"
+if [[ "$protected_status" != "401" ]]; then
+  die "unauthenticated protected GET should be 401 (status=$protected_status body=$protected_body)"
 fi
+ok "unauthenticated protected GET rejected with 401"
 
-# Envelope shape: { code:200, data:..., ... }. We accept any non-error shape
-# as long as `code` equals the HTTP status (backend.md §6.2).
-envelope_code="$(printf '%s' "$protected_body" | jq -r '.code // empty' 2>/dev/null || true)"
-if [[ "$envelope_code" != "200" ]]; then
-  die "protected GET envelope missing .code==200 (got: $envelope_code; body=$protected_body)"
+body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
+  -H 'X-Auth-User-Id: forged-user' \
+  -H 'X-Auth-User-Email: forged@example.invalid' \
+  --max-time 15 \
+  "$SMOKE_GATEWAY_URL/api/v1/analysis/backends")"
+forged_status="${body##*__STATUS__}"
+if [[ "$forged_status" != "401" ]]; then
+  die "forged X-Auth-* protected GET should still be 401 (status=$forged_status)"
 fi
-ok "protected GET returned 200 + envelope .code=200 — introspect + X-Auth-* chain confirmed"
+ok "forged X-Auth-* headers do not bypass Oathkeeper"
+
+body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"threadId":"missing","question":"hello"}' \
+  --max-time 15 \
+  "$SMOKE_GATEWAY_URL/api/v1/analysis")"
+csrf_status="${body##*__STATUS__}"
+if [[ "$csrf_status" != "403" ]]; then
+  die "unsafe protected POST without CSRF should be 403 (status=$csrf_status)"
+fi
+ok "unsafe protected POST without CSRF rejected with 403"
+
+body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: XSRF-TOKEN=smoke-xsrf' \
+  -H 'X-XSRF-TOKEN: smoke-xsrf' \
+  --data-raw '{"threadId":"missing","question":"hello"}' \
+  --max-time 15 \
+  "$SMOKE_GATEWAY_URL/api/v1/analysis")"
+post_auth_status="${body##*__STATUS__}"
+if [[ "$post_auth_status" != "401" ]]; then
+  die "unsafe protected POST with CSRF but without Kratos session should be 401 (status=$post_auth_status)"
+fi
+ok "CSRF-valid but unauthenticated unsafe POST reaches Oathkeeper and returns 401"
 
 # ---------------------------------------------------------------------------
 # Success.

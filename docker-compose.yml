@@ -1,81 +1,17 @@
-# Pixels Rover — Docker Compose (production-shaped baseline)
+# Pixels Rover — Docker Compose baseline
 #
-# Usage:
-#   docker compose up              Start all services
-#   docker compose up -d           Start in background
-#   docker compose up mysql        Start MySQL only
-#   docker compose down            Stop all services
-#   docker compose logs -f         Follow logs
-#
-# LOCAL DEVELOPMENT OVERRIDE:
-#   docker-compose.dev.yml layers the dev-convenience machinery back on
-#   top of this file (jwt-keygen init container, throw-away named
-#   volume, optional CORS relaxation). Use:
-#
-#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-#
-#   Production deployments MUST NOT include docker-compose.dev.yml —
-#   the bind-mounted ./keys/jwt/ directory is the canonical key source
-#   of truth (B5 / docs/runbooks/jwt-key-provisioning.md). Running the
-#   dev override in production would silently regenerate RS256 keys on
-#   every container rebuild and invalidate every active session.
-#
-# Prerequisites (production path):
-#   1. Copy .env.example to .env and fill EVERY value marked REQUIRED.
-#   2. Provision RS256 keypair on host:
-#        mkdir -p keys/jwt
-#        ./scripts/generate-jwt-rsa-keys.sh keys/jwt "$JWT_KID"
-#      (or equivalent openssl commands; see runbook). The
-#      auth-service container bind-mounts ./keys/jwt/ read-only.
-#   3. Run: docker compose up
-#
-# Architecture:
-#   All traffic enters through the API Gateway (port 80/443).
-#   APISIX (Standalone YAML mode, no etcd / no Admin API) handles
-#   routing, auth introspection, CSRF enforcement, identity header
-#   injection, and audit-friendly request IDs.
-#   Backend services are not directly exposed.
-#
-# Startup ordering (see docs/development/backend.md §7 / §12.2):
-#   * auth-service / assistant-service depend on mysql with
-#     `condition: service_started` (NOT service_healthy). MySQL being
-#     past its own healthcheck does NOT imply application schemas are
-#     ready — that is owned by Flyway (auth-service) and Alembic
-#     (assistant-service), which run `migrate` / `upgrade head`
-#     synchronously BEFORE their respective HTTP ports open. If
-#     migrations fail, the service container exits 1 and compose
-#     surfaces the failure; there is no "healthy but uninitialised"
-#     intermediate state.
-#   * gateway depends on services with `condition: service_started`
-#     too. gateway's own /gateway/live is pure-local (no upstream), so
-#     it can return 200 before any upstream is ready. System-level
-#     readiness is observable via /gateway/ready (aggregates each
-#     upstream's /internal/ready) and is the signal external smoke /
-#     load-balancer drain should consume.
-#
-# Env var hard validation (§14 / backend.md §13.1):
-#   Every service bind-mounts ./config/required-env.yaml read-only
-#   into its container and invokes its own RequiredEnvValidator at
-#   boot. A missing / placeholder secret fails the container with
-#   FATAL-tagged stderr lines and a non-zero exit; compose surfaces
-#   this as a restart loop so operators see the failure loudly.
-#
-# Ports (external):
-#   - 80    API Gateway (unified entry point)
-#   - 3306  MySQL (optional, for direct DB access)
+# All external traffic enters through APISIX on GATEWAY_PORT. APISIX keeps
+# routing, static assets, CORS/CSP/security headers, and /gateway/live|ready.
+# Identity is owned by Ory Kratos; protected API access is mediated by the
+# CSRF policy adapter plus Ory Oathkeeper before requests reach backend services.
 
 services:
-  # ---------- MySQL ----------
   mysql:
     image: mysql:8.0
     container_name: pixels-rover-mysql
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      # MYSQL_DATABASE intentionally NOT set -- pixels_auth and
-      # pixels_analysis are both created by db/pixels_rover.sql via
-      # /docker-entrypoint-initdb.d/ (first volume init only).
-      # See docs/development/backend.md §12.1.
       MYSQL_USER: pixels
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
     ports:
@@ -90,69 +26,92 @@ services:
       start_period: 30s
       retries: 5
 
-  # ---------- Auth Service (Java / Spring Boot) ----------
-  auth-service:
-    build:
-      context: ./services/auth-service
-      dockerfile: Dockerfile
-    container_name: pixels-rover-auth
-    restart: unless-stopped
+  kratos-migrate:
+    image: ${KRATOS_IMAGE:-oryd/kratos:v26.2.0}
+    container_name: pixels-rover-kratos-migrate
     depends_on:
-      # service_started, NOT service_healthy: MySQL being healthy does
-      # not mean pixels_auth is ready for app-table DDL. Flyway does
-      # the real readiness work on startup (backend.md §12.2).
       mysql:
         condition: service_started
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pixels_auth
-      SPRING_DATASOURCE_USERNAME: pixels
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-password}
-      # §14: all security-sensitive JWT + introspection env vars have
-      # NO :- default fallbacks here. If .env omits them, the string
-      # interpolation resolves to empty, RequiredEnvValidator rejects
-      # the empty value at boot with a FATAL log line, and the
-      # container exits. docker-compose.dev.yml override supplies
-      # test-grade defaults for local dev.
-      JWT_ALGORITHM: ${JWT_ALGORITHM}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_ACTIVE_KID: ${JWT_ACTIVE_KID}
-      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH}
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
-      # Multi-kid verification during rotation: enumerate auth-service's local
-      # key directory (every `<kid>-public.pem`). There is no merged JWKS artifact
-      # any more -- the former external /api/v1/auth/jwks surface was retired
-      # (see docs/design/jwt-rotation.md §1.2).
-      JWT_PUBLIC_KEYS_DIRECTORY: /jwt-keys
-      SERVER_PORT: 8081
-      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
-    expose:
-      - "8081"
+      DSN: "mysql://pixels:${MYSQL_PASSWORD:-password}@tcp(mysql:3306)/pixels_kratos?parseTime=true&multiStatements=true"
+      KRATOS_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-}
+      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-}
     volumes:
-      # §14 / B5: JWT key directory is bind-mounted from host. Host
-      # owns provisioning (mkdir -p keys/jwt && generate script). This
-      # replaces the former `jwt-keys` named volume + jwt-keygen init
-      # container, which silently regenerated keys on image rebuild
-      # and invalidated every session. docker-compose.dev.yml puts
-      # that dev-convenience back for local loops.
-      - ./keys/jwt:/jwt-keys:ro
-      # §14 SSOT bind-mount — RequiredEnvValidator reads
-      # /app/config/required-env.yaml at boot. Missing bind-mount
-      # causes validator to exit 2 with a clear message.
-      - ./config/required-env.yaml:/app/config/required-env.yaml:ro
-    healthcheck:
-      # /health is process-only liveness (backend.md §7.1). Do NOT
-      # switch this to /internal/ready -- that would trigger container
-      # restarts on MySQL blips, which restarting the JVM cannot fix.
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 60s
-      retries: 3
+      - ./ory/kratos:/etc/config/kratos:ro
+    command: ["migrate", "sql", "-e", "--yes", "--config", "/etc/config/kratos/kratos.yml"]
+    restart: "no"
 
-  # ---------- Assistant Service (Python / FastAPI) ----------
+  kratos:
+    image: ${KRATOS_IMAGE:-oryd/kratos:v26.2.0}
+    container_name: pixels-rover-kratos
+    restart: unless-stopped
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+    environment:
+      DSN: "mysql://pixels:${MYSQL_PASSWORD:-password}@tcp(mysql:3306)/pixels_kratos?parseTime=true&multiStatements=true"
+      KRATOS_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      KRATOS_SECRET_DEFAULT: ${KRATOS_SECRET_DEFAULT:-}
+      KRATOS_SECRET_COOKIE: ${KRATOS_SECRET_COOKIE:-}
+    expose:
+      - "4433"
+      - "4434"
+    volumes:
+      - ./ory/kratos:/etc/config/kratos:ro
+    command: ["serve", "--dev", "--config", "/etc/config/kratos/kratos.yml"]
+
+  oathkeeper:
+    image: ${OATHKEEPER_IMAGE:-oryd/oathkeeper:v26.2.0}
+    container_name: pixels-rover-oathkeeper
+    restart: unless-stopped
+    depends_on:
+      kratos:
+        condition: service_started
+      assistant-service:
+        condition: service_started
+    expose:
+      - "4455"
+      - "4456"
+    volumes:
+      - ./ory/oathkeeper:/etc/config/oathkeeper:ro
+    command: ["serve", "--config", "/etc/config/oathkeeper/oathkeeper.yml"]
+
+  ory-policy-adapter:
+    build:
+      context: ./services/ory-policy-adapter
+      dockerfile: Dockerfile
+    container_name: pixels-rover-ory-policy-adapter
+    restart: unless-stopped
+    depends_on:
+      oathkeeper:
+        condition: service_started
+    environment:
+      OATHKEEPER_PROXY_HOST: oathkeeper
+      OATHKEEPER_PROXY_PORT: 4455
+      PORT: 8080
+    expose:
+      - "8080"
+
+  ory-ui:
+    image: ${ORY_UI_IMAGE:-oryd/kratos-selfservice-ui-node:v26.2.0}
+    container_name: pixels-rover-ory-ui
+    restart: unless-stopped
+    depends_on:
+      kratos:
+        condition: service_started
+    environment:
+      PORT: 4455
+      BASE_PATH: /ui
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_BROWSER_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-}
+      CSRF_COOKIE_NAME: pixels_rover_ui_csrf
+      CSRF_COOKIE_SECRET: ${ORY_UI_COOKIE_SECRET:-}
+      DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES: ${ORY_UI_DISABLE_SECURE_CSRF_COOKIES:-true}
+    expose:
+      - "4455"
+
   assistant-service:
     build:
       context: ./services/assistant-service
@@ -160,16 +119,13 @@ services:
     container_name: pixels-rover-assistant
     restart: unless-stopped
     depends_on:
-      # service_started, NOT service_healthy (see auth-service above).
-      # Alembic `upgrade head` runs synchronously from entrypoint.sh
-      # before uvicorn binds the port (backend.md §12.2).
       mysql:
         condition: service_started
     environment:
       ROVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      ROVER_LLM_API_KEY: ${LLM_API_KEY}
+      ROVER_LLM_API_KEY: ${ROVER_LLM_API_KEY:-}
       ROVER_LLM_API_BASE: ${LLM_API_BASE:-}
-      ROVER_DATABASE_URL: mysql+aiomysql://pixels:${MYSQL_PASSWORD:-password}@mysql:3306/pixels_analysis
+      ROVER_DATABASE_URL: ${ROVER_DATABASE_URL:-}
       ROVER_DUCKDB_PATH: ":memory:"
       ROVER_PIXELS_HOST: ${PIXELS_HOST:-host.docker.internal}
       ROVER_PIXELS_PORT: ${PIXELS_PORT:-18890}
@@ -185,7 +141,6 @@ services:
       start_period: 30s
       retries: 3
 
-  # ---------- Frontend (nginx — static assets only) ----------
   frontend:
     build:
       context: ./frontend
@@ -201,7 +156,6 @@ services:
       start_period: 10s
       retries: 3
 
-  # ---------- API Gateway (APISIX Standalone YAML — unified entry point) ----------
   gateway:
     build:
       context: ./gateway
@@ -209,14 +163,13 @@ services:
     container_name: pixels-rover-gateway
     restart: unless-stopped
     depends_on:
-      # All dependencies use service_started. Reasons:
-      # - gateway's /gateway/live is pure local (no upstream); it comes
-      #   up independently of upstream health.
-      # - waiting on service_healthy of upstreams would create a
-      #   cold-start deadlock if any upstream's healthcheck itself
-      #   takes time to settle; the right signal for "system ready
-      #   for traffic" is /gateway/ready, polled by external smoke.
-      auth-service:
+      kratos:
+        condition: service_started
+      oathkeeper:
+        condition: service_started
+      ory-policy-adapter:
+        condition: service_started
+      ory-ui:
         condition: service_started
       assistant-service:
         condition: service_started
@@ -225,35 +178,12 @@ services:
     ports:
       - "${GATEWAY_PORT:-80}:9080"
     environment:
-      # §14: every value is forwarded WITHOUT a :- default so that
-      # validate-required-env.py (invoked from entrypoint.sh) sees the
-      # true empty-or-missing state and fails loudly. Placeholder
-      # strings ("change-me" etc.) are caught by the same validator.
-      INTERNAL_INTROSPECTION_SECRET: ${INTERNAL_INTROSPECTION_SECRET}
-      INTERNAL_GATEWAY_ADMIN_SECRET: ${INTERNAL_GATEWAY_ADMIN_SECRET}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
-      GATEWAY_CSP_PROFILE: ${GATEWAY_CSP_PROFILE}
-      GATEWAY_OPENAPI_PUBLIC: ${GATEWAY_OPENAPI_PUBLIC}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      GATEWAY_CSP_PROFILE: ${GATEWAY_CSP_PROFILE:-}
     volumes:
-      # Bind-mount the apisix.yaml *template* plus the fragments
-      # directory so iterating on routes (including OpenAPI profile
-      # fragments) is just `docker compose restart gateway` — no
-      # image rebuild. The same files are also COPY'd into the image
-      # as a fallback for deployments where compose isn't the runtime.
-      # entrypoint.sh renders apisix.yaml.template + selected fragment
-      # → /usr/local/apisix/conf/apisix.yaml at boot (see gateway.md §6.7).
       - ./gateway/apisix.yaml.template:/usr/local/apisix/conf/apisix.yaml.template:ro
-      - ./gateway/fragments:/usr/local/apisix/conf/fragments:ro
-      # §14 SSOT bind-mount. The gateway image does NOT bake this
-      # YAML (unlike error-codes.json) — keeping it external forces
-      # ops to bind-mount the canonical contract, so "image says
-      # OK but your .env is stale" never happens silently.
       - ./config/required-env.yaml:/usr/local/apisix/conf/required-env.yaml:ro
     healthcheck:
-      # /gateway/live is pure-local liveness (gateway.md §4.2). MUST
-      # NOT be /gateway/ready (which is system readiness; failing it
-      # here would restart the gateway on upstream outage, turning a
-      # degraded-but-serving state into a hard outage).
       test: ["CMD", "curl", "-fsS", "http://localhost:9080/gateway/live"]
       interval: 15s
       timeout: 5s
@@ -261,11 +191,5 @@ services:
       retries: 10
 
 volumes:
-  # etcd-data volume was removed with the Standalone YAML migration
-  # (see docs/development/gateway.md §1.2). Don't re-introduce it.
-  # jwt-keys named volume was removed with the B5 migration
-  # (see docs/runbooks/jwt-key-provisioning.md). Production uses a
-  # bind-mount of ./keys/jwt; dev uses docker-compose.dev.yml override
-  # to re-introduce the jwt-keygen init container + named volume.
   mysql-data:
     driver: local

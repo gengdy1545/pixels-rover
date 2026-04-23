@@ -5,7 +5,8 @@ sole issuer of the ``X-Auth-*`` identity headers (see ``backend.md §3.1 / §3.3
 Missing or malformed headers here therefore indicate an access-plane fault
 (bypassed gateway, mis-wired route), not a user-facing auth error — hence
 ``500 + details.errorCode="GATEWAY_IDENTITY_MISSING"`` rather than 401/403,
-mirroring ``auth-service``'s ``IdentityHeaderValidationFilter``.
+The user id is an opaque Kratos identity id and must not be parsed as an
+integer by business services.
 """
 
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ SESSION_ID_HEADER = "X-Auth-Session-Id"
 
 @dataclass
 class AuthenticatedUser:
-    user_id: int
+    user_id: str
     email: str
     session_id: str | None = None
 
@@ -45,9 +46,8 @@ def get_current_user(request: Request) -> AuthenticatedUser:
     if not user_id_raw or not email or not email.strip():
         raise _gateway_identity_missing()
 
-    try:
-        user_id = int(user_id_raw)
-    except (TypeError, ValueError) as exc:
-        raise _gateway_identity_missing() from exc
+    user_id = user_id_raw.strip()
+    if not user_id:
+        raise _gateway_identity_missing()
 
-    return AuthenticatedUser(user_id=user_id, email=email, session_id=session_id or None)
+    return AuthenticatedUser(user_id=user_id, email=email.strip(), session_id=session_id or None)
