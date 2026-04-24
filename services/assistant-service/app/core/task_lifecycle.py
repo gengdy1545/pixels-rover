@@ -91,23 +91,25 @@ async def _reap_zombie_sessions() -> int:
         return count
 
 
-async def start_periodic_reaper() -> asyncio.Task:
-    """Start the background periodic zombie reaper task.
+async def run_periodic_reaper() -> None:
+    """Run the periodic zombie reaper forever.
 
-    Returns the asyncio.Task so it can be cancelled on shutdown.
+    This coroutine is shared by the API lifespan and the standalone
+    ``python -m app.workers.reaper`` entrypoint.
     """
+    while True:
+        try:
+            await asyncio.sleep(REAPER_INTERVAL_SEC)
+            await _reap_zombie_sessions()
+        except asyncio.CancelledError:
+            logger.info("Periodic reaper shutting down")
+            break
+        except Exception:
+            logger.exception("Periodic reaper encountered an error")
 
-    async def _loop():
-        while True:
-            try:
-                await asyncio.sleep(REAPER_INTERVAL_SEC)
-                await _reap_zombie_sessions()
-            except asyncio.CancelledError:
-                logger.info("Periodic reaper shutting down")
-                break
-            except Exception:
-                logger.exception("Periodic reaper encountered an error")
 
-    task = asyncio.create_task(_loop(), name="zombie-reaper")
+async def start_periodic_reaper() -> asyncio.Task:
+    """Start the background periodic zombie reaper task."""
+    task = asyncio.create_task(run_periodic_reaper(), name="zombie-reaper")
     logger.info("Periodic zombie reaper started (interval=%ds)", REAPER_INTERVAL_SEC)
     return task

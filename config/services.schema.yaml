@@ -1,0 +1,99 @@
+# Pixels Rover — JSON-Schema for config/services.yaml (backend service registry SSOT).
+#
+# Consumed by scripts/check-contracts.py (§Task 1) to assert every
+# entry in services.yaml is structurally valid BEFORE any cross-layer
+# coherence check fires. Mirrors the hand-written schema style of
+# config/required-env.schema.yaml — same level of detail, same
+# "fail fast with a human-legible message" discipline.
+#
+# Schema draft target: draft-07 (matches required-env.schema.yaml;
+# PyYAML + jsonschema are the only runtime deps).
+#
+# NOTE on auth_mode / timeout_class:
+#   * `auth_mode` is declared as an OPEN enum today (cookie_session,
+#     public, api_key, jwt_bearer). Only `cookie_session` and `public`
+#     are wired end-to-end in the generator. `api_key` and `jwt_bearer`
+#     exist as contract slots — the generator raises NotImplementedError
+#     when it encounters them, not because the schema forbids them.
+#     This is deliberate: adding a future client class is a schema-open
+#     change followed by a generator-branch implementation, NOT a
+#     schema migration (§Task 5).
+#   * `timeout_class` is a CLOSED enum of the three traffic shapes
+#     APISIX currently knows how to tune (standard REST, long-poll,
+#     SSE). Extending it requires a matching generator branch and is
+#     therefore a schema change by design (§Task 7).
+
+"$schema": "http://json-schema.org/draft-07/schema#"
+title: "Pixels Rover backend service registry"
+type: object
+additionalProperties: false
+required: [services]
+properties:
+  services:
+    type: array
+    minItems: 1
+    items:
+      "$ref": "#/definitions/service"
+
+definitions:
+  service:
+    type: object
+    additionalProperties: false
+    required:
+      - name
+      - path_prefix
+      - upstream_host
+      - upstream_port
+      - auth_mode
+      - timeout_class
+    properties:
+      name:
+        description: >-
+          Logical service identity. Lowercase letters, digits and
+          hyphens only; MUST be unique across the file. Used to derive
+          APISIX route-ids and Oathkeeper rule-ids.
+        type: string
+        pattern: "^[a-z][a-z0-9-]*$"
+        minLength: 1
+        maxLength: 64
+      path_prefix:
+        description: >-
+          Gateway-visible URL prefix. MUST start with `/api/v1/` (so it
+          falls under the Oathkeeper-protected edge) and MUST NOT
+          contain wildcards — the generator appends the APISIX `/*`
+          suffix and Oathkeeper `<.*>` tail itself. MUST be unique
+          across the file.
+        type: string
+        pattern: "^/api/v1/[a-z][a-z0-9/-]*$"
+      upstream_host:
+        description: >-
+          Docker-compose service name (also its DNS name inside the
+          compose network). Both APISIX upstreams and Oathkeeper
+          access-rule `upstream.url` fields are generated from this.
+        type: string
+        pattern: "^[a-z][a-z0-9.-]*$"
+      upstream_port:
+        description: >-
+          TCP port the service binds inside the compose network.
+        type: integer
+        minimum: 1
+        maximum: 65535
+      auth_mode:
+        description: >-
+          Authenticator chain applied BEFORE the request reaches the
+          backend. `cookie_session` delegates to Ory Kratos' session
+          cookie (today's only live mode); `public` bypasses authn
+          entirely (rule emits `handler: noop`); `api_key` and
+          `jwt_bearer` are reserved contract slots (§Task 5) — the
+          generator raises NotImplementedError if it sees them.
+        type: string
+        enum: [cookie_session, public, api_key, jwt_bearer]
+      timeout_class:
+        description: >-
+          Traffic-shape selector. `standard` = tight REST timeouts;
+          `long_poll` = extended read timeout; `sse` = extended read
+          timeout AND proxy-buffering off. Concrete numeric values
+          live in the generator so they are co-located with the
+          rendered APISIX route they affect (§Task 7).
+        type: string
+        enum: [standard, long_poll, sse]

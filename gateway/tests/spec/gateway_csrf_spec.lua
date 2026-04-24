@@ -126,6 +126,32 @@ describe("gateway-csrf", function()
             local err = apply_csrf({ csrf_protect = true }, "rid")
             assert.is_nil(err)
         end)
+
+        -- Task 11 acceptance (architecture-tasks.md §Task 11):
+        -- `X-XSRF-TOKEN` is the ONE canonical CSRF header name. Sending
+        -- the retired alternative `X-CSRF-Token` (note casing) with no
+        -- `X-XSRF-TOKEN` must still be rejected — the plugin must NOT
+        -- recognize the alternative as a fallback, even when cookie
+        -- value would otherwise match. Protects against the
+        -- finding-#6 "which header is authoritative?" drift from
+        -- silently re-entering via a plugin-side one-liner.
+        it("rejects POST with X-CSRF-Token (non-canonical) but no X-XSRF-TOKEN", function()
+            ngx_stub.install({
+                method = "POST",
+                headers = { ["X-CSRF-Token"] = "same" },
+            })
+            mocks.set_cookies({ ["XSRF-TOKEN"] = "same" })
+
+            local ok, exit_status = ngx_stub.pcall_with_exit(function()
+                apply_csrf({ csrf_protect = true }, "rid")
+            end)
+            assert.is_true(ok)
+            assert.equals(403, exit_status)
+
+            local body = decode(ngx_stub.captured.body)
+            assert.equals("GATEWAY_CSRF_INVALID", body.details.errorCode)
+            assert.equals("AUTH", body.details.category)
+        end)
     end)
 
     describe("clear_identity_headers", function()

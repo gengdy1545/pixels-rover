@@ -145,3 +145,59 @@ services:
         the port (backend.md §12.2); a missing URL would leave the
         service in a half-migrated state invisible from /internal/ready.
       required: true
+
+    # -- architecture-tasks §Task 8 — subject-integrity JWT verifier ----
+    # Four variables together wire the backend's Oathkeeper id_token
+    # verifier. All four are declared `required: true` so a deployment
+    # that forgets any single one fails to boot (rather than silently
+    # falling back to the plaintext X-Auth-* trust model). Test
+    # harnesses bypass the whole verifier by setting
+    # `OATHKEEPER_JWT_REQUIRED=false` AND `ROVER_REQUIRED_ENV_SKIP=1`,
+    # which keeps the production defaults uncompromised.
+
+    - name: OATHKEEPER_JWKS_URL
+      description: >-
+        URL of Oathkeeper's JWKS endpoint, e.g.
+        http://oathkeeper:4456/.well-known/jwks.json. The backend
+        fetches the signing keys from here (with short TTL cache) to
+        verify the Bearer JWT that Oathkeeper's id_token mutator
+        injects. MUST be reachable from the assistant-service
+        container; compose's internal DNS makes this a stable host
+        without exposing the port externally (architecture-tasks
+        §Task 8).
+      required: true
+      env_example: "http://oathkeeper:4456/.well-known/jwks.json"
+
+    - name: OATHKEEPER_JWT_ISSUER
+      description: >-
+        Expected `iss` claim on the Oathkeeper-issued JWT. Must match
+        Oathkeeper's id_token mutator `issuer_url` setting in
+        config/ory/oathkeeper/oathkeeper.yml. Decoupling the expected
+        value here (instead of hardcoding in app code) lets staging
+        vs production run with different issuer strings without a
+        code change.
+      required: true
+      env_example: "https://pixels-rover.local/oathkeeper"
+
+    - name: OATHKEEPER_JWT_AUDIENCE
+      description: >-
+        Expected `aud` claim on the Oathkeeper-issued JWT. Pins the
+        JWT to the assistant-service audience so a token leaked from
+        a hypothetical future sibling backend cannot be replayed
+        against this one. Must match Oathkeeper's id_token mutator
+        `audience` list.
+      required: true
+      env_example: "pixels-rover-assistant"
+
+    - name: OATHKEEPER_JWT_REQUIRED
+      description: >-
+        Master switch for the Task 8 verifier. "true" in every
+        non-test runtime (production, staging, dev-compose) — the
+        backend rejects requests without a valid Oathkeeper JWT with
+        401 GATEWAY_SUBJECT_UNVERIFIED. "false" is reserved for
+        pytest / unit-test harnesses that bypass the JWT layer
+        entirely via ROVER_REQUIRED_ENV_SKIP=1; never ship "false"
+        in a real deployment.
+      required: true
+      enum: ["true", "false"]
+      env_example: "true"

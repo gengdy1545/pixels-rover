@@ -120,3 +120,80 @@ async def test_middleware_no_warning_when_header_present(
         if "request_id_missing=true" in rec.getMessage()
     ]
     assert warnings == []
+
+
+# architecture-tasks §Task 15 acceptance:
+# "Deliberately stripping X-Request-Id in a test raises the counter and
+# fires the alert rule in a dry-run." The alert-rule dry-run is covered
+# by the `request-id-missing-alert-rule-bound` contract below (static
+# expression + label match against the Prometheus rule file); this
+# asserts the runtime counter half — the observable signal the alert
+# expression ultimately sums over.
+#
+# Implementation note: we deliberately DO NOT `from app.main import
+# REQUEST_ID_MISSING_TOTAL` inside the test. The async_client fixture
+# already imported `app.main` during FastAPI app construction, so the
+# Counter singleton lives in prometheus_client.REGISTRY. Re-importing
+# would be harmless IF main.py were a pure reference module — but
+# main.py's top level also runs `validate_or_die()` via create_app(),
+# which trips when the test process doesn't have /app/config bind-
+# mounted. Reading via the public REGISTRY API keeps the test
+# self-contained and exercises the exact code path Prometheus will
+# scrape in production.
+_MISSING_COUNTER_NAME = "assistant_request_id_missing_total"
+
+
+def _counter_sample_for_route(route: str) -> float:
+    from prometheus_client import REGISTRY
+
+    for metric in REGISTRY.collect():
+        if metric.name != "assistant_request_id_missing":
+            continue
+        for sample in metric.samples:
+            if (
+                sample.name == _MISSING_COUNTER_NAME
+                and sample.labels.get("route") == route
+            ):
+                return sample.value
+    return 0.0
+
+
+@pytest.mark.asyncio
+async def test_counter_increments_when_request_id_header_missing(
+    async_client,
+) -> None:
+    before = _counter_sample_for_route("/health")
+
+    # Deliberately omit X-Request-Id to trigger the fallback path.
+    resp = await async_client.get("/health")
+    assert resp.status_code == 200
+
+    after = _counter_sample_for_route("/health")
+    assert after == pytest.approx(before + 1.0), (
+        f"{_MISSING_COUNTER_NAME}{{route='/health'}} did not increment: "
+        f"before={before!r} after={after!r}. This is the signal Task 15's "
+        f"AssistantRequestIdMissing alert rule sums over."
+    )
+
+
+@pytest.mark.asyncio
+async def test_counter_unchanged_when_request_id_header_present(
+    async_client,
+) -> None:
+    """Negative counterpart: gateway-wired path must NOT bump the counter.
+
+    A counter that increments on every request (instead of only on the
+    fallback path) would make Task 15's alert expression perpetually
+    fire regardless of gateway health — a false-positive pattern that
+    is almost as bad as a silent-failure pattern.
+    """
+    before = _counter_sample_for_route("/health")
+    resp = await async_client.get(
+        "/health", headers={"X-Request-Id": "gw-present-42"}
+    )
+    assert resp.status_code == 200
+    after = _counter_sample_for_route("/health")
+    assert after == pytest.approx(before), (
+        f"counter must NOT increment when X-Request-Id is present: "
+        f"before={before!r} after={after!r}"
+    )

@@ -1,0 +1,84 @@
+# Pixels Rover — backend service registry (SSOT).
+#
+# Single source of truth for every backend service reachable through
+# the APISIX gateway under `/api/v1/*`. Three consumers read from or
+# are generated off this file:
+#
+#   1. scripts/generate-gateway-config.py — renders Oathkeeper rules
+#                                          and splices APISIX upstream
+#                                          + route blocks into
+#                                          gateway/apisix.yaml.template
+#                                          (§Task 1).
+#   2. scripts/check-contracts.py         — enforces registry ↔ backend
+#                                          ↔ Oathkeeper coherence
+#                                          (§Task 6, to be extended).
+#   3. (future) docker-compose.yml        — service blocks MUST agree
+#                                          with upstream_host /
+#                                          upstream_port declared here.
+#
+# ----------------------------------------------------------------------
+# Schema reference — see config/services.schema.yaml for the formal
+# definition. Field semantics in plain English:
+#
+#   name           logical service identity; lowercase, [a-z0-9-]+,
+#                  used to derive route-ids and rule-ids.
+#   path_prefix    gateway-visible URL prefix under /api/v1/. MUST
+#                  start with /api/v1/ (so it falls under the
+#                  /api/v1/* protected edge) and MUST NOT contain
+#                  wildcards — the generator appends `*` where
+#                  APISIX/Oathkeeper expect a prefix match.
+#   upstream_host  docker-compose service name (also serves as DNS
+#                  name inside the compose network). Gateway and
+#                  Oathkeeper both resolve upstreams via this name.
+#   upstream_port  numeric port the service binds on the compose
+#                  network. Declared once here instead of three
+#                  separately-maintained copies.
+#   auth_mode      authenticator chain the gateway applies before
+#                  forwarding. Today only `cookie_session` and
+#                  `public` are implemented; `api_key` and
+#                  `jwt_bearer` are reserved contract slots for
+#                  multi-client futures (§Task 5).
+#   timeout_class  traffic shape selector. `standard` is snappy REST;
+#                  `long_poll` and `sse` get looser read timeouts
+#                  and request-buffering off (§Task 7).
+#
+# Hard rules:
+#   * `name` MUST be unique across the file.
+#   * `path_prefix` MUST be unique across the file — two services
+#     cannot share a prefix under /api/v1/.
+#   * Every `path_prefix` MUST be present as an `APIRouter(prefix=...)`
+#     declaration in at least one FastAPI service (enforced by
+#     check-contracts.py).
+# ----------------------------------------------------------------------
+
+services:
+
+  - name: assistant-analysis
+    path_prefix: /api/v1/analysis
+    upstream_host: assistant-service
+    upstream_port: 8090
+    auth_mode: cookie_session
+    # `/api/v1/analysis` POST returns a `text/event-stream` response
+    # (assistant-service/app/api/analysis.py :: analyze_stream). SSE
+    # connections stay open across the model's token-by-token stream,
+    # so the gateway MUST give this path a long read-timeout and must
+    # NOT request-buffer. Declaring `sse` here is what splits it off
+    # from the tight standard-REST read_timeout under `protected-api`
+    # — see generate-gateway-config.py ::
+    # _APISIX_TIMEOUT_CLASS_PROFILES and the matching
+    # `apisix-timeout-class-routes-match-services-yaml` contract.
+    timeout_class: sse
+
+  - name: assistant-conversations
+    path_prefix: /api/v1/conversations
+    upstream_host: assistant-service
+    upstream_port: 8090
+    auth_mode: cookie_session
+    timeout_class: standard
+
+  - name: assistant-semantic
+    path_prefix: /api/v1/semantic
+    upstream_host: assistant-service
+    upstream_port: 8090
+    auth_mode: cookie_session
+    timeout_class: standard

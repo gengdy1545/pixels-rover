@@ -10,14 +10,42 @@ import { ApiError, apiErrorFromEnvelope } from './apiError';
 // Axios instance
 // ════════════════════════════════════════
 
+// baseURL is resolved from the Vite-time env var ``VITE_API_BASE``.
+// Leaving it unset preserves the historical same-origin behavior (the
+// browser sends requests to whatever host served the bundle, which is
+// APISIX on the production gateway). Setting it — typically during
+// local dev against a remote gateway, or for a future non-browser
+// client — routes every axios + SSE call through the supplied origin.
+// See frontend/.env.example and docs/development/frontend.md.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE ?? '').trim();
+
 const httpClient = axios.create({
-  baseURL: '',
+  baseURL: API_BASE_URL,
   timeout: 30000,
   withCredentials: true, // Always send cookies with requests
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Resolve a relative API path to an absolute URL using the same
+ * ``VITE_API_BASE`` override honoured by the axios instance. SSE opens
+ * go through ``fetch`` rather than axios, so they need to resolve the
+ * base URL themselves — exposing this helper keeps the base-URL logic
+ * in exactly one file.
+ */
+export function resolveApiUrl(path: string): string {
+  if (!API_BASE_URL) {
+    return path;
+  }
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  const base = API_BASE_URL.replace(/\/+$/, '');
+  const tail = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${tail}`;
+}
 
 // ════════════════════════════════════════
 // Common header injection (shared by both Axios and fetch-based SSE)

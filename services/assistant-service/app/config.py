@@ -20,6 +20,11 @@ class Settings(BaseSettings):
 
     duckdb_path: str = ":memory:"
 
+    kratos_public_url: str = "http://kratos:4433"
+    auth_header_verify: bool = True
+    auth_whoami_cache_ttl_sec: int = 5
+    auth_whoami_timeout_sec: float = 2.0
+
     default_max_steps: int = 10
     default_max_llm_calls: int = 20
     default_max_wall_time_sec: int = 180

@@ -35,6 +35,18 @@ class ErrorCategory(str, Enum):
 GATEWAY_IDENTITY_MISSING = "GATEWAY_IDENTITY_MISSING"
 INTERNAL_AUTH_FAILED = "INTERNAL_AUTH_FAILED"
 
+# ``GATEWAY_SUBJECT_UNVERIFIED`` / ``GATEWAY_SUBJECT_MISMATCH`` are the two
+# 401 classes that architecture-tasks §Task 8 introduces alongside the
+# Oathkeeper ``id_token`` mutator. They are INFRA codes (GATEWAY_* prefix)
+# because the failure surface is "we cannot prove the caller's identity
+# through the signed JWT the gateway should be issuing", not "the user
+# submitted a bad form". Kept distinct from GATEWAY_IDENTITY_MISSING
+# because that one still means "plaintext X-Auth-* headers absent", which
+# the backend treats as 500 (gateway mis-wired) rather than 401 (caller
+# unauthenticated).
+GATEWAY_SUBJECT_UNVERIFIED = "GATEWAY_SUBJECT_UNVERIFIED"
+GATEWAY_SUBJECT_MISMATCH = "GATEWAY_SUBJECT_MISMATCH"
+
 # ---- Business-domain prefix ANALYSIS_* (backend.md §6.3) ----
 
 ANALYSIS_INVALID_ARGUMENT = "ANALYSIS_INVALID_ARGUMENT"

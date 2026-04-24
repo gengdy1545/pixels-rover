@@ -2,7 +2,7 @@ import json
 import logging
 
 from app.schemas.task import AnalysisTask
-from app.core.llm_client import LLMClient
+from app.infra.llm import LLMClient
 from app.core.harness import RunContext, OutputGuardrail
 
 logger = logging.getLogger(__name__)

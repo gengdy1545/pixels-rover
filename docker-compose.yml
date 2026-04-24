@@ -73,7 +73,7 @@ services:
       required-env-guard:
         condition: service_completed_successfully
       mysql:
-        condition: service_started
+        condition: service_healthy
     environment: *kratos-environment
     volumes:
       - ./config/ory/kratos:/etc/config/kratos:ro
@@ -94,6 +94,12 @@ services:
     volumes:
       - ./config/ory/kratos:/etc/config/kratos:ro
     command: ["serve", "--config", "/etc/config/kratos/kratos.yml"]
+    healthcheck:
+      test: ["CMD", "kratos", "health", "ready", "--endpoint", "http://localhost:4434"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
 
   oathkeeper:
     image: ${OATHKEEPER_IMAGE:-oryd/oathkeeper:v26.2.0}
@@ -101,15 +107,21 @@ services:
     restart: unless-stopped
     depends_on:
       kratos:
-        condition: service_started
+        condition: service_healthy
       assistant-service:
-        condition: service_started
+        condition: service_healthy
     expose:
       - "4455"
       - "4456"
     volumes:
       - ./config/ory/oathkeeper:/etc/config/oathkeeper:ro
     command: ["serve", "--config", "/etc/config/oathkeeper/oathkeeper.yml"]
+    healthcheck:
+      test: ["CMD", "oathkeeper", "health", "ready", "--endpoint", "http://localhost:4456"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
 
   ory-ui:
     image: ${ORY_UI_IMAGE:-oryd/kratos-selfservice-ui-node:v26.2.0}
@@ -117,7 +129,7 @@ services:
     restart: unless-stopped
     depends_on:
       kratos:
-        condition: service_started
+        condition: service_healthy
     environment:
       PORT: 4455
       BASE_PATH: /ui
@@ -129,6 +141,12 @@ services:
       DANGEROUSLY_DISABLE_SECURE_CSRF_COOKIES: ${ORY_UI_DISABLE_SECURE_CSRF_COOKIES:-false}
     expose:
       - "4455"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4455/ui/login').then(r=>process.exit(r.status < 500 ? 0 : 1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
 
   assistant-service:
     build:
@@ -138,20 +156,32 @@ services:
     restart: unless-stopped
     depends_on:
       mysql:
-        condition: service_started
+        condition: service_healthy
     environment:
       ROVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       ROVER_LLM_API_KEY: ${ROVER_LLM_API_KEY:-}
       ROVER_LLM_API_BASE: ${LLM_API_BASE:-}
       ROVER_DATABASE_URL: ${ROVER_DATABASE_URL:-}
-      ROVER_DUCKDB_PATH: ":memory:"
+      ROVER_DUCKDB_PATH: ${ROVER_DUCKDB_PATH:-/var/lib/pixels-rover/duckdb/analysis.duckdb}
       ROVER_PIXELS_HOST: ${PIXELS_HOST:-host.docker.internal}
       ROVER_PIXELS_PORT: ${PIXELS_PORT:-18890}
       ROVER_DEBUG: ${ROVER_DEBUG:-false}
+      # architecture-tasks §Task 8 — Oathkeeper id_token verifier.
+      # Every non-test runtime MUST set OATHKEEPER_JWT_REQUIRED=true
+      # (the required-env validator refuses to boot otherwise). The
+      # three supporting vars are also required-env declared; the
+      # compose default here is empty so missing values fail fast
+      # through the validator rather than silently disabling
+      # verification.
+      OATHKEEPER_JWKS_URL: ${OATHKEEPER_JWKS_URL:-http://oathkeeper:4456/.well-known/jwks.json}
+      OATHKEEPER_JWT_ISSUER: ${OATHKEEPER_JWT_ISSUER:-}
+      OATHKEEPER_JWT_AUDIENCE: ${OATHKEEPER_JWT_AUDIENCE:-}
+      OATHKEEPER_JWT_REQUIRED: ${OATHKEEPER_JWT_REQUIRED:-}
     expose:
       - "8090"
     volumes:
       - ./config/required-env.yaml:/app/config/required-env.yaml:ro
+      - assistant-duckdb:/var/lib/pixels-rover/duckdb
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
@@ -182,15 +212,15 @@ services:
     restart: unless-stopped
     depends_on:
       kratos:
-        condition: service_started
+        condition: service_healthy
       oathkeeper:
-        condition: service_started
+        condition: service_healthy
       ory-ui:
-        condition: service_started
+        condition: service_healthy
       assistant-service:
-        condition: service_started
+        condition: service_healthy
       frontend:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${GATEWAY_PORT:-80}:9080"
     environment:
@@ -208,4 +238,6 @@ services:
 
 volumes:
   mysql-data:
+    driver: local
+  assistant-duckdb:
     driver: local

@@ -1,0 +1,49 @@
+# Prometheus alerting rules for the `request_id_missing` invariant.
+#
+# architecture-tasks §Task 15 — Close the loop on the
+# `request_id_missing=true` log invariant. This file is the documented
+# dashboard/alert entry the task calls for: once the deferred Prometheus
+# pipeline (see docs/runbooks/observability-roadmap.md §Deferred
+# Pipeline) is wired up, operators drop this file directly into
+# `rule_files:` without rewriting the expressions.
+#
+# Runbook:
+#   * `assistant_request_id_missing_total{route="..."}` is ONLY
+#     incremented when assistant-service receives a request without a
+#     gateway-injected `X-Request-Id` header. In a correctly wired
+#     deployment (APISIX global request-id plugin writing a fresh id at
+#     the edge of the cluster), the rate should be a hard zero.
+#   * A non-zero rate therefore means the gateway is bypassed OR the
+#     plugin is misconfigured — NOT a user authentication issue. See
+#     backend.md §5 rule 1 for the single-writer invariant.
+#   * `check-contracts.py::request-id-missing-alert-rule-bound` keeps
+#     the counter name / label set / alert expression below byte-
+#     identical with the assistant-service source so a careless rename
+#     on either side fails CI instead of silencing the alert.
+
+groups:
+  - name: pixels-rover.request-id-invariant
+    interval: 1m
+    rules:
+      # Stage A — Watch-list entry from observability-roadmap.md. Fires
+      # as soon as any route receives a request without X-Request-Id for
+      # five consecutive minutes, which is long enough to survive a
+      # single scrape-interval flake but short enough that a real
+      # misconfiguration does not sit unnoticed.
+      - alert: AssistantRequestIdMissing
+        expr: sum(rate(assistant_request_id_missing_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: page
+          service: assistant-service
+          category: gateway-misconfiguration
+        annotations:
+          summary: "assistant-service received requests without X-Request-Id"
+          description: >-
+            assistant_request_id_missing_total is non-zero for at least
+            5 minutes. This means the APISIX global request-id plugin
+            did not inject X-Request-Id on one or more routes, or a
+            caller reached assistant-service outside the gateway.
+            Investigate gateway route coverage and the request-id
+            plugin config; do NOT treat this as an auth or user error.
+          runbook_url: "docs/runbooks/observability-roadmap.md#stage-a-watch-list"

@@ -41,6 +41,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Task 4: the committed `frontend/src/shared/types/generated/
+      # assistant.d.ts` MUST be a byte-identical projection of the
+      # committed `services/assistant-service/openapi.json` snapshot
+      # (which in turn is guarded by the `contracts` job below via
+      # `assistant-openapi-snapshot-fresh`). Re-run `gen:types` and
+      # fail if git detects a diff — same contract enforced by
+      # `scripts/check-contracts.py::frontend-generated-types-fresh`,
+      # duplicated here so the frontend job surfaces the issue on a
+      # PR that only touches `frontend/` and otherwise skips the
+      # `contracts` job by path filter.
+      - name: Check generated TS types are fresh
+        run: |
+          npm run gen:types
+          git diff --exit-code -- src/shared/types/generated/assistant.d.ts
+
   # ---------------------------------------------------------------
   # Python assistant-service: test
   # ---------------------------------------------------------------
@@ -92,10 +107,37 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install runtime dependency
-        run: pip install pyyaml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Task 4: the `assistant-openapi-snapshot-fresh` and
+      # `frontend-generated-types-fresh` contract checks shell out to
+      # (a) `scripts/export-openapi.py` which imports the
+      # assistant-service FastAPI app, and (b) `openapi-typescript`
+      # which is a frontend devDependency. Both toolchains must be
+      # installed before `check-contracts.py` runs, otherwise the
+      # relevant checks fail with an actionable-but-irrelevant
+      # "fastapi not importable" / "node_modules missing" message.
+      - name: Install assistant-service runtime deps (for OpenAPI export)
+        working-directory: services/assistant-service
+        run: pip install -e ".[dev]"
+
+      - name: Install frontend deps (for openapi-typescript)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install contract-check runtime deps
+        run: pip install pyyaml jsonschema
 
       - name: Run contract drift detector
+        env:
+          # Point the `_resolve_assistant_python()` helper in
+          # check-contracts.py at the interpreter where we just
+          # installed fastapi, regardless of where setup-python put it.
+          ROVER_ASSISTANT_PYTHON: python3
         run: python3 scripts/check-contracts.py
 
   # ---------------------------------------------------------------

@@ -10,6 +10,22 @@
       "retryable": false,
       "docAnchor": "backend.md §3.3"
     },
+    "GATEWAY_SUBJECT_UNVERIFIED": {
+      "httpStatus": 401,
+      "category": "AUTH",
+      "writtenBy": "business-service",
+      "trigger": "Protected route received no Authorization: Bearer token, or the token failed JWKS signature / iss / aud / exp verification. Issued by the backend's Oathkeeper id_token mutator verifier (architecture-tasks §Task 8) — flips the historic X-Auth-* plaintext trust model to an integrity-protected one.",
+      "retryable": false,
+      "docAnchor": "backend.md §3.3"
+    },
+    "GATEWAY_SUBJECT_MISMATCH": {
+      "httpStatus": 401,
+      "category": "AUTH",
+      "writtenBy": "business-service",
+      "trigger": "Verified JWT claims do not agree with the X-Auth-* header triple (e.g. sub != X-Auth-User-Id). Indicates the X-Auth-* headers were injected by a party other than Oathkeeper while the JWT itself was genuine — same silent-bypass vector §Task 8 closes.",
+      "retryable": false,
+      "docAnchor": "backend.md §3.3"
+    },
     "GATEWAY_CSRF_INVALID": {
       "httpStatus": 403,
       "category": "AUTH",

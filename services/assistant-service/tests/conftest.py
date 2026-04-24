@@ -41,6 +41,7 @@ from app.storage.registry import BackendRegistry
 # Tests intentionally keep SQLite as a lightweight fixture even though runtime
 # now defaults to MySQL.
 os.environ.setdefault("ROVER_DATABASE_URL", "sqlite+aiosqlite://")
+os.environ.setdefault("ROVER_AUTH_HEADER_VERIFY", "false")
 
 # ---------------------------------------------------------------------------
 # Test settings
@@ -263,7 +264,21 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
     # re-introduces response-side writes. It also mirrors the backend.md §5
     # rule 1 "one warning per fallback" behavior so tests/test_request_id.py
     # can assert on the warning line.
+    #
+    # Counter parity — architecture-tasks §Task 15: the warning and the
+    # Prometheus counter bump MUST happen at the same point. Mirroring
+    # only the warning here (and not the counter) would let a future
+    # regression silently break the alert pipeline while leaving the
+    # test suite green. We import the module-level singleton from
+    # app.metrics (not app.main) because the latter has create_app()
+    # side effects at module bottom — validate_or_die() + FastAPI app
+    # construction — which would fire during test collection and trip
+    # on the missing /app/config bind-mount. app.metrics is a pure
+    # singleton module, so importing it is side-effect-free while
+    # still giving us the exact Counter instance Prometheus will
+    # scrape in production.
     import logging as _logging
+    from app.metrics import REQUEST_ID_MISSING_TOTAL as _REQUEST_ID_MISSING_TOTAL
     _request_id_logger = _logging.getLogger("app.main")
 
     @app.middleware("http")
@@ -272,6 +287,7 @@ def create_test_app(settings: Settings, backend_registry: BackendRegistry, db_se
         set_request_id(request_id)
         request.state.request_id = request_id
         if is_fallback:
+            _REQUEST_ID_MISSING_TOTAL.labels(route=request.url.path).inc()
             _request_id_logger.warning(
                 "request_id_missing=true route=%s method=%s fallback=%s",
                 request.url.path, request.method, request_id,

@@ -1,0 +1,2079 @@
+{
+  "components": {
+    "schemas": {
+      "AnalysisPlan": {
+        "properties": {
+          "explanation": {
+            "default": "",
+            "title": "Explanation",
+            "type": "string"
+          },
+          "steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "title": "AnalysisPlan",
+        "type": "object"
+      },
+      "AnalysisRequest": {
+        "properties": {
+          "max_llm_calls": {
+            "default": 20,
+            "title": "Max Llm Calls",
+            "type": "integer"
+          },
+          "max_sql_executions": {
+            "default": 5,
+            "title": "Max Sql Executions",
+            "type": "integer"
+          },
+          "max_steps": {
+            "default": 10,
+            "title": "Max Steps",
+            "type": "integer"
+          },
+          "max_wall_time_sec": {
+            "default": 180,
+            "title": "Max Wall Time Sec",
+            "type": "integer"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "threadId": {
+            "title": "Threadid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "threadId"
+        ],
+        "title": "AnalysisRequest",
+        "type": "object"
+      },
+      "AnalysisResponse": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisPlan"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "partial",
+              "failed",
+              "clarification_needed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "step_results": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "title": "Step Results",
+            "type": "array"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          },
+          "task": {
+            "$ref": "#/components/schemas/AnalysisTask"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Thread Id"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session_id",
+          "status",
+          "task"
+        ],
+        "title": "AnalysisResponse",
+        "type": "object"
+      },
+      "AnalysisTask": {
+        "properties": {
+          "analysis_dimensions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Analysis Dimensions",
+            "type": "array"
+          },
+          "clarification_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Clarification Question"
+          },
+          "comparison_baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "confidence": {
+            "default": 1.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FilterCondition"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "needs_clarification": {
+            "default": false,
+            "title": "Needs Clarification",
+            "type": "boolean"
+          },
+          "raw_input": {
+            "default": "",
+            "title": "Raw Input",
+            "type": "string"
+          },
+          "target_metrics": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Metrics",
+            "type": "array"
+          },
+          "task_type": {
+            "enum": [
+              "query",
+              "compare",
+              "diagnose"
+            ],
+            "title": "Task Type",
+            "type": "string"
+          },
+          "time_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "task_type"
+        ],
+        "title": "AnalysisTask",
+        "type": "object"
+      },
+      "ApiErrorDetails": {
+        "additionalProperties": true,
+        "description": "The ``details`` object carried by every non-2xx response.\n\nSee ``backend.md §6.0``. ``errorCode`` + ``category`` are both mandatory\n(``backend.md §6.3.2``): the only exception is the \"§6.5 wholly-unknown\nunhandled exception\" safety-net which emits ``details: null`` and is\ndocumented separately.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ErrorCategory",
+            "description": "Coarse failure category. The frontend's fallback dispatcher (backend.md §6.3.2 step 2) keys off this field when the exact ``errorCode`` is not yet recognized."
+          },
+          "errorCode": {
+            "description": "Stable SCREAMING_SNAKE_CASE identifier for the failure. Business prefixes (ANALYSIS_* / CONVERSATION_* / SEMANTIC_*) are owned by this service; infrastructure prefixes (GATEWAY_* / INTERNAL_*) are injected by the gateway or the service-to-service auth filter and are reported for traceability.",
+            "enum": [
+              "ANALYSIS_BACKEND_NOT_FOUND",
+              "ANALYSIS_BACKEND_UNAVAILABLE",
+              "ANALYSIS_DATABASE_UNAVAILABLE",
+              "ANALYSIS_INVALID_ARGUMENT",
+              "ANALYSIS_SCHEMA_UNAVAILABLE",
+              "ANALYSIS_SESSION_NOT_FOUND",
+              "ANALYSIS_THREAD_ARCHIVED",
+              "ANALYSIS_THREAD_NOT_FOUND",
+              "ANALYSIS_UPSTREAM_UNAVAILABLE",
+              "GATEWAY_IDENTITY_MISSING",
+              "GATEWAY_SUBJECT_MISMATCH",
+              "GATEWAY_SUBJECT_UNVERIFIED",
+              "INTERNAL_AUTH_FAILED"
+            ],
+            "title": "Errorcode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "errorCode",
+          "category"
+        ],
+        "title": "ApiErrorDetails",
+        "type": "object"
+      },
+      "ApiErrorResponse": {
+        "description": "The full non-2xx envelope (``backend.md §6.0``).\n\nTop-level ``code`` equals the HTTP status; ``data`` is always absent on\nfailure; ``details`` is always present except for the §6.5 safety-net.",
+        "properties": {
+          "code": {
+            "description": "HTTP status code; strictly equal to the transport status line. Must NOT carry a 5-digit legacy business code (sunset, backend.md §6.3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Structured failure details. Present on every non-2xx response except the §6.5 wholly-unknown-exception safety-net."
+          },
+          "message": {
+            "description": "Human-readable short description (do not leak internals).",
+            "title": "Message",
+            "type": "string"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Request trace id; echoed from gateway-injected ``X-Request-Id`` or a ``missing-<8 hex>`` fallback when the header is absent (backend.md §5).",
+            "title": "Requestid"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ApiErrorResponse",
+        "type": "object"
+      },
+      "ColumnInfo": {
+        "properties": {
+          "data_type": {
+            "title": "Data Type",
+            "type": "string"
+          },
+          "is_nullable": {
+            "default": true,
+            "title": "Is Nullable",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "data_type"
+        ],
+        "title": "ColumnInfo",
+        "type": "object"
+      },
+      "ConversationDetailResponse": {
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationHistoryItem"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/ConversationThreadResponse"
+          }
+        },
+        "required": [
+          "thread",
+          "history"
+        ],
+        "title": "ConversationDetailResponse",
+        "type": "object"
+      },
+      "ConversationHistoryItem": {
+        "properties": {
+          "completedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Completedat"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Createdat"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "sessionId": {
+            "title": "Sessionid",
+            "type": "string"
+          },
+          "stats": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Stats",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stepResults": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Stepresults",
+            "type": "array"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Task"
+          },
+          "threadId": {
+            "title": "Threadid",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessionId",
+          "threadId",
+          "status",
+          "question"
+        ],
+        "title": "ConversationHistoryItem",
+        "type": "object"
+      },
+      "ConversationThreadResponse": {
+        "properties": {
+          "backendId": {
+            "title": "Backendid",
+            "type": "string"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Createdat"
+          },
+          "lastActivityAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lastactivityat"
+          },
+          "modelProfile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Modelprofile"
+          },
+          "schemaName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Schemaname"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "threadId": {
+            "title": "Threadid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Updatedat"
+          }
+        },
+        "required": [
+          "threadId",
+          "title",
+          "backendId",
+          "status"
+        ],
+        "title": "ConversationThreadResponse",
+        "type": "object"
+      },
+      "CreateConversationRequest": {
+        "properties": {
+          "backendId": {
+            "title": "Backendid",
+            "type": "string"
+          },
+          "modelProfile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelprofile"
+          },
+          "schemaName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schemaname"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "backendId"
+        ],
+        "title": "CreateConversationRequest",
+        "type": "object"
+      },
+      "DimensionCreate": {
+        "properties": {
+          "backend_id": {
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_column": {
+            "title": "Source Column",
+            "type": "string"
+          },
+          "source_schema": {
+            "title": "Source Schema",
+            "type": "string"
+          },
+          "source_table": {
+            "title": "Source Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "source_column",
+          "source_table",
+          "source_schema",
+          "backend_id"
+        ],
+        "title": "DimensionCreate",
+        "type": "object"
+      },
+      "ErrorCategory": {
+        "description": "Coarse failure categories used by ``details.category`` (``backend.md §6.0``).\n\nThe frontend's fallback UX hook keys off these values when the precise\n``errorCode`` is unrecognized — see ``backend.md §6.3.2``.",
+        "enum": [
+          "USER_INPUT",
+          "AUTH",
+          "RATE_LIMIT",
+          "UPSTREAM",
+          "INTERNAL"
+        ],
+        "title": "ErrorCategory",
+        "type": "string"
+      },
+      "FilterCondition": {
+        "properties": {
+          "dimension": {
+            "title": "Dimension",
+            "type": "string"
+          },
+          "operator": {
+            "default": "=",
+            "enum": [
+              "=",
+              "!=",
+              "in",
+              "not_in",
+              ">",
+              "<",
+              ">=",
+              "<=",
+              "between"
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "dimension"
+        ],
+        "title": "FilterCondition",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JoinPath": {
+        "properties": {
+          "join_condition": {
+            "title": "Join Condition",
+            "type": "string"
+          },
+          "join_type": {
+            "default": "INNER",
+            "enum": [
+              "INNER",
+              "LEFT"
+            ],
+            "title": "Join Type",
+            "type": "string"
+          },
+          "left_table": {
+            "title": "Left Table",
+            "type": "string"
+          },
+          "right_table": {
+            "title": "Right Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "left_table",
+          "right_table",
+          "join_condition"
+        ],
+        "title": "JoinPath",
+        "type": "object"
+      },
+      "MetricCreate": {
+        "properties": {
+          "backend_id": {
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "calculation": {
+            "title": "Calculation",
+            "type": "string"
+          },
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_schema": {
+            "title": "Source Schema",
+            "type": "string"
+          },
+          "source_table": {
+            "title": "Source Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "calculation",
+          "source_table",
+          "source_schema",
+          "backend_id"
+        ],
+        "title": "MetricCreate",
+        "type": "object"
+      },
+      "PlanStep": {
+        "properties": {
+          "action": {
+            "enum": [
+              "generate_and_execute_sql",
+              "summarize_results"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "params": {
+            "$ref": "#/components/schemas/StepParams",
+            "default": {
+              "backend_id": null,
+              "filters": null,
+              "group_by": null,
+              "metrics": null,
+              "purpose": "",
+              "schema_name": null,
+              "time_range": null
+            }
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "status": {
+            "default": "pending",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "action"
+        ],
+        "title": "PlanStep",
+        "type": "object"
+      },
+      "QueryResult": {
+        "properties": {
+          "columns": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "execution_time_ms": {
+            "default": 0,
+            "title": "Execution Time Ms",
+            "type": "integer"
+          },
+          "row_count": {
+            "default": 0,
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "title": "QueryResult",
+        "type": "object"
+      },
+      "ResolvedContext": {
+        "properties": {
+          "dimensions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResolvedDimension"
+            },
+            "title": "Dimensions",
+            "type": "array"
+          },
+          "join_paths": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/JoinPath"
+            },
+            "title": "Join Paths",
+            "type": "array"
+          },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResolvedMetric"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "unresolved": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved",
+            "type": "array"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "ResolvedContext",
+        "type": "object"
+      },
+      "ResolvedDimension": {
+        "properties": {
+          "backend_id": {
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "canonical_name": {
+            "title": "Canonical Name",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "source_column": {
+            "title": "Source Column",
+            "type": "string"
+          },
+          "source_schema": {
+            "title": "Source Schema",
+            "type": "string"
+          },
+          "source_table": {
+            "title": "Source Table",
+            "type": "string"
+          },
+          "user_term": {
+            "title": "User Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_term",
+          "canonical_name",
+          "display_name",
+          "source_column",
+          "source_table",
+          "source_schema",
+          "backend_id"
+        ],
+        "title": "ResolvedDimension",
+        "type": "object"
+      },
+      "ResolvedMetric": {
+        "properties": {
+          "backend_id": {
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "calculation": {
+            "title": "Calculation",
+            "type": "string"
+          },
+          "canonical_name": {
+            "title": "Canonical Name",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "source_schema": {
+            "title": "Source Schema",
+            "type": "string"
+          },
+          "source_table": {
+            "title": "Source Table",
+            "type": "string"
+          },
+          "user_term": {
+            "title": "User Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_term",
+          "canonical_name",
+          "display_name",
+          "calculation",
+          "source_table",
+          "source_schema",
+          "backend_id"
+        ],
+        "title": "ResolvedMetric",
+        "type": "object"
+      },
+      "SSEEventName": {
+        "description": "Server-sent event names emitted by POST /api/v1/analysis. Mirrors app.schemas.events.SSEEventType.",
+        "enum": [
+          "status_change",
+          "task_parsed",
+          "clarification",
+          "plan_created",
+          "step_started",
+          "step_sql",
+          "step_completed",
+          "step_failed",
+          "summary_ready",
+          "analysis_done",
+          "warning",
+          "error"
+        ],
+        "title": "SSEEventName",
+        "type": "string"
+      },
+      "StepParams": {
+        "properties": {
+          "backend_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Backend Id"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filters"
+          },
+          "group_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group By"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Metrics"
+          },
+          "purpose": {
+            "default": "",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Schema Name"
+          },
+          "time_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "StepParams",
+        "type": "object"
+      },
+      "StepResult": {
+        "properties": {
+          "columns": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "execution_time_ms": {
+            "default": 0,
+            "title": "Execution Time Ms",
+            "type": "integer"
+          },
+          "row_count": {
+            "default": 0,
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sql"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          }
+        },
+        "title": "StepResult",
+        "type": "object"
+      },
+      "SynonymCreate": {
+        "properties": {
+          "canonical_name": {
+            "title": "Canonical Name",
+            "type": "string"
+          },
+          "entity_type": {
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "canonical_name",
+          "entity_type"
+        ],
+        "title": "SynonymCreate",
+        "type": "object"
+      },
+      "TableInfo": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Row Count"
+          },
+          "schema_name": {
+            "title": "Schema Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "schema_name"
+        ],
+        "title": "TableInfo",
+        "type": "object"
+      },
+      "TimeRange": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "enum": [
+                  "today",
+                  "yesterday",
+                  "last_7_days",
+                  "last_30_days",
+                  "this_month",
+                  "last_month",
+                  "this_quarter",
+                  "last_quarter",
+                  "this_year",
+                  "last_year",
+                  "ytd"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start"
+          }
+        },
+        "title": "TimeRange",
+        "type": "object"
+      },
+      "UpdateConversationRequest": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "UpdateConversationRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationResult": {
+        "properties": {
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "is_valid": {
+            "title": "Is Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_valid"
+        ],
+        "title": "ValidationResult",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Intelligent Assistant Orchestration System",
+    "title": "Pixels Rover Assistant Service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/analysis": {
+      "post": {
+        "description": "Submit an analysis question. Returns SSE stream of events.",
+        "operationId": "submit_analysis_api_v1_analysis_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Analysis",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/api/v1/analysis/backends": {
+      "get": {
+        "operationId": "list_backends_api_v1_analysis_backends_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backends",
+        "tags": [
+          "backends"
+        ]
+      }
+    },
+    "/api/v1/analysis/backends/{backend_id}/schemas": {
+      "get": {
+        "operationId": "list_schemas_api_v1_analysis_backends__backend_id__schemas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backend_id",
+            "required": true,
+            "schema": {
+              "title": "Backend Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Schemas",
+        "tags": [
+          "backends"
+        ]
+      }
+    },
+    "/api/v1/analysis/backends/{backend_id}/schemas/{schema}/tables": {
+      "get": {
+        "operationId": "list_tables_api_v1_analysis_backends__backend_id__schemas__schema__tables_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backend_id",
+            "required": true,
+            "schema": {
+              "title": "Backend Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "title": "Schema",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tables",
+        "tags": [
+          "backends"
+        ]
+      }
+    },
+    "/api/v1/analysis/backends/{backend_id}/schemas/{schema}/tables/{table}/columns": {
+      "get": {
+        "operationId": "list_columns_api_v1_analysis_backends__backend_id__schemas__schema__tables__table__columns_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backend_id",
+            "required": true,
+            "schema": {
+              "title": "Backend Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "title": "Schema",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Columns",
+        "tags": [
+          "backends"
+        ]
+      }
+    },
+    "/api/v1/analysis/{session_id}": {
+      "get": {
+        "description": "Get a completed analysis result by session ID.",
+        "operationId": "get_analysis_result_api_v1_analysis__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Analysis Result",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/api/v1/conversations": {
+      "get": {
+        "operationId": "list_conversations_api_v1_conversations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Conversations",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "operationId": "create_conversation_api_v1_conversations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/v1/conversations/{thread_id}": {
+      "get": {
+        "operationId": "get_conversation_api_v1_conversations__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversation",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "patch": {
+        "operationId": "update_conversation_api_v1_conversations__thread_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/v1/semantic/dimensions": {
+      "get": {
+        "operationId": "list_dimensions_api_v1_semantic_dimensions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Dimensions",
+        "tags": [
+          "semantic"
+        ]
+      },
+      "post": {
+        "operationId": "create_dimension_api_v1_semantic_dimensions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DimensionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Dimension",
+        "tags": [
+          "semantic"
+        ]
+      }
+    },
+    "/api/v1/semantic/metrics": {
+      "get": {
+        "operationId": "list_metrics_api_v1_semantic_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Metrics",
+        "tags": [
+          "semantic"
+        ]
+      },
+      "post": {
+        "operationId": "create_metric_api_v1_semantic_metrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Metric",
+        "tags": [
+          "semantic"
+        ]
+      }
+    },
+    "/api/v1/semantic/synonyms": {
+      "get": {
+        "operationId": "list_synonyms_api_v1_semantic_synonyms_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Synonyms",
+        "tags": [
+          "semantic"
+        ]
+      },
+      "post": {
+        "operationId": "create_synonym_api_v1_semantic_synonyms_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynonymCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Synonym",
+        "tags": [
+          "semantic"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/internal/ready": {
+      "get": {
+        "operationId": "internal_ready_internal_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Internal Ready"
+      }
+    }
+  }
+}

@@ -49,6 +49,14 @@ services:
     environment:
       ROVER_LLM_API_KEY: ${ROVER_LLM_API_KEY:-dev-local-llm-stub-key-does-not-call-out}
       ROVER_DATABASE_URL: ${ROVER_DATABASE_URL:-mysql+aiomysql://pixels:${MYSQL_PASSWORD:-password}@mysql:3306/pixels_analysis}
+      # architecture-tasks §Task 8 dev defaults. These mirror the
+      # issuer/audience pinned in config/ory/oathkeeper/oathkeeper.yml
+      # and the dev-only JWKS file mounted into the Oathkeeper
+      # container below. The base compose leaves all three blank so
+      # production operators are forced to set them explicitly.
+      OATHKEEPER_JWT_ISSUER: ${OATHKEEPER_JWT_ISSUER:-https://pixels-rover.local/oathkeeper}
+      OATHKEEPER_JWT_AUDIENCE: ${OATHKEEPER_JWT_AUDIENCE:-pixels-rover-assistant}
+      OATHKEEPER_JWT_REQUIRED: ${OATHKEEPER_JWT_REQUIRED:-true}
 
   gateway:
     environment:

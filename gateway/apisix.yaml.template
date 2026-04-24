@@ -91,15 +91,43 @@ routes:
       nodes:
         "127.0.0.1:65535": 1
 
+  - id: deny-public-metrics
+    uri: /metrics
+    methods: [GET, HEAD]
+    priority: 9989
+    plugins:
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              ngx.status = 404
+              return ngx.exit(404)
+            end
+    upstream:
+      type: roundrobin
+      nodes:
+        "127.0.0.1:65535": 1
+
   # Ory self-service UI and Kratos public browser-flow endpoints.
+  #
+  # Method policy (architecture-tasks §9): from APISIX's perspective the Ory
+  # UI is read-only — the UI container owns its own POSTs directly against
+  # Kratos from inside its JS code; no public POST surface exists on `/ui*`.
+  # Both `/ui` (exact) and `/ui/*` (prefix) therefore restrict to
+  # `[GET, HEAD]` uniformly. Any other verb on either URI falls through
+  # to the frontend SPA catch-all route below — a single, symmetric
+  # downstream behavior for both URIs that replaces the earlier asymmetry
+  # where only the exact `/ui` route was method-restricted.
   - id: ory-ui-root
     uri: /ui
-    methods: [GET]
+    methods: [GET, HEAD]
     priority: 970
     upstream_id: ory-ui
 
   - id: ory-ui-assets
     uri: /ui/*
+    methods: [GET, HEAD]
     priority: 980
     upstream_id: ory-ui
 
@@ -147,13 +175,43 @@ routes:
       nodes:
         "127.0.0.1:65535": 1
 
-  - id: protected-api
-    uri: /api/v1/*
-    priority: 800
+  # ---- /api/v1/* — per-timeout-class gateway edge (architecture-tasks §Task 7) ----
+  #
+  # Historically a single `protected-api` route owned every
+  # `/api/v1/*` request and was forced to carry the loosest timeout
+  # the loudest SSE endpoint needed (900 s read_timeout, request
+  # buffering off). That coupling is finding #4: tuning the SSE idle
+  # window silently extended the REST 504 bound to 15 minutes.
+  #
+  # The fix is per-traffic-shape routes. `config/services.yaml`
+  # declares a `timeout_class` for each backend service
+  # (`standard` | `long_poll` | `sse`); for every entry whose class
+  # is NOT `standard` we emit a more-specific APISIX route here with
+  # the class's own timeout / buffering profile. Anything that
+  # remains (all `standard` entries) falls through to the
+  # `protected-api` fallback route with the tight REST read_timeout.
+  #
+  # Priority math: APISIX picks the highest-priority route when two
+  # URIs match. Per-class routes use `priority: 810` so they sit
+  # exactly `_OPENAPI_PRIORITY_MARGIN = 10` above the fallback's
+  # `priority: 800` — the gateway.md §6.2 hard rule that
+  # check-contracts.py :: route-prefix-priority-ordered enforces.
+  #
+  # Cross-cutting concerns (gateway-csrf + X-Auth-* header strip)
+  # MUST be re-declared on every /api/v1/* route because
+  # `proxy-rewrite` / `gateway-csrf` are per-route plugins — omitting
+  # them on a new class-specific route would re-open the
+  # X-Auth-* forgery surface (finding #2 regression) on that path.
+  # The set of plugins below therefore mirrors what `protected-api`
+  # declares, and is asserted identical by
+  # `apisix-timeout-class-routes-match-services-yaml`.
+  - id: assistant-analysis-sse
+    uri: /api/v1/analysis*
+    priority: 810
     timeout:
       connect: 5
       send: 60
-      read: 900
+      read: 1800
     plugins:
       gateway-csrf:
         csrf_protect: true
@@ -162,6 +220,21 @@ routes:
           remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
       proxy-control:
         request_buffering: false
+    upstream_id: oathkeeper-proxy
+
+  - id: protected-api
+    uri: /api/v1/*
+    priority: 800
+    timeout:
+      connect: 5
+      send: 60
+      read: 30
+    plugins:
+      gateway-csrf:
+        csrf_protect: true
+      proxy-rewrite:
+        headers:
+          remove: [X-Auth-User-Id, X-Auth-User-Email, X-Auth-Session-Id]
     upstream_id: oathkeeper-proxy
 
   - id: frontend
@@ -201,7 +274,7 @@ global_rules:
       cors:
         allow_origins: "${CORS_ALLOWED_ORIGINS}"
         allow_methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-        allow_headers: "Authorization,Content-Type,Cookie,X-Request-Id,X-XSRF-TOKEN,X-CSRF-Token"
+        allow_headers: "Content-Type,Cookie,X-Request-Id,X-XSRF-TOKEN"
         expose_headers: "X-Request-Id"
         allow_credential: true
         max_age: 3600

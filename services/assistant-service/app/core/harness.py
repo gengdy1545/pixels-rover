@@ -7,7 +7,7 @@ from pydantic import BaseModel, ValidationError
 import sqlglot
 
 from app.schemas.harness import TaskEnvelope, BudgetExhausted, GuardrailViolation
-from app.core.llm_client import LLMClient
+from app.infra.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 

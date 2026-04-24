@@ -9,7 +9,7 @@ from app.schemas.semantic import ResolvedContext
 from app.schemas.backend import ValidationResult
 from app.schemas.harness import GuardrailViolation
 from app.storage.base import StorageBackend
-from app.core.llm_client import LLMClient
+from app.infra.llm import LLMClient
 from app.core.harness import RunContext, check_sql_safety
 
 logger = logging.getLogger(__name__)

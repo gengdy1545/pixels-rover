@@ -1,20 +1,34 @@
+# DO NOT EDIT — generated from config/services.yaml by
+# scripts/generate-gateway-config.py. Run the generator with --write
+# after editing the registry. scripts/check-contracts.py asserts this
+# file is a byte-identical re-render of the registry and will fail CI
+# on drift.
+#
+# Rule shape follows Oathkeeper access-rule schema (Ory Oathkeeper
+# v26.x); each entry below corresponds to exactly one row in
+# config/services.yaml.
+
 - id: assistant-analysis
   upstream:
     url: http://assistant-service:8090
   match:
     url: http://<.*>/api/v1/analysis<.*>
     methods:
-      - GET
-      - POST
-      - OPTIONS
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
   authenticators:
-    - handler: cookie_session
+  - handler: cookie_session
   authorizer:
     handler: allow
   mutators:
-    - handler: header
+  - handler: header
+  - handler: id_token
   errors:
-    - handler: json
+  - handler: json
 
 - id: assistant-conversations
   upstream:
@@ -22,19 +36,21 @@
   match:
     url: http://<.*>/api/v1/conversations<.*>
     methods:
-      - GET
-      - POST
-      - PATCH
-      - DELETE
-      - OPTIONS
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
   authenticators:
-    - handler: cookie_session
+  - handler: cookie_session
   authorizer:
     handler: allow
   mutators:
-    - handler: header
+  - handler: header
+  - handler: id_token
   errors:
-    - handler: json
+  - handler: json
 
 - id: assistant-semantic
   upstream:
@@ -42,14 +58,40 @@
   match:
     url: http://<.*>/api/v1/semantic<.*>
     methods:
-      - GET
-      - POST
-      - OPTIONS
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
   authenticators:
-    - handler: cookie_session
+  - handler: cookie_session
   authorizer:
     handler: allow
   mutators:
-    - handler: header
+  - handler: header
+  - handler: id_token
   errors:
-    - handler: json
+  - handler: json
+
+- id: deny-all-api-v1
+  upstream:
+    url: http://127.0.0.1:1
+  match:
+    url: http://<.*>/api/v1/<.*>
+    methods:
+    - GET
+    - HEAD
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
+  authenticators:
+  - handler: unauthorized
+  authorizer:
+    handler: allow
+  mutators:
+  - handler: noop
+  errors:
+  - handler: json

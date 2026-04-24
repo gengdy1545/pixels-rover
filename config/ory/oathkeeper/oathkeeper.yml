@@ -28,6 +28,22 @@ authenticators:
         - X-Forwarded-For
         - X-Forwarded-Host
         - X-Forwarded-Proto
+  # `unauthorized` is Oathkeeper's built-in authenticator that always
+  # rejects the request with 401. It has no config knobs — enabling it
+  # is sufficient. Used exclusively by the terminal deny-all access rule
+  # rendered by scripts/generate-gateway-config.py (architecture-tasks
+  # §Task 2): any /api/v1/* request that fails to match an explicit
+  # service rule falls through to the deny-all and is refused, rather
+  # than leaking through to a backend with no X-Auth-* headers.
+  unauthorized:
+    enabled: true
+  # `noop` is Oathkeeper's built-in authenticator that lets every
+  # request through without identity injection. Only used by rules
+  # rendered from `auth_mode: public` entries in config/services.yaml;
+  # none exist today, but the generator requires the authenticator to
+  # be enabled or rule ingestion fails at Oathkeeper startup.
+  noop:
+    enabled: true
 
 authorizers:
   allow:
@@ -43,6 +59,33 @@ mutators:
         X-Auth-User-Id: "{{ print .Subject }}"
         X-Auth-User-Email: "{{ print .Extra.identity.traits.email }}"
         X-Auth-Session-Id: "{{ print .Extra.id }}"
+  # architecture-tasks §Task 8 — subject integrity.
+  #
+  # id_token signs a short-TTL JWT carrying the same session claims as
+  # the header mutator and injects it as `Authorization: Bearer <jwt>`.
+  # The backend's app.oathkeeper_jwt.verify_bearer_jwt verifies the
+  # token against the JWKS served below under the api port (4456) via
+  # Oathkeeper's own /.well-known/jwks.json handler. Only the public
+  # keys leave the container; the private JWK stays on the mounted
+  # secret file at /etc/config/oathkeeper/id_token.jwks.json.
+  #
+  # Issuer / audience are pinned here so the backend's pinned
+  # OATHKEEPER_JWT_ISSUER / OATHKEEPER_JWT_AUDIENCE have a single
+  # authoritative counterpart. Changing either value is a
+  # coordinated rotation — both sides flip in the same PR.
+  id_token:
+    enabled: true
+    config:
+      issuer_url: https://pixels-rover.local/oathkeeper
+      jwks_url: file:///etc/config/oathkeeper/id_token.jwks.json
+      ttl: 60s
+      claims: |
+        {
+          "sub": "{{ print .Subject }}",
+          "email": "{{ print .Extra.identity.traits.email }}",
+          "sid": "{{ print .Extra.id }}",
+          "aud": ["pixels-rover-assistant"]
+        }
 
 errors:
   fallback:

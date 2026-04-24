@@ -9,8 +9,21 @@ not part of the current baseline.
 - APISIX emits gateway logs and carries `X-Request-Id`.
 - Frontend API clients send `X-Request-Id`.
 - Assistant-service consumes the inbound request id for log correlation.
+- Assistant-service exports
+  `assistant_request_id_missing_total{route="..."}` from `/metrics` whenever
+  it has to synthesize a fallback request id. This should remain zero in a
+  correctly wired gateway path.
 - `/gateway/live` is process liveness.
 - `/gateway/ready` aggregates Kratos, Oathkeeper, Ory UI, and assistant-service.
+- Gateway `/metrics` is explicitly denied; scrapers must target the
+  assistant-service port from the observability network.
+
+## Stage A Watch List
+
+- Alert expression once Prometheus is wired:
+  `sum(rate(assistant_request_id_missing_total[5m])) > 0` for 5 minutes.
+  Treat this as gateway/header propagation misconfiguration, not as a user
+  authentication problem.
 
 ## Deferred Pipeline
 

@@ -270,7 +270,13 @@ function flattenRuns(
         question: item.question,
         status: item.status,
         createdAt: item.createdAt || null,
-        sqlExecutions: item.stats.sqlExecutions || sqlSteps.length,
+        // Generated `ConversationHistoryItem.stats` is optional because
+        // the backend pydantic model uses `Field(default_factory=dict)`
+        // which JSON-schema-encodes as "absent permitted". The frontend
+        // only ever renders the derived row count, so substituting the
+        // computed fallback is correct regardless of whether the server
+        // omitted `stats` or returned an empty `{}`.
+        sqlExecutions: item.stats?.sqlExecutions || sqlSteps.length,
         totalRows,
       };
     }),

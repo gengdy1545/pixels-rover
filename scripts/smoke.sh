@@ -32,6 +32,12 @@
 #                          (c) legacy /api/v1/chat|query|metadata 404
 #                          (d) gateway global X-Request-Id injection on both
 #                              happy-path and 404 responses
+#                          (e) Ory UI method policy: `/ui` and `/ui/*` behave
+#                              identically for every non-GET/HEAD verb
+#                              (symmetry invariant from architecture-tasks §9;
+#                              exact downstream status is not fixed — the
+#                              contract is equal-status parity between the
+#                              two URIs)
 #   5. auth boundary     — unauthenticated protected API requests are rejected
 #                          by Oathkeeper, forged X-Auth-* headers do not bypass
 #                          auth, and unsafe methods are stopped by the
@@ -297,7 +303,8 @@ smoke_header() {
 # -- 4a: /api/internal/* and /gateway/internal/* are not externally declared --
 for hidden in \
     /api/internal/health \
-    /gateway/internal/invalidate_session; do
+    /gateway/internal/invalidate_session \
+    /metrics; do
   smoke_request GET "$hidden" >/dev/null || true
   if [[ "$SMOKE_LAST_STATUS" != "404" ]]; then
     die "expected 404 for $hidden from outside (got $SMOKE_LAST_STATUS) — gateway leaking an internal route"
@@ -342,6 +349,35 @@ rid_404="$(smoke_header X-Request-Id)"
 [[ -n "$rid_404" ]] || die "404 response missing X-Request-Id (gateway global response-rewrite skips error responses)"
 ok "404 response carries X-Request-Id=$rid_404"
 
+# -- 4e: Ory UI method-policy symmetry (architecture-tasks §9) --
+# Both `/ui` (exact) and `/ui/*` (prefix) are routed to the ory-ui upstream
+# only for GET/HEAD. For every other verb both URIs must behave identically
+# — the asymmetry that previously left `/ui/*` unrestricted is gone. We do
+# not fix the exact downstream status (APISIX falls through to the frontend
+# SPA catch-all, whose status depends on the static asset layout); we only
+# assert the two URIs return the SAME status for the SAME non-GET verb.
+for verb in POST PUT DELETE PATCH; do
+  smoke_request "$verb" /ui >/dev/null || true
+  status_root="$SMOKE_LAST_STATUS"
+  smoke_request "$verb" /ui/login >/dev/null || true
+  status_sub="$SMOKE_LAST_STATUS"
+  if [[ "$status_root" != "$status_sub" ]]; then
+    die "$verb /ui and $verb /ui/login returned different statuses ($status_root vs $status_sub); Ory UI method policy is asymmetric — see architecture-tasks §9"
+  fi
+  ok "$verb /ui and $verb /ui/login both returned $status_root (symmetric)"
+done
+
+# And confirm the happy path still works: GET on both must reach the ory-ui
+# upstream (any non-5xx is acceptable — Ory UI may 200 / 302 / 303 depending
+# on session state).
+for ui_path in /ui /ui/login; do
+  smoke_request GET "$ui_path" >/dev/null || true
+  case "$SMOKE_LAST_STATUS" in
+    2*|3*) ok "GET $ui_path returned $SMOKE_LAST_STATUS (ory-ui reachable)" ;;
+    *) die "GET $ui_path returned $SMOKE_LAST_STATUS; expected 2xx/3xx from ory-ui upstream" ;;
+  esac
+done
+
 # ---------------------------------------------------------------------------
 # Stage 5 — auth boundary.
 # ---------------------------------------------------------------------------
@@ -368,6 +404,46 @@ if [[ "$forged_status" != "401" ]]; then
 fi
 ok "forged X-Auth-* headers do not bypass Oathkeeper"
 
+direct_body="$(docker compose "${SMOKE_COMPOSE_FILES[@]}" exec -T gateway \
+  curl -sS -o - -w '\n__STATUS__%{http_code}' \
+    -H 'X-Auth-User-Id: forged-user' \
+    -H 'X-Auth-User-Email: forged@example.invalid' \
+    -H 'X-Auth-Session-Id: forged-session' \
+    --max-time 15 \
+    http://assistant-service:8090/api/v1/analysis/backends || echo $'\n__STATUS__000')"
+direct_status="${direct_body##*__STATUS__}"
+direct_payload="${direct_body%$'\n'__STATUS__*}"
+if [[ "$direct_status" != "401" ]]; then
+  die "direct forged X-Auth-* request to assistant-service should be 401 (status=$direct_status body=$direct_payload)"
+fi
+# architecture-tasks §Task 8 acceptance: beyond "status is 401", the
+# response envelope MUST name GATEWAY_SUBJECT_UNVERIFIED so a future
+# regression that flips the code back to GATEWAY_IDENTITY_MISSING (or
+# drops the JWT check entirely and returns 500) is caught here, not
+# only by the pytest negative suite.
+if ! grep -q 'GATEWAY_SUBJECT_UNVERIFIED' <<< "$direct_payload"; then
+  die "direct forged X-Auth-* request did not surface GATEWAY_SUBJECT_UNVERIFIED (body=$direct_payload)"
+fi
+ok "direct forged X-Auth-* request to assistant-service rejected with 401 GATEWAY_SUBJECT_UNVERIFIED"
+
+# -- §Task 8 extra: non-Bearer Authorization header direct probe.
+# A sidecar that learns the X-Auth-* convention might also try to
+# smuggle an arbitrary Authorization header; make sure the verifier's
+# Bearer-prefix check is strict (no silent "any token is good enough"
+# fallback), mirroring tests/test_oathkeeper_jwt.py ::
+# test_bearer_present_but_not_bearer_scheme_is_401.
+direct_basic_status="$(docker compose "${SMOKE_COMPOSE_FILES[@]}" exec -T gateway \
+  curl -sS -o /dev/null -w '%{http_code}' \
+    -H 'X-Auth-User-Id: forged-user' \
+    -H 'X-Auth-User-Email: forged@example.invalid' \
+    -H 'Authorization: Basic Zm9yZ2VkOg==' \
+    --max-time 15 \
+    http://assistant-service:8090/api/v1/analysis/backends || echo "000")"
+if [[ "$direct_basic_status" != "401" ]]; then
+  die "direct non-Bearer Authorization header should still be 401 (status=$direct_basic_status)"
+fi
+ok "direct non-Bearer Authorization header still rejected with 401"
+
 body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
   -X POST \
   -H 'Content-Type: application/json' \
@@ -384,6 +460,20 @@ body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
   -X POST \
   -H 'Content-Type: application/json' \
   -H 'Cookie: XSRF-TOKEN=smoke-xsrf' \
+  -H 'X-CSRF-Token: smoke-xsrf' \
+  --data-raw '{"threadId":"missing","question":"hello"}' \
+  --max-time 15 \
+  "$SMOKE_GATEWAY_URL/api/v1/analysis")"
+legacy_csrf_status="${body##*__STATUS__}"
+if [[ "$legacy_csrf_status" != "403" ]]; then
+  die "unsafe protected POST with only legacy X-CSRF-Token should be 403 (status=$legacy_csrf_status)"
+fi
+ok "legacy X-CSRF-Token is not accepted as a CSRF substitute"
+
+body="$(curl -sS -o - -w '\n__STATUS__%{http_code}' \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: XSRF-TOKEN=smoke-xsrf' \
   -H 'X-XSRF-TOKEN: smoke-xsrf' \
   --data-raw '{"threadId":"missing","question":"hello"}' \
   --max-time 15 \
@@ -393,6 +483,28 @@ if [[ "$post_auth_status" != "401" ]]; then
   die "unsafe protected POST with CSRF but without Kratos session should be 401 (status=$post_auth_status)"
 fi
 ok "CSRF-valid but unauthenticated unsafe POST reaches Oathkeeper and returns 401"
+
+# -- 5a: Oathkeeper terminal deny-all (architecture-tasks §Task 2) --
+# Undeclared /api/v1/* paths (i.e. paths NOT listed as a `path_prefix`
+# in config/services.yaml) must be caught by the generator-emitted
+# terminal `deny-all-api-v1` rule and rejected with 401. The whole
+# point of the deny-all is that a dropped service rule — or a new
+# service being added to config/services.yaml without regenerating
+# rules.yml — fails closed (401) instead of open (request forwarded
+# to a backend with no X-Auth-* headers and the backend treating it
+# as unauthenticated but "policy-allowed"). We pick a path shape
+# that is guaranteed NOT to be an existing service prefix and also
+# not a legacy retired route (those are handled by APISIX `mocking`
+# on the gateway itself and return 410 before ever reaching
+# Oathkeeper).
+deny_all_probe_path="/api/v1/does-not-exist-xyz-$$"
+for verb in GET POST; do
+  smoke_request "$verb" "$deny_all_probe_path" >/dev/null || true
+  if [[ "$SMOKE_LAST_STATUS" != "401" ]]; then
+    die "Oathkeeper terminal deny-all must return 401 for $verb $deny_all_probe_path (got $SMOKE_LAST_STATUS) — deny-all rule missing, mis-ordered, or shadowed; see architecture-tasks §Task 2"
+  fi
+  ok "$verb $deny_all_probe_path rejected with 401 by deny-all-api-v1"
+done
 
 # ---------------------------------------------------------------------------
 # Success.

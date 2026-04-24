@@ -1,7 +1,7 @@
 import type { ApiErrorResponse } from '../types/common';
 import type { SSECallbacks, SSEConnection, SSEEventName, SSEEventMap } from '../types/sse';
 import { redirectToLogin } from '../storage/navigation';
-import { buildCommonHeaders } from './client';
+import { buildCommonHeaders, resolveApiUrl } from './client';
 import { apiErrorFromEnvelope } from './apiError';
 import type { ApiError } from './apiError';
 
@@ -64,7 +64,7 @@ async function consumeStream(
     const buildRequest = () => {
       const commonHeaders = buildCommonHeaders(streamRequestId);
       streamRequestId = commonHeaders['X-Request-Id'];
-      return new Request(url, {
+      return new Request(resolveApiUrl(url), {
         method: 'POST',
         credentials: 'include',
         headers: {

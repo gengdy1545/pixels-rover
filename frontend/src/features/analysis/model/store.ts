@@ -236,11 +236,27 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       case 'step_sql': {
         const payload = d as unknown as SSEStepSqlData;
         set({
-          steps: get().steps.map((s) =>
-            s.step_id === payload.step_id
-              ? { ...s, result: { ...s.result, sql: payload.sql, columns: s.result?.columns || [], rows: s.result?.rows || [], row_count: s.result?.row_count || 0, execution_time_ms: s.result?.execution_time_ms || 0 } }
-              : s,
-          ),
+          steps: get().steps.map((s) => {
+            if (s.step_id !== payload.step_id) return s;
+            // `s.result` may be null (no backend result yet) or partially
+            // populated (an earlier step_sql landed before step_completed).
+            // Merge in the incoming SQL while backfilling every required
+            // StepResult field from prior state or a deterministic zero
+            // value so the resulting object satisfies `StepResult` (no
+            // `undefined` leaking into fields typed as `T | null`).
+            const prev = s.result ?? null;
+            return {
+              ...s,
+              result: {
+                sql: payload.sql,
+                columns: prev?.columns ?? [],
+                rows: prev?.rows ?? [],
+                row_count: prev?.row_count ?? 0,
+                execution_time_ms: prev?.execution_time_ms ?? 0,
+                summary: prev?.summary ?? null,
+              },
+            };
+          }),
         });
         break;
       }

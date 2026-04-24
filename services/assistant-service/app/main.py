@@ -28,7 +28,9 @@ from app.api.conversations import router as conversations_router
 from app.api.semantic import router as semantic_router
 from app.api.backends import router as backends_router
 from app.api.internal import router as internal_router
+from app.metrics import REQUEST_ID_MISSING_TOTAL
 from app.schemas.api_error import register_openapi_error_components
+from app.schemas.openapi_registry import register_openapi_response_components
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -108,6 +110,7 @@ def create_app() -> FastAPI:
             # backend.md §5 rule 1: exactly one warning per fallback request,
             # carrying the triggering route so the upstream gateway misconfig
             # is investigable from the log aggregator alone.
+            REQUEST_ID_MISSING_TOTAL.labels(route=request.url.path).inc()
             logger.warning(
                 "request_id_missing=true route=%s method=%s fallback=%s",
                 request.url.path, request.method, request_id,
@@ -235,6 +238,18 @@ def create_app() -> FastAPI:
     # grepping the Python source. See backend.md §6.0 + §6.3.2.
     register_openapi_error_components(app)
 
+    # OpenAPI component registration: expose response-body pydantic models
+    # (AnalysisResponse, PlanStep, ConversationHistoryItem, ...) so the
+    # committed ``services/assistant-service/openapi.json`` snapshot — and
+    # therefore the auto-generated ``frontend/src/shared/types/generated/
+    # assistant.d.ts`` — stays in lock-step with the backend pydantic
+    # definitions. Must be called AFTER register_openapi_error_components
+    # so both decorators compose cleanly (each wraps the previous
+    # ``app.openapi`` exactly once; wrapper order is irrelevant for the
+    # cached schema payload, but the call order keeps the error-envelope
+    # registration as the first layer for readability).
+    register_openapi_response_components(app)
+
     @app.get("/health")
     async def health():
         # Process-level liveness only; MUST NOT probe database, DuckDB, or
@@ -255,19 +270,10 @@ def create_app() -> FastAPI:
     async def metrics() -> Response:
         # Prometheus text-format exposition.
         #
-        # Stage A exposes only prometheus_client's default process / platform /
-        # GC collectors — no business counters are registered. The endpoint
-        # exists to satisfy docs/runbooks/observability-roadmap.md §2 rule 5
-        # ("endpoint must return 200 with correct format even before a scraper
-        # exists") so a future metrics pipeline can attach without a dev-side
-        # scramble. Business counters (auth failures / identity-missing /
-        # request-id fallback) are deferred to stage B per §2.1 of that
-        # roadmap; any PR that wants to add one here must first expand §2.1.
-        #
-        # Served on the assistant-service port directly alongside /health and
-        # /internal/ready. `apisix.yaml.template` does NOT expose this path,
-        # so external access is blocked at the gateway boundary (same posture
-        # as /internal/ready before it was wrapped by the `internal;` location).
+        # Prometheus includes default process collectors plus the
+        # assistant_request_id_missing_total invariant counter above. Public
+        # gateway access to this path is explicitly denied by APISIX; only
+        # in-network scrapers should hit the service port directly.
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app

@@ -5,7 +5,7 @@ from app.schemas.task import AnalysisTask
 from app.schemas.semantic import ResolvedContext
 from app.schemas.plan import AnalysisPlan, PlanStep, StepParams
 from app.schemas.harness import PlanValidationError
-from app.core.llm_client import LLMClient
+from app.infra.llm import LLMClient
 from app.core.harness import RunContext, OutputGuardrail
 
 logger = logging.getLogger(__name__)

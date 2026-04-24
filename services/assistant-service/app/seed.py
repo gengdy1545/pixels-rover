@@ -101,6 +101,18 @@ INSERT INTO tpch.lineitem VALUES
 
 def seed_duckdb(backend: DuckDBBackend) -> None:
     """Create demo tables and insert sample data."""
+    backend.execute_sql_sync("CREATE SCHEMA IF NOT EXISTS rover_meta")
+    backend.execute_sql_sync(
+        "CREATE TABLE IF NOT EXISTS rover_meta.seed_marker "
+        "(name VARCHAR PRIMARY KEY, seeded_at TIMESTAMP DEFAULT current_timestamp)"
+    )
+    marker = backend.fetch_one_sql_sync(
+        "SELECT name FROM rover_meta.seed_marker WHERE name = 'tpch-demo-v1'"
+    )
+    if marker is not None:
+        logger.info("DuckDB demo data already seeded, skipping.")
+        return
+
     logger.info("Seeding DuckDB with TPC-H demo data...")
     for statement in TPCH_DDL.strip().split(";"):
         stmt = statement.strip()
@@ -118,6 +130,9 @@ def seed_duckdb(backend: DuckDBBackend) -> None:
                 else:
                     logger.warning("Seed data insertion warning: %s", e)
 
+    backend.execute_sql_sync(
+        "INSERT INTO rover_meta.seed_marker(name) VALUES ('tpch-demo-v1')"
+    )
     logger.info("DuckDB seeding complete.")
 
 

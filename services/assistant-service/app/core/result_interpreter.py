@@ -3,7 +3,7 @@ import logging
 
 from app.schemas.task import AnalysisTask
 from app.schemas.plan import PlanStep
-from app.core.llm_client import LLMClient
+from app.infra.llm import LLMClient
 from app.core.harness import RunContext
 
 logger = logging.getLogger(__name__)

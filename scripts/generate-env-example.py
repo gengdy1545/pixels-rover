@@ -105,6 +105,21 @@ FOOTER = """\
 # Assistant-service debug toggle. Keep this project-scoped instead of DEBUG to
 # avoid colliding with shell/debugger-provided DEBUG values.
 # ROVER_DEBUG=false
+
+# DuckDB storage path. The compose default is persistent and mounted on the
+# assistant-duckdb named volume. Set ROVER_DUCKDB_PATH=:memory: for throwaway
+# local demos/tests; that mode loses analysis data on restart.
+# ROVER_DUCKDB_PATH=/var/lib/pixels-rover/duckdb/analysis.duckdb
+
+# ==== Optional frontend build-time overrides ====
+
+# Vite-time override for the frontend's axios + SSE baseURL. Unset
+# preserves same-origin behaviour (the bundle's host becomes the API
+# host), which is what production ships. Local dev against a remote
+# gateway (or a future non-browser client pointing at a specific host)
+# sets this at build time, e.g. `VITE_API_BASE=http://localhost:9080`.
+# See frontend/src/shared/api/client.ts#resolveApiUrl.
+# VITE_API_BASE=
 """
 
 

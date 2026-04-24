@@ -140,3 +140,8 @@ class DuckDBBackend(StorageBackend):
     def execute_sql_sync(self, sql: str) -> None:
         """Run arbitrary SQL synchronously (for seeding data, etc.)."""
         self._conn.execute(sql)
+
+    def fetch_one_sql_sync(self, sql: str) -> tuple | None:
+        """Run a scalar seed/metadata query synchronously."""
+        result = self._conn.execute(sql)
+        return result.fetchone()
